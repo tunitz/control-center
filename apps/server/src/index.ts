@@ -10,7 +10,7 @@ import { SshPool } from "./ssh";
 import { Scheduler, targetOf, type UnitRow } from "./poller";
 import { COMMANDS, sendWol } from "./commands";
 import { installScript, pasteCommand, curlCommand } from "./install";
-import { deleteUnit } from "./units";
+import { deleteUnit, updateUnit } from "./units";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
@@ -43,7 +43,7 @@ const unitView = (u: any) => {
   const l = latest(u.id), st = db.query("SELECT json FROM unit_static WHERE unit_id=?").get(u.id) as { json: string } | null;
   const s = st ? JSON.parse(st.json) : null;
   return {
-    id: u.id, name: u.name, host: u.host, mac: u.mac, broadcast: u.broadcast, enabled: !!u.enabled, online: online(u), last_seen: u.last_seen, last_error: u.last_error,
+    id: u.id, name: u.name, host: u.host, ssh_port: u.ssh_port, mac: u.mac, broadcast: u.broadcast, enabled: !!u.enabled, online: online(u), last_seen: u.last_seen, last_error: u.last_error,
     fingerprint: u.fingerprint, sample_interval_s: u.sample_interval_s, static: s, latest: l,
     ram_pct: l && s && l.ram_used_mb != null ? (l.ram_used_mb / s.ram_total_mb) * 100 : null,
     vram_pct: l && s?.vram_total_mb && l.vram_used_mb != null ? (l.vram_used_mb / s.vram_total_mb) * 100 : null,
@@ -108,7 +108,9 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     if (!sub && m === "GET") return json({ ...unitView(u), month: monthCost(db, now()).units.find(x => x.id === id) });
     if (!sub && m === "PATCH") {
       const b = await req.json();
-      db.query("UPDATE units SET name=COALESCE(?,name), mac=COALESCE(?,mac), broadcast=COALESCE(?,broadcast), enabled=COALESCE(?,enabled) WHERE id=?").run(b.name ?? null, b.mac ?? null, b.broadcast ?? null, b.enabled == null ? null : b.enabled ? 1 : 0, id);
+      const r = updateUnit(db, id, { name: b.name, host: b.host, ssh_port: b.ssh_port, mac: b.mac, broadcast: b.broadcast });
+      if (!r.ok) return json({ error: r.error }, 400);
+      if (r.hostChanged) pool.drop(id); // reconnect to the new address
       audit(db, "admin", "unit.updated", id, JSON.stringify(b), ip); return json(unitView(db.query("SELECT * FROM units WHERE id=?").get(id)));
     }
     if (!sub && m === "DELETE") {
@@ -116,10 +118,11 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     }
     if (sub === "installer" && m === "GET") {
       const script = installScript({ pubkey: u.pubkey, from: process.env.CC_PUBLIC_IP, interval: u.sample_interval_s });
+      const sudo = url.searchParams.get("sudo") !== "0";
       if (url.searchParams.get("format") === "curl")
-        return new Response(curlCommand({ repo: process.env.CC_AGENT_REPO ?? "tunitz/ccagent", tag: process.env.CC_AGENT_TAG ?? "latest", pubkey: u.pubkey }), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
+        return new Response(curlCommand({ sudo,  repo: process.env.CC_AGENT_REPO ?? "tunitz/ccagent", tag: process.env.CC_AGENT_TAG ?? "latest", pubkey: u.pubkey }), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
       if (url.searchParams.get("format") === "paste")
-        return new Response(pasteCommand(script), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
+        return new Response(pasteCommand(script, sudo), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
       return new Response(script, { headers: { "content-type": "text/x-shellscript", "content-disposition": `attachment; filename="install-ccagent-${u.name.replace(/[^\w.-]/g, "_")}.sh"` } });
     }
     if (sub === "metrics" && m === "GET") {

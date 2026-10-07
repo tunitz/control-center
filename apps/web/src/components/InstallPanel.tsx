@@ -6,12 +6,14 @@ export default function InstallPanel({ id, name, publicKey, fingerprint }: { id:
   const [tab, setTab] = useState<"curl" | "paste" | "download">("curl");
   const [paste, setPaste] = useState("");
   const [curl, setCurl] = useState("");
+  const [sudo, setSudo] = useState(true);
   const [copied, setCopied] = useState<"paste" | "key" | "failed" | null>(null);
   const file = `install-ccagent-${name.replace(/[^\w.-]/g, "_")}.sh`;
   useEffect(() => {
-    fetch(`/api/units/${id}/installer?format=paste`, { credentials: "same-origin" }).then(r => r.text()).then(setPaste).catch(() => {});
-    fetch(`/api/units/${id}/installer?format=curl`, { credentials: "same-origin" }).then(r => r.text()).then(setCurl).catch(() => {});
-  }, [id]);
+    const q = sudo ? "" : "&sudo=0";
+    fetch(`/api/units/${id}/installer?format=paste${q}`, { credentials: "same-origin" }).then(r => r.text()).then(setPaste).catch(() => {});
+    fetch(`/api/units/${id}/installer?format=curl${q}`, { credentials: "same-origin" }).then(r => r.text()).then(setCurl).catch(() => {});
+  }, [id, sudo]);
   const download = async () => {
     const r = await fetch(`/api/units/${id}/installer`, { credentials: "same-origin" });
     const url = URL.createObjectURL(await r.blob()), a = document.createElement("a");
@@ -30,10 +32,14 @@ export default function InstallPanel({ id, name, publicKey, fingerprint }: { id:
         <button className={"chip" + (tab === "paste" ? " on" : "")} onClick={() => setTab("paste")}>Offline paste</button>
         <button className={"chip" + (tab === "download" ? " on" : "")} onClick={() => setTab("download")}>Download installer</button>
       </div>
+      {tab !== "download" && <div className="chips" style={{ marginBottom: 10 }} role="group" aria-label="Run as">
+        <button className={"chip" + (sudo ? " on" : "")} aria-pressed={sudo} onClick={() => setSudo(true)}>With sudo</button>
+        <button className={"chip" + (!sudo ? " on" : "")} aria-pressed={!sudo} onClick={() => setSudo(false)}>No sudo (already root)</button>
+      </div>}
       {tab === "curl" ? <>
         <div className="pre" style={{ userSelect: "all" }}>{curl || "loading…"}</div>
         <button className="btn pri" style={{ marginTop: 8 }} disabled={!curl} onClick={() => copy(curl, "paste")}>{copied === "paste" ? "Copied to clipboard" : copied === "failed" ? "Copy blocked: long-press the command above" : "Copy command"}</button>
-        <p className="muted" style={{ fontSize: 13 }}>Run it on the unit. It downloads the installer from the public ccagent release (no login, no secrets) and authorizes only this unit's public key. The unit needs internet, not access to the Control Center. No internet there? Use Offline paste.</p>
+        <p className="muted" style={{ fontSize: 13 }}>Run it on the unit. It downloads the installer from the public ccagent release (no login, no secrets) and authorizes only this unit's public key. The unit needs internet, not access to the Control Center. No internet there? Use Offline paste. Proxmox hosts and root shells have no sudo: pick "No sudo".</p>
       </> : tab === "paste" ? <>
         <button className="btn pri" disabled={!paste} onClick={() => copy(paste, "paste")}>{copied === "paste" ? "Copied to clipboard" : copied === "failed" ? "Copy blocked: select the text below" : "Copy install command"}</button>
         <p className="muted" style={{ fontSize: 13 }}>Paste it into a terminal on the unit and it installs as root. Everything needed is inside the paste, so the unit needs no access to the Control Center. {paste ? `${Math.round(paste.length / 1024)} KB.` : ""}</p>

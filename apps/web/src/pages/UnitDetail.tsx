@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, fmt, gb, RANGES, type Metrics, type Unit } from "../api";
 import { useLive } from "../hooks";
 import { Chart, type Series } from "../components/Chart";
+import EditUnit from "../components/EditUnit";
 
 const S = {
   cpu: [{ key: "cpu_pct", label: "CPU %", color: "#38e1ff" }] as Series[],
@@ -25,7 +26,8 @@ function Block({ title, m, keys, series, unit, max }: { title: string; m: Metric
 }
 export default function UnitDetail({ id }: { id: number }) {
   const [range, setRange] = useState<(typeof RANGES)[number]>("1h");
-  const { data: u } = useLive<Unit>(`/units/${id}`, 5000);
+  const { data: u, reload } = useLive<Unit>(`/units/${id}`, 5000);
+  const [editing, setEditing] = useState(false);
   const { data: m } = useLive<Metrics>(`/units/${id}/metrics?range=${range}`, range === "1h" ? 10000 : 60000);
   const [menu, setMenu] = useState(false), [confirm, setConfirm] = useState<null | "shutdown" | "restart" | "remove">(null), [toast, setToast] = useState("");
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 3500); return () => clearTimeout(t); } }, [toast]);
@@ -43,7 +45,7 @@ export default function UnitDetail({ id }: { id: number }) {
     <>
       <div className="uhead"><a href="#/" className="btn" aria-label="Back">←</a><span className={"dot" + (u.online ? " on" : "")} /><div><h3 style={{ fontSize: 22 }}>{u.name}</h3><div className="host">{u.host} · {u.online ? "online" : "offline"}</div></div><div className="spacer" />
         <div className="menu"><button className="btn pri" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>Power ▾</button>
-          {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => { setConfirm("restart"); setMenu(false); }}>Restart…</button><button role="menuitem" onClick={() => { setConfirm("shutdown"); setMenu(false); }}>Shut down…</button><button role="menuitem" onClick={() => { setConfirm("remove"); setMenu(false); }} style={{ color: "#fecaca" }}>Remove unit…</button></div>}
+          {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => { setEditing(true); setMenu(false); }}>Edit IP / MAC…</button><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => { setConfirm("restart"); setMenu(false); }}>Restart…</button><button role="menuitem" onClick={() => { setConfirm("shutdown"); setMenu(false); }}>Shut down…</button><button role="menuitem" onClick={() => { setConfirm("remove"); setMenu(false); }} style={{ color: "#fecaca" }}>Remove unit…</button></div>}
         </div>
       </div>
       <div className="card specs" style={{ marginBottom: 14 }}>
@@ -71,6 +73,7 @@ export default function UnitDetail({ id }: { id: number }) {
           <div style={{ display: "flex", gap: 8 }}><button className="btn dng" onClick={() => act(confirm)}>{confirm === "shutdown" ? "Shut down" : "Restart"}</button><button className="btn" onClick={() => setConfirm(null)} autoFocus>Cancel</button></div>
         </>}
       </div></div>}
+      {editing && <EditUnit unit={u} onClose={() => setEditing(false)} onSaved={() => { reload(); setToast("Saved"); }} />}
       {toast && <div className="toast" role="status">{toast}</div>}
     </>
   );

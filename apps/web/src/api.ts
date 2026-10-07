@@ -11,7 +11,7 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
 }
 export type Sample = Record<string, number | null>;
 export type Unit = {
-  id: number; name: string; host: string; mac: string | null; broadcast: string | null; enabled: boolean; online: boolean; last_seen: number | null; last_error: string | null;
+  id: number; name: string; host: string; ssh_port?: number; mac: string | null; broadcast: string | null; enabled: boolean; online: boolean; last_seen: number | null; last_error: string | null;
   fingerprint: string | null; sample_interval_s: number; latest: Sample | null; ram_pct: number | null; vram_pct: number | null;
   static: null | { cpu_model: string; cores: number; threads: number; base_mhz: number | null; boost_mhz: number | null; gpu_model: string | null; vram_total_mb: number | null; ram_total_mb: number; swap_total_mb: number };
   month?: { kwh: number; php: number };

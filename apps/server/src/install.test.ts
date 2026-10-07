@@ -50,3 +50,27 @@ test("curl command is short, pinned to a tag, and passes the key as an argument"
   expect(() => curlCommand({ repo: "bad repo; rm -rf /", tag: "v1", pubkey: pub })).toThrow();
   expect(() => curlCommand({ repo: "a/b", tag: "v1", pubkey: "x'; rm -rf / #" })).toThrow();
 });
+
+test("curl command has a no-sudo variant for root shells (Proxmox has no sudo)", async () => {
+  const { curlCommand } = await import("./install");
+  const c = curlCommand({ repo: "a/b", tag: "latest", pubkey: pub, sudo: false });
+  expect(c).toBe(`curl -fsSL https://github.com/a/b/releases/latest/download/install-ccagent.sh | bash -s -- '${pub}'`);
+  expect(c).not.toContain("sudo");
+  expect(curlCommand({ repo: "a/b", tag: "latest", pubkey: pub })).toContain("| sudo bash"); // default stays sudo
+});
+test("paste command has a no-sudo variant", async () => {
+  const { pasteCommand } = await import("./install");
+  const p = pasteCommand(installScript({ pubkey: pub, interval: 5 }), false);
+  expect(p).toMatch(/\| gunzip \| bash\n$/);
+  expect(p).not.toContain("sudo");
+});
+test("sudoers block runs cleanly when sudo/visudo are absent (Proxmox): no abort, power reported unavailable", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  const a = s.indexOf("SYSCTL=$(command -v systemctl"), b = s.indexOf("# RAPL counters");
+  const block = s.slice(a, b);
+  // PATH holds only bash builtins' needs: no sudo, no visudo
+  const r = Bun.spawnSync(["/usr/bin/bash", "-c", "set -euo pipefail\n" + block + "\necho CONTINUED"], { env: { PATH: "/nonexistent" } });
+  expect(r.stdout.toString()).toContain("power control unavailable");
+  expect(r.stdout.toString()).toContain("CONTINUED");   // set -e did not abort the install
+  expect(r.exitCode).toBe(0);
+});

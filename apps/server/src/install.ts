@@ -10,20 +10,20 @@ const b64 = (name: string) => (Buffer.from(slim(agentFile(name))).toString("base
  * One copy-paste command for a unit that cannot reach the Control Center: the installer travels inside
  * the paste, gzip+base64 on a single line (nothing is downloaded).
  */
-export function pasteCommand(script: string) {
-  return `echo '${gzipSync(Buffer.from(script), { level: 9 }).toString("base64")}' | base64 -d | gunzip | sudo bash\n`;
+export function pasteCommand(script: string, sudo = true) {
+  return `echo '${gzipSync(Buffer.from(script), { level: 9 }).toString("base64")}' | base64 -d | gunzip | ${sudo ? "sudo " : ""}bash\n`;
 }
 
 /**
  * Short command for units that can reach GitHub: the generic installer is a release asset of the public agent repo
  * and the unit's public key is passed as an argument. tag "latest" follows the newest release.
  */
-export function curlCommand(o: { repo: string; tag: string; pubkey: string }) {
+export function curlCommand(o: { repo: string; tag: string; pubkey: string; sudo?: boolean }) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(o.repo)) throw new Error("invalid repo");
   if (!/^[\w.-]+$/.test(o.tag)) throw new Error("invalid tag");
   if (!/^ssh-ed25519 [A-Za-z0-9+/=]+( [\w.@-]+)?$/.test(o.pubkey)) throw new Error("invalid public key");
   const base = o.tag === "latest" ? "releases/latest/download" : `releases/download/${o.tag}`;
-  return `curl -fsSL https://github.com/${o.repo}/${base}/install-ccagent.sh | sudo bash -s -- '${o.pubkey}'`;
+  return `curl -fsSL https://github.com/${o.repo}/${base}/install-ccagent.sh | ${o.sudo === false ? "" : "sudo "}bash -s -- '${o.pubkey}'`;
 }
 
 /**
@@ -57,10 +57,14 @@ printf 'INTERVAL=%s\\nDIR=/var/lib/ccagent\\n' "$INTERVAL" > /etc/ccagent.conf
 printf '%s\\n' "command=\\"/opt/ccagent/ccagent-gate\\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding${fromOpt} $PUBKEY" > /var/lib/ccagent/.ssh/authorized_keys
 chmod 700 /var/lib/ccagent/.ssh; chmod 600 /var/lib/ccagent/.ssh/authorized_keys
 chown -R ccagent:ccagent /var/lib/ccagent
-# power verbs only: exactly these two commands, no wildcard
-SYSCTL=$(command -v systemctl)
-printf 'ccagent ALL=(root) NOPASSWD: %s ${"power" + "off"}, %s ${"re" + "boot"}\\n' "$SYSCTL" "$SYSCTL" > /etc/sudoers.d/ccagent; chmod 440 /etc/sudoers.d/ccagent
-visudo -cf /etc/sudoers.d/ccagent >/dev/null
+# power commands only: exactly two, no wildcard. Needs sudo and visudo, which are absent on Proxmox hosts.
+SYSCTL=$(command -v systemctl || true)
+if command -v sudo >/dev/null 2>&1 && command -v visudo >/dev/null 2>&1 && [ -d /etc/sudoers.d ] && [ -n "$SYSCTL" ]; then
+  printf 'ccagent ALL=(root) NOPASSWD: %s ${"power" + "off"}, %s ${"re" + "boot"}\\n' "$SYSCTL" "$SYSCTL" > /etc/sudoers.d/ccagent; chmod 440 /etc/sudoers.d/ccagent
+  visudo -cf /etc/sudoers.d/ccagent >/dev/null || { rm -f /etc/sudoers.d/ccagent; echo "warning: sudoers rule rejected, power control unavailable"; }
+else
+  echo "note: sudo not found on this host, so power control unavailable (metrics still work)"
+fi
 # RAPL counters are root-only on newer kernels: make readable at boot
 if command -v systemd-tmpfiles >/dev/null; then
   mkdir -p /etc/tmpfiles.d
