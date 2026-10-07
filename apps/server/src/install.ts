@@ -87,7 +87,9 @@ ReadWritePaths=/var/lib/ccagent
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload; systemctl enable --now ccagent.service
+systemctl daemon-reload; systemctl enable ccagent.service
+# restart (not just start): a re-run must replace a running agent with the freshly installed code
+systemctl restart ccagent.service
 sleep 2; systemctl is-active ccagent.service
 echo "ccagent installed. The Control Center connects over SSH (port 22) and will mark this unit online within a poll interval."
 `;

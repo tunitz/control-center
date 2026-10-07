@@ -74,3 +74,9 @@ test("sudoers block runs cleanly when sudo/visudo are absent (Proxmox): no abort
   expect(r.stdout.toString()).toContain("CONTINUED");   // set -e did not abort the install
   expect(r.exitCode).toBe(0);
 });
+
+test("re-running the installer restarts the service so it also upgrades a running agent", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  expect(s).toContain("systemctl restart ccagent.service");
+  expect(s).not.toContain("enable --now"); // enable --now is a no-op on an already-running unit
+});
