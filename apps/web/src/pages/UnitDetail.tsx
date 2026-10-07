@@ -45,7 +45,7 @@ export default function UnitDetail({ id }: { id: number }) {
     <>
       <div className="uhead"><a href="#/" className="btn" aria-label="Back">←</a><span className={"dot" + (u.online ? " on" : "")} /><div><h3 style={{ fontSize: 22 }}>{u.name}</h3><div className="host">{u.host} · {u.online ? "online" : "offline"}</div></div><div className="spacer" />
         <div className="menu"><button className="btn pri" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>Power ▾</button>
-          {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => { setEditing(true); setMenu(false); }}>Edit IP / MAC…</button><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => { setConfirm("restart"); setMenu(false); }}>Restart…</button><button role="menuitem" onClick={() => { setConfirm("shutdown"); setMenu(false); }}>Shut down…</button><button role="menuitem" onClick={() => { setConfirm("remove"); setMenu(false); }} style={{ color: "#fecaca" }}>Remove unit…</button></div>}
+          {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => { setEditing(true); setMenu(false); }}>Edit IP / MAC</button><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => { setConfirm("restart"); setMenu(false); }}>Restart</button><button role="menuitem" onClick={() => { setConfirm("shutdown"); setMenu(false); }}>Shut down</button><button role="menuitem" onClick={() => { setConfirm("remove"); setMenu(false); }} style={{ color: "#fecaca" }}>Remove unit</button></div>}
         </div>
       </div>
       <div className="card specs" style={{ marginBottom: 14 }}>
