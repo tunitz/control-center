@@ -9,7 +9,8 @@ import { generateUnitKey, encrypt } from "./crypto";
 import { SshPool } from "./ssh";
 import { Scheduler, targetOf, type UnitRow } from "./poller";
 import { COMMANDS, sendWol } from "./commands";
-import { newToken, tokenUnit, installScript, agentFile } from "./install";
+import { installScript } from "./install";
+import { deleteUnit } from "./units";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
@@ -52,32 +53,12 @@ const json = (o: unknown, status = 200, headers: Record<string, string> = {}) =>
 const cookieOf = (req: Request) => /(?:^|; )cc_session=([^;]+)/.exec(req.headers.get("cookie") ?? "")?.[1];
 const loginLimit = makeLimiter(5, 60);
 const WEB = join(import.meta.dir, "../../web/dist");
-const installCmd = (base: string, token: string) => `curl -fsSL '${base}/agent/install.sh?token=${token}' | sudo bash`;
 
 const server = Bun.serve({
   port: Number(process.env.PORT ?? 3030), hostname: process.env.HOST ?? "0.0.0.0", idleTimeout: 0,
   async fetch(req, srv) {
     const url = new URL(req.url), path = url.pathname, ip = srv.requestIP(req)?.address ?? "";
     try {
-      if (path === "/agent/install.sh") {
-        const token = url.searchParams.get("token"), uid = tokenUnit(db, token, now());
-        if (!uid) return new Response("invalid or expired token\n", { status: 403 });
-        const u = db.query("SELECT * FROM units WHERE id=?").get(uid) as any;
-        return new Response(installScript({ base: process.env.CC_PUBLIC_URL ?? url.origin, token: token!, pubkey: u.pubkey, from: process.env.CC_PUBLIC_IP, interval: u.sample_interval_s }), { headers: { "content-type": "text/x-shellscript" } });
-      }
-      if (path.startsWith("/agent/files/")) {
-        if (!tokenUnit(db, url.searchParams.get("token"), now())) return new Response("forbidden\n", { status: 403 });
-        const name = path.slice("/agent/files/".length);
-        if (!["ccagent.sh", "ccagent-gate"].includes(name)) return new Response("not found\n", { status: 404 });
-        return new Response(agentFile(name));
-      }
-      if (path === "/agent/register" && req.method === "POST") {
-        const token = url.searchParams.get("token"), uid = tokenUnit(db, token, now());
-        if (!uid) return json({ error: "invalid token" }, 403);
-        db.query("UPDATE install_tokens SET used=1 WHERE token=?").run(token);
-        audit(db, "agent", "agent.registered", uid, "installer callback", ip);
-        return json({ ok: true });
-      }
       if (path === "/api/health") return json({ app: "control-center", ok: true });
       if (path === "/api/auth/login" && req.method === "POST") {
         if (!loginLimit(ip, now())) return json({ error: "too many attempts" }, 429);
@@ -115,9 +96,9 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     const k = generateUnitKey(`cc-${b.name}`);
     const r = db.query("INSERT INTO units(name,host,ssh_port,pubkey,privkey_enc,fingerprint,mac,broadcast,sample_interval_s,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
       .run(String(b.name), String(b.host), Number(b.ssh_port ?? 22), k.publicKey, encrypt(master, k.privateKey), k.fingerprint, b.mac || null, b.broadcast || "255.255.255.255", Number(b.sample_interval_s ?? getSetting(db, "sample_interval_s", "5")), now());
-    const id = Number(r.lastInsertRowid), t = newToken(db, id, now());
+    const id = Number(r.lastInsertRowid);
     audit(db, "admin", "unit.added", id, String(b.name), ip);
-    return json({ id, install_command: installCmd(process.env.CC_PUBLIC_URL ?? url.origin, t.token), expires_at: t.expires_at, fingerprint: k.fingerprint }, 201);
+    return json({ id, public_key: k.publicKey, fingerprint: k.fingerprint }, 201);
   }
   const um = /^\/api\/units\/(\d+)(?:\/(\w+))?$/.exec(path);
   if (um) {
@@ -131,9 +112,10 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
       audit(db, "admin", "unit.updated", id, JSON.stringify(b), ip); return json(unitView(db.query("SELECT * FROM units WHERE id=?").get(id)));
     }
     if (!sub && m === "DELETE") {
-      pool.drop(id);
-      for (const t of ["samples_raw", "samples_1m", "samples_15m", "energy_hourly", "unit_static", "install_tokens"]) db.query(`DELETE FROM ${t} WHERE unit_id=?`).run(id);
-      db.query("DELETE FROM units WHERE id=?").run(id); audit(db, "admin", "unit.deleted", id, u.name, ip); return json({ ok: true });
+      pool.drop(id); deleteUnit(db, id); audit(db, "admin", "unit.deleted", id, u.name, ip); return json({ ok: true });
+    }
+    if (sub === "installer" && m === "GET") {
+      return new Response(installScript({ pubkey: u.pubkey, from: process.env.CC_PUBLIC_IP, interval: u.sample_interval_s }), { headers: { "content-type": "text/x-shellscript", "content-disposition": `attachment; filename="install-ccagent-${u.name.replace(/[^\w.-]/g, "_")}.sh"` } });
     }
     if (sub === "metrics" && m === "GET") {
       const range = (url.searchParams.get("range") ?? "1h") as Range;
@@ -143,8 +125,8 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     if (sub === "rekey" && m === "POST") {
       const k = generateUnitKey(`cc-${u.name}`);
       db.query("UPDATE units SET pubkey=?, privkey_enc=?, fingerprint=? WHERE id=?").run(k.publicKey, encrypt(master, k.privateKey), k.fingerprint, id);
-      pool.drop(id); const t = newToken(db, id, now()); audit(db, "admin", "unit.rekeyed", id, k.fingerprint, ip);
-      return json({ install_command: installCmd(process.env.CC_PUBLIC_URL ?? url.origin, t.token), expires_at: t.expires_at });
+      pool.drop(id); audit(db, "admin", "unit.rekeyed", id, k.fingerprint, ip);
+      return json({ public_key: k.publicKey, fingerprint: k.fingerprint });
     }
     if (sub === "power" && m === "POST") {
       const b = await req.json(), c = COMMANDS[String(b.action)];

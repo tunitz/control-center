@@ -15,17 +15,19 @@ Or `docker compose up -d --build` with `CC_MASTER_KEY` and `CC_PUBLIC_URL` in `.
 |---|---|---|
 | PORT / HOST | 3030 / 0.0.0.0 | listen address |
 | CC_DATA | ./data | SQLite location |
-| CC_PUBLIC_URL | request origin | URL units use to download the agent (must be reachable from them) |
 | CC_PUBLIC_IP | unset | if set, the key on units is restricted with `from="<ip>"` |
 | CC_POLL_INTERVAL | 5 | initial poll interval (editable in Settings) |
 
-## Add a unit
+## Add a unit (no connection from the unit to the Control Center is needed)
+Only the Control Center connects out to the unit (SSH, port 22, key auth), so units on another subnet work as long as the Control Center can reach them.
 1. Dashboard > **Add unit** (name, host/IP, MAC for WoL). A unique ed25519 key is generated; the private half stays encrypted on the server.
-2. Run the shown one-liner **as root on the unit**: `curl -fsSL '<url>/agent/install.sh?token=...' | sudo bash`. The token is single-use and lasts 15 min.
-3. The installer creates user `ccagent`, installs `/opt/ccagent/{ccagent.sh,ccagent-gate}`, writes `/etc/ccagent.conf`, authorizes the key with a forced command, adds a sudoers rule for exactly two power commands (systemctl, no wildcard), a tmpfiles rule so RAPL counters are readable, and a systemd service limited to 32 MB / 5% CPU.
-4. Within one poll interval the unit shows online. To rotate a key: Settings > Units > Rotate key, then re-run the new command.
+2. **Download installer**: a self-contained script with the agent and that unit's public key embedded. Copy it to the unit by any means (scp, USB, paste) and run `sudo bash install-ccagent-<name>.sh`.
+3. Alternative via the private repo release: `gh release download <tag> -R tunitz/control-center -p install-ccagent.sh`, then `sudo bash install-ccagent.sh '<public key shown in the dialog>'`. Publish a release with `tools/release.sh vX.Y.Z` (needs `GITHUB_TOKEN`; the repo and its assets stay private).
+4. The installer creates user `ccagent`, installs `/opt/ccagent/{ccagent.sh,ccagent-gate,uninstall.sh}`, writes `/etc/ccagent.conf`, authorizes the key with a forced command, adds a sudoers rule for exactly two power commands (systemctl, no wildcard), a tmpfiles rule so RAPL counters are readable, and a systemd service limited to 32 MB / 5% CPU.
+5. Within one poll interval the unit shows online. Rotate a key: Settings > Units > Rotate key, then re-run the new installer on the unit.
 
-The unit's sshd must be reachable from the Control Center on port 22 (key auth).
+## Remove a unit
+Unit page > Power menu > **Remove unit** (or Settings > Units > Remove). This deletes the unit and all of its history, energy data and key from the Control Center and is audit-logged. It does not touch the unit itself: run `sudo /opt/ccagent/uninstall.sh` there to remove the agent, user, sudoers and service.
 
 ## Agent log format
 `/var/lib/ccagent/metrics.jsonl` (mode 0600), one line per sample; `null` = unsupported:
@@ -40,7 +42,7 @@ GPU power is read from hwmon (AMD) or nvidia-smi. CPU power needs Intel/AMD RAPL
 
 ## API (cookie session; writes need header `x-cc: 1`)
 - `POST /api/auth/login {password}`, `POST /api/auth/logout`, `POST /api/auth/password {current,next}`
-- `GET /api/units`, `POST /api/units {name,host,mac?}` -> `{id,install_command,fingerprint}`; `GET|PATCH|DELETE /api/units/:id`; `POST /api/units/:id/rekey`
+- `GET /api/units`, `POST /api/units {name,host,mac?}` -> `{id,public_key,fingerprint}`; `GET /api/units/:id/installer` (per-unit script); `GET|PATCH|DELETE /api/units/:id`; `POST /api/units/:id/rekey` -> `{public_key,fingerprint}`
 - `GET /api/units/:id/metrics?range=1h|6h|12h|24h|7d|30d` -> `{tier,points[],summary{min,avg,max},energy_wh}`
 - `POST /api/units/:id/power {action: shutdown|restart|wake, confirm:true}`
 - `GET /api/cost`, `GET /api/rates`, `PUT /api/rates/:YYYY-MM` (current month only)

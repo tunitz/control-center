@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { api } from "../api";
+import InstallPanel from "./InstallPanel";
 export default function AddUnit({ onClose }: { onClose: () => void }) {
-  const [f, setF] = useState({ name: "", host: "", mac: "" }), [res, setRes] = useState<{ install_command: string; fingerprint: string } | null>(null), [err, setErr] = useState("");
+  const [f, setF] = useState({ name: "", host: "", mac: "" }), [res, setRes] = useState<{ id: number; public_key: string; fingerprint: string } | null>(null), [err, setErr] = useState("");
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label="Add unit" onClick={onClose}><div className="card" onClick={e => e.stopPropagation()}>
@@ -16,11 +17,8 @@ export default function AddUnit({ onClose }: { onClose: () => void }) {
         </form>
       ) : (
         <>
-          <h3 style={{ marginTop: 0 }}>Install the agent</h3>
-          <p className="muted">Run this on the unit as root. The link is single-use and expires in 15 minutes.</p>
-          <div className="pre">{res.install_command}</div>
-          <p className="muted" style={{ fontSize: 12 }}>Key fingerprint {res.fingerprint}</p>
-          <button className="btn pri" onClick={onClose}>Done</button>
+          <InstallPanel id={res.id} name={f.name} publicKey={res.public_key} fingerprint={res.fingerprint} />
+          <button className="btn" style={{ marginTop: 12 }} onClick={onClose}>Done</button>
         </>
       )}
     </div></div>

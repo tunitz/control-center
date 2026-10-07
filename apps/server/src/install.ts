@@ -1,30 +1,40 @@
-import { randomBytes } from "node:crypto";
-import type { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export function newToken(db: Database, unitId: number, now: number) {
-  const token = randomBytes(18).toString("base64url");
-  db.query("INSERT INTO install_tokens(token,unit_id,expires_at) VALUES(?,?,?)").run(token, unitId, now + 900);
-  return { token, expires_at: now + 900 };
-}
-export function tokenUnit(db: Database, token: string | null, now: number): number | null {
-  if (!token) return null;
-  const r = db.query("SELECT unit_id u FROM install_tokens WHERE token=? AND used=0 AND expires_at>?").get(token, now) as { u: number } | null;
-  return r ? r.u : null;
-}
-export function installScript(opts: { base: string; token: string; pubkey: string; from?: string; interval: number }) {
-  const authLine = `command="/opt/ccagent/ccagent-gate",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding${opts.from ? `,from="${opts.from}"` : ""} ${opts.pubkey}`;
+export const agentFile = (name: string) => readFileSync(join(import.meta.dir, "../../../agent", name), "utf8");
+const b64 = (name: string) => (Buffer.from(agentFile(name)).toString("base64").match(/.{1,76}/g) ?? []).join("\n");
+
+/**
+ * Self-contained installer: the agent files are embedded, so the unit never has to reach the Control Center.
+ * With `pubkey` baked in it is a per-unit script; without it, it takes the public key as $1 (release asset).
+ */
+export function installScript(opts: { pubkey?: string; from?: string; interval: number }) {
+  const fromOpt = opts.from ? `,from=\\"${opts.from}\\"` : "";
+  const keyLine = opts.pubkey
+    ? `PUBKEY=${JSON.stringify(opts.pubkey)}`
+    : `PUBKEY="\${1:-}"
+INTERVAL="\${2:-${opts.interval}}"
+[ -n "$PUBKEY" ] || { echo "usage: sudo bash $0 '<ssh-ed25519 public key from the Control Center>' [interval_s]"; exit 1; }`;
   return `#!/usr/bin/env bash
-# Control Center agent installer. Needs root. Generated for a single unit; token expires in 15 minutes.
+# Control Center agent installer (self-contained, no network access to the Control Center needed). Run as root.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run as root (sudo)"; exit 1; }
-BASE=${JSON.stringify(opts.base)}; TOKEN=${JSON.stringify(opts.token)}
+INTERVAL=${opts.interval}
+${keyLine}
 id ccagent >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/ccagent --shell /bin/bash ccagent
 mkdir -p /opt/ccagent /var/lib/ccagent/.ssh
-for f in ccagent.sh ccagent-gate; do curl -fsSL "$BASE/agent/files/$f?token=$TOKEN" -o /opt/ccagent/$f; chmod 755 /opt/ccagent/$f; done
-printf 'INTERVAL=${opts.interval}\\nDIR=/var/lib/ccagent\\n' > /etc/ccagent.conf
-printf '%s\\n' ${JSON.stringify(authLine)} > /var/lib/ccagent/.ssh/authorized_keys
+base64 -d > /opt/ccagent/ccagent.sh <<'B64_ccagent_sh'
+${b64("ccagent.sh")}
+B64_ccagent_sh
+base64 -d > /opt/ccagent/ccagent-gate <<'B64_ccagent_gate'
+${b64("ccagent-gate")}
+B64_ccagent_gate
+base64 -d > /opt/ccagent/uninstall.sh <<'B64_uninstall_sh'
+${b64("uninstall.sh")}
+B64_uninstall_sh
+chmod 755 /opt/ccagent/ccagent.sh /opt/ccagent/ccagent-gate /opt/ccagent/uninstall.sh
+printf 'INTERVAL=%s\\nDIR=/var/lib/ccagent\\n' "$INTERVAL" > /etc/ccagent.conf
+printf '%s\\n' "command=\\"/opt/ccagent/ccagent-gate\\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding${fromOpt} $PUBKEY" > /var/lib/ccagent/.ssh/authorized_keys
 chmod 700 /var/lib/ccagent/.ssh; chmod 600 /var/lib/ccagent/.ssh/authorized_keys
 chown -R ccagent:ccagent /var/lib/ccagent
 # power verbs only: exactly these two commands, no wildcard
@@ -55,8 +65,6 @@ WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload; systemctl enable --now ccagent.service
 sleep 2; systemctl is-active ccagent.service
-curl -fsS -X POST "$BASE/agent/register?token=$TOKEN" >/dev/null && echo "registered with Control Center"
-echo "ccagent installed."
+echo "ccagent installed. The Control Center connects over SSH (port 22) and will mark this unit online within a poll interval."
 `;
 }
-export const agentFile = (name: string) => readFileSync(join(import.meta.dir, "../../../agent", name), "utf8");

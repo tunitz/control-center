@@ -27,8 +27,11 @@ export default function UnitDetail({ id }: { id: number }) {
   const [range, setRange] = useState<(typeof RANGES)[number]>("1h");
   const { data: u } = useLive<Unit>(`/units/${id}`, 5000);
   const { data: m } = useLive<Metrics>(`/units/${id}/metrics?range=${range}`, range === "1h" ? 10000 : 60000);
-  const [menu, setMenu] = useState(false), [confirm, setConfirm] = useState<null | "shutdown" | "restart">(null), [toast, setToast] = useState("");
+  const [menu, setMenu] = useState(false), [confirm, setConfirm] = useState<null | "shutdown" | "restart" | "remove">(null), [toast, setToast] = useState("");
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 3500); return () => clearTimeout(t); } }, [toast]);
+  const remove = async () => {
+    try { await api(`/units/${id}`, { method: "DELETE" }); location.hash = "#/"; } catch (e: any) { setToast(e.message); setConfirm(null); }
+  };
   const act = async (action: string) => {
     try { await api(`/units/${id}/power`, { method: "POST", body: { action, confirm: action !== "wake" } }); setToast(`${action} sent`); } catch (e: any) { setToast(e.message); }
     setConfirm(null); setMenu(false);
@@ -40,7 +43,7 @@ export default function UnitDetail({ id }: { id: number }) {
     <>
       <div className="uhead"><a href="#/" className="btn" aria-label="Back">←</a><span className={"dot" + (u.online ? " on" : "")} /><div><h3 style={{ fontSize: 22 }}>{u.name}</h3><div className="host">{u.host} · {u.online ? "online" : "offline"}</div></div><div className="spacer" />
         <div className="menu"><button className="btn pri" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>Power ▾</button>
-          {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => setConfirm("restart")}>Restart…</button><button role="menuitem" onClick={() => setConfirm("shutdown")}>Shut down…</button></div>}
+          {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => setConfirm("restart")}>Restart…</button><button role="menuitem" onClick={() => setConfirm("shutdown")}>Shut down…</button><button role="menuitem" onClick={() => setConfirm("remove")} style={{ color: "#fecaca" }}>Remove unit…</button></div>}
         </div>
       </div>
       <div className="card specs" style={{ marginBottom: 14 }}>
@@ -60,8 +63,13 @@ export default function UnitDetail({ id }: { id: number }) {
         <Block title="Power (W)" m={m} keys={["cpu_w", "gpu_w"]} series={S.pow} unit=" W" />
       </div>}
       {confirm && <div className="modal" role="alertdialog" aria-modal="true" onClick={() => setConfirm(null)}><div className="card" onClick={e => e.stopPropagation()}>
-        <h3 style={{ marginTop: 0 }}>{confirm === "shutdown" ? "Shut down" : "Restart"} {u.name}?</h3><p className="muted">This takes the unit offline{confirm === "shutdown" ? ". Use Wake (WoL) to bring it back." : " briefly."} The action is audit-logged.</p>
-        <div style={{ display: "flex", gap: 8 }}><button className="btn dng" onClick={() => act(confirm)}>{confirm === "shutdown" ? "Shut down" : "Restart"}</button><button className="btn" onClick={() => setConfirm(null)} autoFocus>Cancel</button></div>
+        {confirm === "remove" ? <>
+          <h3 style={{ marginTop: 0 }}>Remove {u.name}?</h3><p className="muted">Deletes the unit and all of its history and energy data from the Control Center. This cannot be undone. The agent stays on the unit: run <code>sudo /opt/ccagent/uninstall.sh</code> there to remove it.</p>
+          <div style={{ display: "flex", gap: 8 }}><button className="btn dng" onClick={remove}>Remove unit</button><button className="btn" onClick={() => setConfirm(null)} autoFocus>Cancel</button></div>
+        </> : <>
+          <h3 style={{ marginTop: 0 }}>{confirm === "shutdown" ? "Shut down" : "Restart"} {u.name}?</h3><p className="muted">This takes the unit offline{confirm === "shutdown" ? ". Use Wake (WoL) to bring it back." : " briefly."} The action is audit-logged.</p>
+          <div style={{ display: "flex", gap: 8 }}><button className="btn dng" onClick={() => act(confirm)}>{confirm === "shutdown" ? "Shut down" : "Restart"}</button><button className="btn" onClick={() => setConfirm(null)} autoFocus>Cancel</button></div>
+        </>}
       </div></div>}
       {toast && <div className="toast" role="status">{toast}</div>}
     </>

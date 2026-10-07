@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { api, type Unit } from "../api";
 import { useLive } from "../hooks";
+import InstallPanel from "../components/InstallPanel";
 
 export default function Settings() {
   const { data: rates, reload: rr } = useLive<{ month: string; php_per_kwh: number }[]>("/rates", 60000);
   const { data: units, reload: ru } = useLive<Unit[]>("/units", 20000);
   const { data: audit } = useLive<any[]>("/audit?limit=30", 15000);
-  const [s, setS] = useState({ poll_interval_s: 5, sample_interval_s: 5, retention_days: 90 }), [rate, setRate] = useState(""), [msg, setMsg] = useState(""), [pw, setPw] = useState({ current: "", next: "" }), [key, setKey] = useState("");
+  const [s, setS] = useState({ poll_interval_s: 5, sample_interval_s: 5, retention_days: 90 }), [rate, setRate] = useState(""), [msg, setMsg] = useState(""), [pw, setPw] = useState({ current: "", next: "" }), [key, setKey] = useState<null | { id: number; name: string; public_key: string; fingerprint: string }>(null);
   useEffect(() => { api("/settings").then(setS as any); }, []);
   useEffect(() => { if (rates?.[0] && !rate) setRate(String(rates[0].php_per_kwh)); }, [rates]);
   const run = async (f: () => Promise<any>, ok: string) => { try { await f(); setMsg(ok); } catch (e: any) { setMsg(e.message); } };
@@ -30,9 +31,9 @@ export default function Settings() {
       </div>
       <div className="card"><h3 style={{ marginTop: 0 }}>Units</h3>
         <div className="scroll"><table><thead><tr><th>Name</th><th>Host</th><th>MAC</th><th>Key</th><th></th></tr></thead><tbody>{units?.map(u => <tr key={u.id}><td>{u.name}</td><td>{u.host}</td><td>{u.mac ?? "—"}</td><td title={u.fingerprint ?? ""}>{u.fingerprint?.slice(0, 18)}…</td>
-          <td style={{ whiteSpace: "nowrap" }}><button className="btn" onClick={() => run(async () => { const r = await api<any>(`/units/${u.id}/rekey`, { method: "POST" }); setKey(r.install_command); }, "New key issued: re-run the installer")}>Rotate key</button>{" "}
-            <button className="btn dng" onClick={() => { if (confirm(`Delete ${u.name} and its history?`)) run(async () => { await api(`/units/${u.id}`, { method: "DELETE" }); ru(); }, "Unit deleted"); }}>Delete</button></td></tr>)}</tbody></table></div>
-        {key && <><p className="muted">Run on the unit (expires in 15 min):</p><div className="pre">{key}</div></>}
+          <td style={{ whiteSpace: "nowrap" }}><button className="btn" onClick={() => run(async () => { const r = await api<any>(`/units/${u.id}/rekey`, { method: "POST" }); setKey({ id: u.id, name: u.name, public_key: r.public_key, fingerprint: r.fingerprint }); ru(); }, "New key issued: re-run the installer on the unit")}>Rotate key</button>{" "}
+            <button className="btn dng" onClick={() => { if (confirm(`Remove ${u.name} and delete all its history? The agent on the unit is not touched (run /opt/ccagent/uninstall.sh there).`)) run(async () => { await api(`/units/${u.id}`, { method: "DELETE" }); ru(); }, "Unit removed"); }}>Remove</button></td></tr>)}</tbody></table></div>
+        {key && <div style={{ marginTop: 12 }}><InstallPanel id={key.id} name={key.name} publicKey={key.public_key} fingerprint={key.fingerprint} /></div>}
       </div>
       <div className="card"><h3 style={{ marginTop: 0 }}>Change password</h3>
         <label htmlFor="cp">Current</label><input id="cp" type="password" autoComplete="current-password" value={pw.current} onChange={e => setPw({ ...pw, current: e.target.value })} style={{ maxWidth: 300 }} />
