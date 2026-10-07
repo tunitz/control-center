@@ -1,2 +1,13 @@
-{ "name": "control-center", "private": true, "workspaces": ["apps/*"],
-  "scripts": { "test": "bun test apps/server", "typecheck": "bun run --cwd apps/server typecheck && bun run --cwd apps/web typecheck", "build:web": "bun run --cwd apps/web build", "start": "bun run apps/server/src/index.ts" } }
+{
+  "name": "control-center",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "bun test apps/server apps/web/src",
+    "typecheck": "bun run --cwd apps/server typecheck && bun run --cwd apps/web typecheck",
+    "build:web": "bun run --cwd apps/web build",
+    "start": "bun run apps/server/src/index.ts"
+  }
+}
