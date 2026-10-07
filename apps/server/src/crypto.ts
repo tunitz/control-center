@@ -15,6 +15,10 @@ export function decrypt(master: string, blob: string): string {
 }
 export function generateUnitKey(comment: string) {
   const kp = utils.generateKeyPairSync("ed25519", { comment });
+  // Fail loudly rather than storing a key that ssh2 cannot load (seen once: a one-byte-short key that
+  // only surfaced much later as "Malformed OpenSSH private key" with the unit stuck offline).
+  const parsed = utils.parseKey(kp.private) as unknown;
+  if (parsed instanceof Error) throw new Error(`generated private key is unusable: ${parsed.message}`);
   const fp = createHash("sha256").update(Buffer.from(kp.public.split(" ")[1], "base64")).digest("base64").replace(/=+$/, "");
   return { publicKey: kp.public.trim(), privateKey: kp.private, fingerprint: "SHA256:" + fp };
 }

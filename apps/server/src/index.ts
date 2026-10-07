@@ -9,7 +9,7 @@ import { generateUnitKey, encrypt } from "./crypto";
 import { SshPool } from "./ssh";
 import { Scheduler, targetOf, type UnitRow } from "./poller";
 import { COMMANDS, sendWol } from "./commands";
-import { installScript } from "./install";
+import { installScript, pasteCommand } from "./install";
 import { deleteUnit } from "./units";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
@@ -115,7 +115,10 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
       pool.drop(id); deleteUnit(db, id); audit(db, "admin", "unit.deleted", id, u.name, ip); return json({ ok: true });
     }
     if (sub === "installer" && m === "GET") {
-      return new Response(installScript({ pubkey: u.pubkey, from: process.env.CC_PUBLIC_IP, interval: u.sample_interval_s }), { headers: { "content-type": "text/x-shellscript", "content-disposition": `attachment; filename="install-ccagent-${u.name.replace(/[^\w.-]/g, "_")}.sh"` } });
+      const script = installScript({ pubkey: u.pubkey, from: process.env.CC_PUBLIC_IP, interval: u.sample_interval_s });
+      if (url.searchParams.get("format") === "paste")
+        return new Response(pasteCommand(script), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
+      return new Response(script, { headers: { "content-type": "text/x-shellscript", "content-disposition": `attachment; filename="install-ccagent-${u.name.replace(/[^\w.-]/g, "_")}.sh"` } });
     }
     if (sub === "metrics" && m === "GET") {
       const range = (url.searchParams.get("range") ?? "1h") as Range;

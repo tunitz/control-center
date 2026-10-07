@@ -27,3 +27,14 @@ test("forced-command line restricts key and honours from=", () => {
   expect(s).toContain('from=\\"10.0.0.5\\"');
   expect(s).toContain("no-pty,no-port-forwarding");
 });
+
+test("paste command carries the whole installer and re-parses as the same script", async () => {
+  const { pasteCommand } = await import("./install");
+  const s = installScript({ pubkey: pub, interval: 5 });
+  const p = pasteCommand(s);
+  expect(p.startsWith("sudo ")).toBe(true);
+  const m = /<<'(\w+)'\n([\s\S]*)\n\1\n$/.exec(p);
+  expect(m).not.toBeNull();
+  expect(m![2]).toBe(s.replace(/\n+$/, "")); // byte-identical payload
+  expect(m![1]).not.toMatch(/[^A-Z_]/);        // quoted delimiter: no expansion
+});

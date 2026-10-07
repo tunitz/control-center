@@ -21,7 +21,8 @@ Or `docker compose up -d --build` with `CC_MASTER_KEY` and `CC_PUBLIC_URL` in `.
 ## Add a unit (no connection from the unit to the Control Center is needed)
 Only the Control Center connects out to the unit (SSH, port 22, key auth), so units on another subnet work as long as the Control Center can reach them.
 1. Dashboard > **Add unit** (name, host/IP, MAC for WoL). A unique ed25519 key is generated; the private half stays encrypted on the server.
-2. **Download installer**: a self-contained script with the agent and that unit's public key embedded. Copy it to the unit by any means (scp, USB, paste) and run `sudo bash install-ccagent-<name>.sh`.
+2. **Copy-paste command** (default): one command holding the whole installer, including the agent and that unit's public key. Paste it into a terminal on the unit; it runs as root. Nothing is downloaded, so this works on a unit with no route to the Control Center. About 12 KB.
+   Or **Download installer**: a self-contained script; copy it over (scp, USB) and run `sudo bash install-ccagent-<name>.sh`.
 3. Alternative via the private repo release: `gh release download <tag> -R tunitz/control-center -p install-ccagent.sh`, then `sudo bash install-ccagent.sh '<public key shown in the dialog>'`. Publish a release with `tools/release.sh vX.Y.Z` (needs `GITHUB_TOKEN`; the repo and its assets stay private).
 4. The installer creates user `ccagent`, installs `/opt/ccagent/{ccagent.sh,ccagent-gate,uninstall.sh}`, writes `/etc/ccagent.conf`, authorizes the key with a forced command, adds a sudoers rule for exactly two power commands (systemctl, no wildcard), a tmpfiles rule so RAPL counters are readable, and a systemd service limited to 32 MB / 5% CPU.
 5. Within one poll interval the unit shows online. Rotate a key: Settings > Units > Rotate key, then re-run the new installer on the unit.

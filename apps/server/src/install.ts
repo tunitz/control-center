@@ -5,6 +5,14 @@ export const agentFile = (name: string) => readFileSync(join(import.meta.dir, ".
 const b64 = (name: string) => (Buffer.from(agentFile(name)).toString("base64").match(/.{1,76}/g) ?? []).join("\n");
 
 /**
+ * One copy-paste command that installs the agent on a unit that cannot reach the Control Center:
+ * the whole script travels inside the paste (quoted heredoc, no expansion), so nothing is downloaded.
+ */
+export function pasteCommand(script: string) {
+  return `sudo bash <<'CCAGENT_END'\n${script.replace(/\n+$/, "")}\nCCAGENT_END\n`;
+}
+
+/**
  * Self-contained installer: the agent files are embedded, so the unit never has to reach the Control Center.
  * With `pubkey` baked in it is a per-unit script; without it, it takes the public key as $1 (release asset).
  */

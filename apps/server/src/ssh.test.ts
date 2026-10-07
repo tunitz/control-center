@@ -42,6 +42,15 @@ const mkUnit = (db: ReturnType<typeof openDb>): UnitRow => {
   return db.query("SELECT * FROM units WHERE id=1").get() as UnitRow;
 };
 
+test("generated unit keys are always loadable by ssh2", () => {
+  for (const c of ["cc-a", "cc-paste-unit", "cc-a-very-long-unit-name-here"]) {
+    const k = generateUnitKey(c);
+    const round = decrypt("m", encrypt("m", k.privateKey));
+    expect(round).toBe(k.privateKey);
+    expect(utils.parseKey(round)).not.toBeInstanceOf(Error);
+  }
+});
+
 test("crypto roundtrip", () => { expect(decrypt("m", encrypt("m", "secret"))).toBe("secret"); expect(() => decrypt("x", encrypt("m", "s"))).toThrow(); });
 
 test("parseRead groups files", () => {
