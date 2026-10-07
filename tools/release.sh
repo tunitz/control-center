@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Publishes a release on the PRIVATE repo with the generic installer attached. Usage: tools/release.sh v0.2.0
-# Needs GITHUB_TOKEN (repo scope). Download later with: gh release download <tag> -R tunitz/control-center  (or the API with the token)
+# Publishes a release on the PUBLIC agent repo (tunitz/ccagent) with the generic installer attached. Usage: tools/release.sh v0.3.0
+# The dashboard repo stays private; only the agent installer is public.
+# Needs GITHUB_TOKEN (repo scope). Units download it anonymously (curl, no token).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-TAG=${1:?tag, e.g. v0.2.0}; REPO=${REPO:-tunitz/control-center}
+TAG=${1:?tag, e.g. v0.2.0}; REPO=${REPO:-tunitz/ccagent}
 : "${GITHUB_TOKEN:?GITHUB_TOKEN not set}"
 bun run tools/build-installer.ts dist/install-ccagent.sh
 API=https://api.github.com/repos/$REPO

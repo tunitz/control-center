@@ -9,7 +9,7 @@ import { generateUnitKey, encrypt } from "./crypto";
 import { SshPool } from "./ssh";
 import { Scheduler, targetOf, type UnitRow } from "./poller";
 import { COMMANDS, sendWol } from "./commands";
-import { installScript, pasteCommand } from "./install";
+import { installScript, pasteCommand, curlCommand } from "./install";
 import { deleteUnit } from "./units";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
@@ -116,6 +116,8 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     }
     if (sub === "installer" && m === "GET") {
       const script = installScript({ pubkey: u.pubkey, from: process.env.CC_PUBLIC_IP, interval: u.sample_interval_s });
+      if (url.searchParams.get("format") === "curl")
+        return new Response(curlCommand({ repo: process.env.CC_AGENT_REPO ?? "tunitz/ccagent", tag: process.env.CC_AGENT_TAG ?? "latest", pubkey: u.pubkey }), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
       if (url.searchParams.get("format") === "paste")
         return new Response(pasteCommand(script), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
       return new Response(script, { headers: { "content-type": "text/x-shellscript", "content-disposition": `attachment; filename="install-ccagent-${u.name.replace(/[^\w.-]/g, "_")}.sh"` } });

@@ -3,12 +3,14 @@ import { copyText } from "../clipboard";
 
 /** Shown after creating or re-keying a unit. The unit never needs to reach the Control Center. */
 export default function InstallPanel({ id, name, publicKey, fingerprint }: { id: number; name: string; publicKey: string; fingerprint: string }) {
-  const [tab, setTab] = useState<"paste" | "download">("paste");
+  const [tab, setTab] = useState<"curl" | "paste" | "download">("curl");
   const [paste, setPaste] = useState("");
+  const [curl, setCurl] = useState("");
   const [copied, setCopied] = useState<"paste" | "key" | "failed" | null>(null);
   const file = `install-ccagent-${name.replace(/[^\w.-]/g, "_")}.sh`;
   useEffect(() => {
     fetch(`/api/units/${id}/installer?format=paste`, { credentials: "same-origin" }).then(r => r.text()).then(setPaste).catch(() => {});
+    fetch(`/api/units/${id}/installer?format=curl`, { credentials: "same-origin" }).then(r => r.text()).then(setCurl).catch(() => {});
   }, [id]);
   const download = async () => {
     const r = await fetch(`/api/units/${id}/installer`, { credentials: "same-origin" });
@@ -24,10 +26,15 @@ export default function InstallPanel({ id, name, publicKey, fingerprint }: { id:
       <h3 style={{ marginTop: 0 }}>Install the agent</h3>
       <p className="muted">The unit does not need to reach the Control Center: only the Control Center connects out to it over SSH.</p>
       <div className="chips" style={{ marginBottom: 12 }}>
-        <button className={"chip" + (tab === "paste" ? " on" : "")} onClick={() => setTab("paste")}>Copy-paste command</button>
+        <button className={"chip" + (tab === "curl" ? " on" : "")} onClick={() => setTab("curl")}>Short command</button>
+        <button className={"chip" + (tab === "paste" ? " on" : "")} onClick={() => setTab("paste")}>Offline paste</button>
         <button className={"chip" + (tab === "download" ? " on" : "")} onClick={() => setTab("download")}>Download installer</button>
       </div>
-      {tab === "paste" ? <>
+      {tab === "curl" ? <>
+        <div className="pre" style={{ userSelect: "all" }}>{curl || "loading…"}</div>
+        <button className="btn pri" style={{ marginTop: 8 }} disabled={!curl} onClick={() => copy(curl, "paste")}>{copied === "paste" ? "Copied to clipboard" : copied === "failed" ? "Copy blocked: long-press the command above" : "Copy command"}</button>
+        <p className="muted" style={{ fontSize: 13 }}>Run it on the unit. It downloads the installer from the public ccagent release (no login, no secrets) and authorizes only this unit's public key. The unit needs internet, not access to the Control Center. No internet there? Use Offline paste.</p>
+      </> : tab === "paste" ? <>
         <button className="btn pri" disabled={!paste} onClick={() => copy(paste, "paste")}>{copied === "paste" ? "Copied to clipboard" : copied === "failed" ? "Copy blocked: select the text below" : "Copy install command"}</button>
         <p className="muted" style={{ fontSize: 13 }}>Paste it into a terminal on the unit and it installs as root. Everything needed is inside the paste, so the unit needs no access to the Control Center. {paste ? `${Math.round(paste.length / 1024)} KB.` : ""}</p>
         <details open={copied === "failed"}><summary className="muted" style={{ cursor: "pointer" }}>{copied === "failed" ? "Tap the box, select all, copy" : "Preview"}</summary><textarea readOnly value={paste || "loading…"} onFocus={e => e.currentTarget.select()} aria-label="Install command" style={{ width: "100%", height: 160, fontFamily: "ui-monospace,monospace", fontSize: 16, background: "#080b1c", border: "1px solid var(--line)", borderRadius: 10, color: "var(--text)", padding: 10 }} /></details>
@@ -39,10 +46,8 @@ export default function InstallPanel({ id, name, publicKey, fingerprint }: { id:
         </ol>
         <button className="btn pri" onClick={download}>Download installer</button>
       </>}
-      <details style={{ marginTop: 14 }}><summary className="muted" style={{ cursor: "pointer" }}>Release installer (private repo)</summary>
-        <p className="muted" style={{ fontSize: 13 }}>If the unit can fetch from GitHub with your token: download <code>install-ccagent.sh</code> from the latest release, then pass this unit's public key:</p>
-        <div className="pre">sudo bash install-ccagent.sh '{publicKey}'</div>
-        <button className="btn" style={{ marginTop: 8 }} onClick={() => copy(`sudo bash install-ccagent.sh '${publicKey}'`, "key")}>{copied === "key" ? "Copied" : copied === "failed" ? "Copy blocked: long-press the text above" : "Copy public key command"}</button>
+      <details style={{ marginTop: 14 }}><summary className="muted" style={{ cursor: "pointer" }}>Public key</summary>
+        <div className="pre" style={{ marginTop: 8 }}>{publicKey}</div>
       </details>
       <p className="muted" style={{ fontSize: 12 }}>Key fingerprint {fingerprint}</p>
     </>

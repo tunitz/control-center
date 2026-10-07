@@ -1,15 +1,29 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 
 export const agentFile = (name: string) => readFileSync(join(import.meta.dir, "../../../agent", name), "utf8");
-const b64 = (name: string) => (Buffer.from(agentFile(name)).toString("base64").match(/.{1,76}/g) ?? []).join("\n");
+const slim = (src: string) => src.split("\n").filter((l, i) => i === 0 || (l.trim() !== "" && !/^\s*#/.test(l))).join("\n") + "\n";
+const b64 = (name: string) => (Buffer.from(slim(agentFile(name))).toString("base64").match(/.{1,76}/g) ?? []).join("\n");
 
 /**
- * One copy-paste command that installs the agent on a unit that cannot reach the Control Center:
- * the whole script travels inside the paste (quoted heredoc, no expansion), so nothing is downloaded.
+ * One copy-paste command for a unit that cannot reach the Control Center: the installer travels inside
+ * the paste, gzip+base64 on a single line (nothing is downloaded).
  */
 export function pasteCommand(script: string) {
-  return `sudo bash <<'CCAGENT_END'\n${script.replace(/\n+$/, "")}\nCCAGENT_END\n`;
+  return `echo '${gzipSync(Buffer.from(script), { level: 9 }).toString("base64")}' | base64 -d | gunzip | sudo bash\n`;
+}
+
+/**
+ * Short command for units that can reach GitHub: the generic installer is a release asset of the public agent repo
+ * and the unit's public key is passed as an argument. tag "latest" follows the newest release.
+ */
+export function curlCommand(o: { repo: string; tag: string; pubkey: string }) {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(o.repo)) throw new Error("invalid repo");
+  if (!/^[\w.-]+$/.test(o.tag)) throw new Error("invalid tag");
+  if (!/^ssh-ed25519 [A-Za-z0-9+/=]+( [\w.@-]+)?$/.test(o.pubkey)) throw new Error("invalid public key");
+  const base = o.tag === "latest" ? "releases/latest/download" : `releases/download/${o.tag}`;
+  return `curl -fsSL https://github.com/${o.repo}/${base}/install-ccagent.sh | sudo bash -s -- '${o.pubkey}'`;
 }
 
 /**
@@ -17,6 +31,7 @@ export function pasteCommand(script: string) {
  * With `pubkey` baked in it is a per-unit script; without it, it takes the public key as $1 (release asset).
  */
 export function installScript(opts: { pubkey?: string; from?: string; interval: number }) {
+  // raw (quoted heredoc) embedding compresses far better inside the gzip'd one-liner than base64 does
   const fromOpt = opts.from ? `,from=\\"${opts.from}\\"` : "";
   const keyLine = opts.pubkey
     ? `PUBKEY=${JSON.stringify(opts.pubkey)}`
@@ -31,15 +46,12 @@ INTERVAL=${opts.interval}
 ${keyLine}
 id ccagent >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/ccagent --shell /bin/bash ccagent
 mkdir -p /opt/ccagent /var/lib/ccagent/.ssh
-base64 -d > /opt/ccagent/ccagent.sh <<'B64_ccagent_sh'
-${b64("ccagent.sh")}
-B64_ccagent_sh
-base64 -d > /opt/ccagent/ccagent-gate <<'B64_ccagent_gate'
-${b64("ccagent-gate")}
-B64_ccagent_gate
-base64 -d > /opt/ccagent/uninstall.sh <<'B64_uninstall_sh'
-${b64("uninstall.sh")}
-B64_uninstall_sh
+cat > /opt/ccagent/ccagent.sh <<'EOF_ccagent_sh'
+${slim(agentFile("ccagent.sh"))}EOF_ccagent_sh
+cat > /opt/ccagent/ccagent-gate <<'EOF_ccagent_gate'
+${slim(agentFile("ccagent-gate"))}EOF_ccagent_gate
+cat > /opt/ccagent/uninstall.sh <<'EOF_uninstall_sh'
+${slim(agentFile("uninstall.sh"))}EOF_uninstall_sh
 chmod 755 /opt/ccagent/ccagent.sh /opt/ccagent/ccagent-gate /opt/ccagent/uninstall.sh
 printf 'INTERVAL=%s\\nDIR=/var/lib/ccagent\\n' "$INTERVAL" > /etc/ccagent.conf
 printf '%s\\n' "command=\\"/opt/ccagent/ccagent-gate\\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding${fromOpt} $PUBKEY" > /var/lib/ccagent/.ssh/authorized_keys
