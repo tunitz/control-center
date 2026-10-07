@@ -1,0 +1,9 @@
+FROM debian:12-slim
+# Real systemd as PID 1, root shell, NO sudo, NO visudo (mimics a Proxmox host)
+ENV container=docker
+RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv openssh-server curl ca-certificates procps && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /run/sshd \
+ && systemctl enable ssh \
+ && rm -f /lib/systemd/system/multi-user.target.wants/getty.target /etc/systemd/system/*.wants/systemd-logind.service 2>/dev/null; true
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

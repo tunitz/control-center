@@ -31,7 +31,7 @@ test("paste command is ONE short line that decodes back to the full installer", 
   const s = installScript({ pubkey: pub, interval: 5 });
   const p = pasteCommand(s);
   expect(p.trim().split("\n").length).toBe(1);          // one line, not a paragraph
-  expect(p.length).toBeLessThan(5200);                    // was ~12300 as a multi-line paragraph
+  expect(p.length).toBeLessThan(5600);                    // was ~12300 as a multi-line paragraph
   const m = /^echo '([A-Za-z0-9+/=]+)' \| base64 -d \| gunzip \| sudo bash\n?$/.exec(p);
   expect(m).not.toBeNull();
   const back = gunzipSync(Buffer.from(m![1], "base64")).toString();
@@ -64,19 +64,18 @@ test("paste command has a no-sudo variant", async () => {
   expect(p).toMatch(/\| gunzip \| bash\n$/);
   expect(p).not.toContain("sudo");
 });
-test("sudoers block runs cleanly when sudo/visudo are absent (Proxmox): no abort, power reported unavailable", () => {
-  const s = installScript({ pubkey: pub, interval: 5 });
-  const a = s.indexOf("SYSCTL=$(command -v systemctl"), b = s.indexOf("# RAPL counters");
-  const block = s.slice(a, b);
-  // PATH holds only bash builtins' needs: no sudo, no visudo
-  const r = Bun.spawnSync(["/usr/bin/bash", "-c", "set -euo pipefail\n" + block + "\necho CONTINUED"], { env: { PATH: "/nonexistent" } });
-  expect(r.stdout.toString()).toContain("power control unavailable");
-  expect(r.stdout.toString()).toContain("CONTINUED");   // set -e did not abort the install
-  expect(r.exitCode).toBe(0);
-});
-
 test("re-running the installer restarts the service so it also upgrades a running agent", () => {
   const s = installScript({ pubkey: pub, interval: 5 });
   expect(s).toContain("systemctl restart ccagent.service");
   expect(s).not.toContain("enable --now"); // enable --now is a no-op on an already-running unit
+});
+
+test("power control needs no sudo: root path unit + helper, old sudoers rule removed", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  expect(s).toContain("ccagent-power.path");
+  expect(s).toContain("PathExists=/var/lib/ccagent/power.request");
+  expect(s).toContain("<<'EOF_ccagent_power'");
+  expect(s).toContain("ExecStart=/opt/ccagent/ccagent-power");
+  expect(s).not.toContain("visudo");
+  expect(s).toContain("rm -f /etc/sudoers.d/ccagent"); // migrate older installs
 });

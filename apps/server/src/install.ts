@@ -50,21 +50,33 @@ cat > /opt/ccagent/ccagent.sh <<'EOF_ccagent_sh'
 ${slim(agentFile("ccagent.sh"))}EOF_ccagent_sh
 cat > /opt/ccagent/ccagent-gate <<'EOF_ccagent_gate'
 ${slim(agentFile("ccagent-gate"))}EOF_ccagent_gate
+cat > /opt/ccagent/ccagent-power <<'EOF_ccagent_power'
+${slim(agentFile("ccagent-power"))}EOF_ccagent_power
 cat > /opt/ccagent/uninstall.sh <<'EOF_uninstall_sh'
 ${slim(agentFile("uninstall.sh"))}EOF_uninstall_sh
-chmod 755 /opt/ccagent/ccagent.sh /opt/ccagent/ccagent-gate /opt/ccagent/uninstall.sh
+chmod 755 /opt/ccagent/ccagent.sh /opt/ccagent/ccagent-gate /opt/ccagent/ccagent-power /opt/ccagent/uninstall.sh
 printf 'INTERVAL=%s\\nDIR=/var/lib/ccagent\\n' "$INTERVAL" > /etc/ccagent.conf
 printf '%s\\n' "command=\\"/opt/ccagent/ccagent-gate\\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding${fromOpt} $PUBKEY" > /var/lib/ccagent/.ssh/authorized_keys
 chmod 700 /var/lib/ccagent/.ssh; chmod 600 /var/lib/ccagent/.ssh/authorized_keys
 chown -R ccagent:ccagent /var/lib/ccagent
-# power commands only: exactly two, no wildcard. Needs sudo and visudo, which are absent on Proxmox hosts.
-SYSCTL=$(command -v systemctl || true)
-if command -v sudo >/dev/null 2>&1 && command -v visudo >/dev/null 2>&1 && [ -d /etc/sudoers.d ] && [ -n "$SYSCTL" ]; then
-  printf 'ccagent ALL=(root) NOPASSWD: %s ${"power" + "off"}, %s ${"re" + "boot"}\\n' "$SYSCTL" "$SYSCTL" > /etc/sudoers.d/ccagent; chmod 440 /etc/sudoers.d/ccagent
-  visudo -cf /etc/sudoers.d/ccagent >/dev/null || { rm -f /etc/sudoers.d/ccagent; echo "warning: sudoers rule rejected, power control unavailable"; }
-else
-  echo "note: sudo not found on this host, so power control unavailable (metrics still work)"
-fi
+# Power control without sudo: systemd (root) watches for a request file written by the agent user and runs the matching action.
+# This also works on Proxmox, which ships no sudo. Older installs used a sudoers rule; remove it.
+rm -f /etc/sudoers.d/ccagent
+cat > /etc/systemd/system/ccagent-power.path <<UNIT
+[Unit]
+Description=Control Center power requests
+[Path]
+PathExists=/var/lib/ccagent/power.request
+[Install]
+WantedBy=multi-user.target
+UNIT
+cat > /etc/systemd/system/ccagent-power.service <<UNIT
+[Unit]
+Description=Control Center power action
+[Service]
+Type=oneshot
+ExecStart=/opt/ccagent/ccagent-power
+UNIT
 # RAPL counters are root-only on newer kernels: make readable at boot
 if command -v systemd-tmpfiles >/dev/null; then
   mkdir -p /etc/tmpfiles.d
@@ -87,7 +99,8 @@ ReadWritePaths=/var/lib/ccagent
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload; systemctl enable ccagent.service
+systemctl daemon-reload; systemctl enable ccagent.service ccagent-power.path
+systemctl restart ccagent-power.path
 # restart (not just start): a re-run must replace a running agent with the freshly installed code
 systemctl restart ccagent.service
 sleep 2; systemctl is-active ccagent.service

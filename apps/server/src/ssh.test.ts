@@ -86,3 +86,12 @@ test("wrong key is refused", async () => {
   await expect(pool.exec(9, { host: "127.0.0.1", port, username: "x", privateKey: other.privateKey }, "read")).rejects.toThrow();
   pool.closeAll();
 });
+
+test("generateUnitKey retries past ssh2's occasional unloadable key (~1 in 250) and never throws or returns a bad one", () => {
+  let bad = 0;
+  for (let i = 0; i < 1500; i++) {
+    const k = generateUnitKey("cc-retry-test");
+    if (utils.parseKey(k.privateKey) instanceof Error) bad++;
+  }
+  expect(bad).toBe(0);
+});
