@@ -129,3 +129,34 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;p
 }
 
 .chat-item{min-width:0}.chat-list li{min-width:0}
+
+/* Chat redesign (2026-10-08): phone chat is a full-height app screen; no site header, one-row settings, round send. */
+.chat-menu,.chat-more{display:inline-flex;align-items:center;justify-content:center;width:40px;min-height:40px;padding:0}
+.chat-actions{position:relative}
+.chat-more-pop{display:none;position:absolute;right:0;top:44px;z-index:20;min-width:140px;padding:6px;border-radius:14px;background:#151b38;border:1px solid var(--line);box-shadow:0 10px 30px #000a;flex-direction:column;gap:2px}
+.chat-more-pop.open{display:flex}
+.chat-more-pop .btn{text-align:left;border-color:transparent;background:transparent;min-height:44px;font-size:15px;color:var(--text)}
+.chat-more-pop .btn.dng{color:#fca5a5}
+.chat-head .chat-menu,.chat-head .chat-more{color:var(--text)}
+.chat-compose textarea{overflow-y:auto;line-height:1.4}
+.chat-compose .btn.chat-send{flex:none;width:38px;height:38px;min-height:38px;padding:0 !important;display:inline-flex;align-items:center;justify-content:center;border-radius:50%}
+.chat-model{gap:8px;flex-wrap:nowrap}
+.chat-model select{flex:1 1 0;min-width:0;max-width:50%;height:34px;border:1px solid var(--line);border-radius:999px;padding:0 12px;text-overflow:ellipsis;text-align:center;text-align-last:center;color:var(--mut);background:#ffffff0a;-webkit-appearance:none;appearance:none}
+.chat-err-inline{flex-basis:100%}
+@media (max-width:760px){
+  .app.chat-route{padding:max(8px,env(safe-area-inset-top)) 8px 0}
+  .app.chat-route>header.top{display:none}
+  .chat{height:calc(100dvh - 72px - env(safe-area-inset-bottom) - max(8px,env(safe-area-inset-top)));height:calc(100dvh - 72px - env(safe-area-inset-bottom) - max(8px,env(safe-area-inset-top)))}
+  .chat-head{padding:2px 0 6px;flex-wrap:nowrap}
+  .chat-head-title{font-size:16px;text-align:center;overflow:hidden;text-overflow:ellipsis}
+  .chat-actions{order:3}
+  .chat-compose{margin:0 0 8px;width:100%;padding:6px 6px 6px 16px}
+  .chat-model{width:100%;margin:0 0 8px;padding:0}
+  .chat-empty{font-size:17px;line-height:1.4;max-width:18em;color:var(--text);opacity:.7}
+  .chat-log{padding:8px 2px}
+}
+
+/* Chat model picker: provider then model (2026-10-08) */
+.chat-model{flex-wrap:wrap}
+.chat-model select{flex:1 1 40%;max-width:none}
+.chat-model .chat-model-pick{flex:1 1 100%;order:3}

@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseSse, applyEvent, initialStream, toViewMessages, sessionLabel, modelChoices, REASONING_CHOICES, reasoningOptions } from "./chatStream";
+import { parseSse, applyEvent, initialStream, toViewMessages, sessionLabel, modelChoices, modelGroups, REASONING_CHOICES, reasoningOptions } from "./chatStream";
 
 test("parseSse keeps a partial event until its blank line arrives", () => {
   const a = parseSse("", 'event: assistant.delta\ndata: {"delta":"po');
@@ -138,4 +138,45 @@ test("sessionLabel prefers the title, then the preview, then a placeholder", () 
   expect(sessionLabel({ title: null, preview: long })).toBe(long.slice(0, 60));
   expect(sessionLabel({ title: null, preview: "short" })).toBe("short");
   expect(sessionLabel({ title: null, preview: null })).toBe("New chat");
+});
+
+test("model groups split providers, skip empty ones, sort by name and model, and use bare model labels", () => {
+  const groups = modelGroups({
+    providers: [
+      { slug: "nous", name: "Nous Portal", models: ["openai/gpt-5.5", "anthropic/claude-haiku-5.5"] },
+      { slug: "anthropic", name: "Anthropic", models: ["claude-sonnet-5-5", "claude-haiku-5-5"] },
+      { slug: "empty", name: "Empty", models: [] },
+    ],
+  });
+  expect(groups).toEqual([
+    {
+      slug: "anthropic",
+      name: "Anthropic",
+      models: [
+        { value: "anthropic|claude-haiku-5-5", label: "claude-haiku-5-5", model: "claude-haiku-5-5" },
+        { value: "anthropic|claude-sonnet-5-5", label: "claude-sonnet-5-5", model: "claude-sonnet-5-5" },
+      ],
+    },
+    {
+      slug: "nous",
+      name: "Nous Portal",
+      models: [
+        { value: "nous|anthropic/claude-haiku-5.5", label: "anthropic/claude-haiku-5.5", model: "anthropic/claude-haiku-5.5" },
+        { value: "nous|openai/gpt-5.5", label: "openai/gpt-5.5", model: "openai/gpt-5.5" },
+      ],
+    },
+  ]);
+});
+
+test("model groups drop repeated model ids within a provider", () => {
+  const groups = modelGroups({
+    providers: [{ slug: "nous", name: "Nous Portal", models: ["openai/gpt-5.5", "openai/gpt-5.5"] }],
+  });
+  expect(groups).toHaveLength(1);
+  expect(groups[0].models.map(m => m.model)).toEqual(["openai/gpt-5.5"]);
+});
+
+test("model groups tolerate a missing or empty payload", () => {
+  expect(modelGroups({})).toEqual([]);
+  expect(modelGroups({ providers: [] })).toEqual([]);
 });

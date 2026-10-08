@@ -95,6 +95,24 @@ export function modelChoices(payload: { providers?: { slug: string; name: string
     })));
 }
 
+export type ModelGroup = { slug: string; name: string; models: { value: string; label: string; model: string }[] };
+
+/** Groups Hermes providers for a picker: one group per provider with models, de-duplicated and sorted; label is the bare model id. */
+export function modelGroups(payload: { providers?: { slug: string; name: string; models?: string[] }[] }): ModelGroup[] {
+  return (payload.providers ?? [])
+    .filter(p => (p.models ?? []).length > 0)
+    .map(p => ({
+      slug: p.slug,
+      name: p.name,
+      models: [...new Set(p.models ?? [])].sort((a, b) => a.localeCompare(b)).map(model => ({
+        value: `${p.slug}|${model}`,
+        label: model,
+        model,
+      })),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
 /** Reasoning levels offered in the chat picker; "none" turns reasoning off. */
 export const REASONING_CHOICES: { value: string; label: string }[] = [
   { value: "none", label: "Off" },

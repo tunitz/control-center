@@ -23,7 +23,7 @@ function App() {
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
   const unit = /^#\/unit\/(\d+)/.exec(hash), settings = hash.startsWith("#/settings"), chat = hash.startsWith("#/chat");
   return (
-    <div className="app">
+    <div className={`app${chat ? " chat-route" : ""}`}>
       <header className="top">
         <div className="brand"><div className="logo" />Control Center</div>
         <nav className="tabs"><a href="#/" className={!settings && !chat ? "on" : ""}>Dashboard</a><a href="#/chat" className={chat ? "on" : ""}>Chat</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
