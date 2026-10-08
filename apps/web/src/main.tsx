@@ -4,6 +4,7 @@ import "uplot/dist/uPlot.min.css";
 import "./styles.css";
 import { api } from "./api";
 import { subscribeHash } from "./route";
+import { clearCache } from "./hooks";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import UnitDetail from "./pages/UnitDetail";
@@ -27,7 +28,7 @@ function App() {
         <div className="brand"><div className="logo" />Control Center</div>
         <nav className="tabs"><a href="#/" className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
         <div className="spacer" />
-        <button className="btn" onClick={async () => { await api("/auth/logout", { method: "POST" }); setAuthed(false); }}>Sign out</button>
+        <button className="btn" onClick={async () => { await api("/auth/logout", { method: "POST" }); clearCache(); setAuthed(false); }}>Sign out</button>
       </header>
       <main>{unit ? <UnitDetail id={Number(unit[1])} /> : settings ? <Settings /> : <Dashboard />}</main>
       <nav className="tabbar"><a href="#/" className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>

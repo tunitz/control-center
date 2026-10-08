@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { api, fmt, type Unit, type Metrics } from "../api";
-import { useLive } from "../hooks";
+import { useLive, cached, remember } from "../hooks";
 import { Gauge } from "../components/Gauge";
 import { Sparkline } from "../components/Sparkline";
 import AddUnit from "../components/AddUnit";
 
 type Cost = { month: string; rate: number; total_php: number; total_kwh: number };
 function UnitCard({ u }: { u: Unit }) {
-  const [spark, setSpark] = useState<(number | null)[]>([]);
-  useEffect(() => { let on = true; const f = () => api<Metrics>(`/units/${u.id}/metrics?range=1h`).then(m => on && setSpark(m.points.filter((_, i) => i % 4 === 0).map(p => p.cpu_pct))).catch(() => {}); f(); const t = setInterval(f, 30000); return () => { on = false; clearInterval(t); }; }, [u.id]);
+  const [spark, setSpark] = useState<(number | null)[]>(() => cached<(number | null)[]>(`spark:${u.id}`) ?? []);
+  useEffect(() => { let on = true; const f = () => api<Metrics>(`/units/${u.id}/metrics?range=1h`).then(m => { if (!on) return; const v = m.points.filter((_, i) => i % 4 === 0).map(p => p.cpu_pct); remember(`spark:${u.id}`, v); setSpark(v); }).catch(() => {}); f(); const t = setInterval(f, 30000); return () => { on = false; clearInterval(t); }; }, [u.id]);
   const l = u.latest, w = (l?.cpu_w ?? 0) + (l?.gpu_w ?? 0), hasW = l?.cpu_w != null || l?.gpu_w != null;
   return (
     <a className="card" href={`#/unit/${u.id}`} aria-label={`Open ${u.name}`}>
