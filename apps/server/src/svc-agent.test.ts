@@ -1,5 +1,5 @@
 import { test, expect, beforeEach } from "bun:test";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, utimesSync, mkdirSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, utimesSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -413,4 +413,96 @@ test("svc-logs refuses a non-allowlisted unit (exit 3, denied) and never calls t
   expect(r.code).toBe(3);
   expect(JSON.parse(r.out)).toMatchObject({ ok: false, code: "denied" });
   expect(callLog()).toBe("");
+});
+
+// The helper runs as root and writes the result file; the gate (ccagent) must be able to read and delete it,
+// so the result must be chowned to the state dir's owner before it is renamed into place.
+test("helper chowns the result to the state dir's uid/gid, mode 0600, before the rename", () => {
+  const id = "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1";
+  writeFileSync(req, JSON.stringify({ ts: Math.floor(Date.now() / 1000), id, verb: "bogus" }) + "\n");
+  const probe = `
+import importlib.util, json, os, sys
+events = []
+real_replace = os.replace
+os.chown = lambda p, u, g: events.append(["chown", p, u, g])
+def rep(a, b):
+    events.append(["replace", a, b]); return real_replace(a, b)
+os.replace = rep
+import importlib.machinery
+loader = importlib.machinery.SourceFileLoader("svc", sys.argv[1])
+spec = importlib.util.spec_from_loader("svc", loader)
+m = importlib.util.module_from_spec(spec); loader.exec_module(m)
+m.main()
+st = os.stat(os.environ["CCAGENT_DIR"])
+print(json.dumps({"events": events, "uid": st.st_uid, "gid": st.st_gid}))
+`;
+  const p = Bun.spawnSync(["python3", "-c", probe, HELPER], { env: helperEnv() });
+  expect(p.exitCode).toBe(0);
+  const { events, uid, gid } = JSON.parse(p.stdout.toString());
+  const tmp = join(dir, `svc.result.${id}.tmp`);
+  const final = join(dir, `svc.result.${id}`);
+  const chown = events.findIndex((e: any[]) => e[0] === "chown");
+  const replace = events.findIndex((e: any[]) => e[0] === "replace");
+  expect(chown).toBeGreaterThanOrEqual(0);
+  expect(events[chown]).toEqual(["chown", tmp, uid, gid]);
+  expect(events[replace]).toEqual(["replace", tmp, final]);
+  expect(chown).toBeLessThan(replace);
+  expect(result(id)).toMatchObject({ ok: false, code: "denied" });
+  expect(statSync(final).mode & 0o777).toBe(0o600);
+});
+
+// ---------- log text: ANSI stripping and keyword level upgrade (systemd + lxc journal lines) ----------
+
+const journalOf = (rows: Record<string, string>[]) => rows.map((r, i) => JSON.stringify({ __REALTIME_TIMESTAMP: String((1700000000 + i) * 1000000), ...r })).join("\n") + "\n";
+
+test("svc-logs strips ANSI from MESSAGE for systemd and lxc before truncation", async () => {
+  const text = journalOf([
+    { PRIORITY: "6", MESSAGE: "\u001b[34mdebug\u001b[39m loading module" },
+    { PRIORITY: "6", MESSAGE: "\u001b[31mERROR\u001b[0m boom" },
+    { PRIORITY: "6", MESSAGE: "a".repeat(1995) + "\u001b[31m\u001b[0m" + "b".repeat(20) },
+  ]);
+  fakeCmd("journalctl", `cat ${fixture("j-ansi", text)}`);
+  fakeCmd("pct", `case "$1" in exec) cat ${fixture("p-ansi", text)};; esac`);
+  writeFileSync(allow, JSON.stringify([{ kind: "systemd", name: "nginx.service" }, { kind: "lxc", name: "101" }]));
+  const sys = JSON.parse((await viaHelper("svc-logs systemd nginx.service 10")).out).data.lines as { msg: string; level: string }[];
+  const lxc = JSON.parse((await viaHelper("svc-logs lxc 101 10")).out).data.lines as { msg: string; level: string }[];
+  // newest first: [0] = long line, [1] = ERROR boom, [2] = debug loading module
+  for (const lines of [sys, lxc]) {
+    expect(lines.every(l => !l.msg.includes("\u001b"))).toBe(true);
+    expect(lines[0].msg).toBe("a".repeat(1995) + "bbbbb"); // 1995 a + 20 b after strip, cut to 2000
+    expect(lines[0].msg.length).toBe(2000);
+    expect(lines[1]).toMatchObject({ msg: "ERROR boom", level: "error" });
+    expect(lines[2]).toMatchObject({ msg: "debug loading module", level: "debug" });
+  }
+});
+
+test("svc-logs upgrades info/missing PRIORITY by keyword in the cleaned msg (lxc and systemd)", async () => {
+  const text = journalOf([
+    { MESSAGE: "plain no level" },                                  // missing PRIORITY, no keyword -> info
+    { PRIORITY: "6", MESSAGE: "\u001b[31mFatal\u001b[0m: disk gone" }, // info -> error (case-insensitive)
+    { PRIORITY: "5", MESSAGE: "Traceback (most recent call last)" },  // notice -> error
+    { PRIORITY: "6", MESSAGE: "Exception in handler" },               // -> error
+    { PRIORITY: "6", MESSAGE: "PANIC now" },                          // -> error
+    { PRIORITY: "6", MESSAGE: "WARNING: low memory" },                // -> warn
+    { PRIORITY: "6", MESSAGE: "warn retrying" },                      // -> warn
+    { PRIORITY: "6", MESSAGE: "[debug] cache miss" },                 // -> debug
+    { MESSAGE: "terror and debugger are not keywords" },              // word match only -> info
+    { PRIORITY: "6", MESSAGE: "error text at info priority" },        // info -> error
+    { PRIORITY: "4", MESSAGE: "error-ish but PRIORITY 4 is warn" },   // 0-4 authoritative -> warn
+    { PRIORITY: "3", MESSAGE: "debug only but PRIORITY 3 is error" }, // authoritative -> error
+    { PRIORITY: "2", MESSAGE: "warning but PRIORITY 2 is error" },    // authoritative -> error
+    { PRIORITY: "7", MESSAGE: "error mention at debug priority" },    // 7 is not info/missing -> keep debug
+  ]);
+  fakeCmd("journalctl", `cat ${fixture("j-up", text)}`);
+  fakeCmd("pct", `case "$1" in exec) cat ${fixture("p-up", text)};; esac`);
+  writeFileSync(allow, JSON.stringify([{ kind: "systemd", name: "nginx.service" }, { kind: "lxc", name: "101" }]));
+  for (const cmd of ["svc-logs systemd nginx.service 50", "svc-logs lxc 101 50"]) {
+    const r = await viaHelper(cmd);
+    expect(r.code).toBe(0);
+    const lines = (JSON.parse(r.out).data.lines as { msg: string; level: string }[]).reverse(); // back to file order
+    expect(lines.map(l => l.level)).toEqual([
+      "info", "error", "error", "error", "error", "warn", "warn", "debug", "info",
+      "error", "warn", "error", "error", "debug",
+    ]);
+  }
 });

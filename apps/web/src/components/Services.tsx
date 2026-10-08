@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type ServiceItem, type ServiceLogLine, type ServiceRef } from "../api";
-import { KIND_LABEL, canStart, canStop, filterItems, groupByKind, relativeTime, stateTone } from "../services";
+import { AGENT_HINT, KIND_LABEL, canStart, canStop, filterItems, groupByKind, hintFor, isAgentMissing, relativeTime, stateTone } from "../services";
 
-const AGENT_HINT = "Nothing found. Reinstall the agent on this unit to enable services.";
-const isAgentMissing = (msg: string) => /agent/i.test(msg);
 const keyOf = (r: ServiceRef) => JSON.stringify([r.kind, r.name]);
 const basePath = (unitId: number, r: ServiceRef) => `/units/${unitId}/services/${r.kind}/${encodeURIComponent(r.name)}`;
 const ACTION_LABEL = { start: "Starting", stop: "Stopping", restart: "Restarting" } as const;
@@ -25,6 +23,7 @@ export default function Services({ unitId }: { unitId: number }) {
   useEffect(() => { setLoaded(false); load(); }, [load]);
 
   const groups = groupByKind(items);
+  const listHint = hintFor({ listErr: err, pickerOpen: picking, discoverCount: 0, pickerErr: "" });
   return (
     <section className="card svc" aria-labelledby="svc-h" style={{ marginTop: 14 }}>
       <div className="svc-top">
@@ -33,7 +32,8 @@ export default function Services({ unitId }: { unitId: number }) {
         <button className="btn sm" aria-expanded={picking} onClick={() => setPicking(!picking)}>Manage</button>
       </div>
       {picking && <Picker unitId={unitId} onClose={() => setPicking(false)} onSaved={() => { setPicking(false); load(); }} />}
-      {err && (isAgentMissing(err) ? <div className="muted" role="status">{AGENT_HINT}</div> : <div className="err" role="alert">{err}</div>)}
+      {listHint === "list" && <div className="muted" role="status">{AGENT_HINT}</div>}
+      {err && !isAgentMissing(err) && <div className="err" role="alert">{err}</div>}
       {loaded && !err && items.length === 0 && <div className="muted">No services allowed. Use Manage to choose.</div>}
       {groups.map(g => (
         <div key={g.kind}>
@@ -149,6 +149,7 @@ function Picker({ unitId, onClose, onSaved }: { unitId: number; onClose: () => v
   const foundKeys = new Set(found.map(keyOf));
   const options: ServiceItem[] = [...found, ...allowed.filter(a => !foundKeys.has(keyOf(a))).map(a => ({ ...a, state: "" }))];
   const groups = groupByKind(filterItems(options, q));
+  const hint = hintFor({ listErr: "", pickerOpen: true, discoverCount: found.length, pickerErr: err });
   const toggle = (r: ServiceRef) => setSel(prev => {
     const next = new Set(prev);
     const k = keyOf(r);
@@ -164,9 +165,8 @@ function Picker({ unitId, onClose, onSaved }: { unitId: number; onClose: () => v
 
   return (
     <div className="svc-picker">
-      {options.length === 0 ? (
-        <div className="muted" role="status">{AGENT_HINT}</div>
-      ) : (
+      {hint === "picker" && <div className="muted" role="status">{AGENT_HINT}</div>}
+      {options.length > 0 && (
         <>
           <input aria-label="Filter services" placeholder="Filter" value={q} onChange={e => setQ(e.target.value)} autoCapitalize="none" />
           {groups.map(g => (
@@ -183,7 +183,7 @@ function Picker({ unitId, onClose, onSaved }: { unitId: number; onClose: () => v
           ))}
         </>
       )}
-      {err && (isAgentMissing(err) ? <div className="muted" role="status">{AGENT_HINT}</div> : <div className="err" role="alert">{err}</div>)}
+      {err && !isAgentMissing(err) && <div className="err" role="alert">{err}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button className="btn pri sm" disabled={busy || options.length === 0} onClick={save}>Save</button>
         <button type="button" className="btn sm" onClick={onClose}>Cancel</button>

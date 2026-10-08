@@ -1,6 +1,18 @@
 import type { ServiceKind, ServiceItem } from "./api";
 export type { ServiceItem };
 
+export const AGENT_HINT = "Nothing found. Reinstall the agent on this unit to enable services.";
+export const isAgentMissing = (msg: string) => /agent/i.test(msg);
+
+/**
+ * Where the agent-reinstall hint is shown, if anywhere. At most one place at a time:
+ * while the Manage picker is open the picker owns the hint (empty discover, or an agent error); otherwise the list does.
+ */
+export function hintFor(o: { listErr: string; pickerOpen: boolean; discoverCount: number; pickerErr: string }): "list" | "picker" | null {
+  if (o.pickerOpen) return o.discoverCount === 0 || isAgentMissing(o.pickerErr) ? "picker" : null;
+  return isAgentMissing(o.listErr) ? "list" : null;
+}
+
 export const KIND_ORDER: ServiceKind[] = ["systemd", "docker", "lxc"];
 export const KIND_LABEL: Record<ServiceKind, string> = { systemd: "systemd", docker: "Docker", lxc: "LXC" };
 

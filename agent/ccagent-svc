@@ -72,18 +72,32 @@ def level(priority):
     except Exception: return 'info'
     return 'error' if p<=3 else 'warn' if p==4 else 'info' if p<=6 else 'debug'
 def truncate(s): return s[:2000]
+ANSI=re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+def strip_ansi(s): return ANSI.sub('',s)
+# Apps often print their own level while journald records PRIORITY 5/6 (or none): a keyword in the text upgrades it.
+# PRIORITY 0-4 is authoritative; 7 (debug) is kept as-is.
+def journal_level(priority, msg):
+    try: p=int(priority)
+    except Exception: p=None
+    if p is not None and p<=4: return level(p)
+    if p is not None and p>=7: return level(p)
+    low=msg.lower()
+    if re.search(r'\b(error|fatal|panic|exception|traceback)\b',low): return 'error'
+    if re.search(r'\b(warn|warning)\b',low): return 'warn'
+    if re.search(r'\bdebug\b',low): return 'debug'
+    return 'info'
 def journal_lines(out):
     rows=[]
     for line in out.splitlines():
         try:
             x=json.loads(line); msg=x.get('MESSAGE','')
             if isinstance(msg,list): msg=bytes(max(0,min(255,int(v))) for v in msg).decode('utf-8','replace')
-            rows.append({'ts':int(x.get('__REALTIME_TIMESTAMP',0))//1000,'level':level(x.get('PRIORITY')),'msg':truncate(str(msg))})
+            msg=strip_ansi(str(msg))
+            rows.append({'ts':int(x.get('__REALTIME_TIMESTAMP',0))//1000,'level':journal_level(x.get('PRIORITY'),msg),'msg':truncate(msg)})
         except Exception: pass
     return list(reversed(rows))
 def docker_lines(out):
     rows=[]
-    ansi=re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
     stamp=re.compile(r'^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d))\s?(.*)$')
     for line in out.splitlines():
         m=stamp.match(line); ts=0; msg=line
@@ -92,7 +106,7 @@ def docker_lines(out):
                 from datetime import datetime
                 ts=int(datetime.fromisoformat(m.group(1).replace('Z','+00:00')).timestamp()*1000); msg=m.group(2)
             except Exception: pass
-        msg=ansi.sub('',msg); low=msg.lower()
+        msg=strip_ansi(msg); low=msg.lower()
         lev='error' if any(x in low for x in ('error','fatal','panic')) else 'warn' if 'warn' in low else 'info'
         rows.append({'ts':ts,'level':lev,'msg':truncate(msg)})
     return list(reversed(rows))
@@ -156,5 +170,7 @@ def main():
     path=DIR+'/svc.result.'+ident
     tmp=path+'.tmp';
     with open(tmp,'w') as f: json.dump(result,f); f.write('\n')
+    # Runs as root; the gate (owner of DIR) must read and delete the result, so hand it to DIR's owner.
+    st=os.stat(DIR); os.chown(tmp,st.st_uid,st.st_gid)
     os.chmod(tmp,0o600); os.replace(tmp,path)
 if __name__=='__main__': main()

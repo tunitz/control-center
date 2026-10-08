@@ -1,5 +1,7 @@
 import { test, expect } from "bun:test";
-import { relativeTime, stateTone, canStart, canStop, groupByKind, filterItems } from "./services";
+import { relativeTime, stateTone, canStart, canStop, groupByKind, filterItems, hintFor, isAgentMissing, AGENT_HINT } from "./services";
+
+const AGENT_MISSING = "agent not reachable";
 
 const NOW = 1_700_000_000_000;
 
@@ -65,4 +67,28 @@ test("filterItems: case-insensitive substring on name, empty query keeps all", (
   expect(filterItems(items, "  ")).toEqual(items);
   expect(filterItems(items, "PLE").map(i => i.name)).toEqual(["Plex"]);
   expect(filterItems(items, "zzz")).toEqual([]);
+});
+
+test("hintFor: list-level agent hint shows only when the picker is closed", () => {
+  expect(hintFor({ listErr: AGENT_MISSING, pickerOpen: false, discoverCount: 0, pickerErr: "" })).toBe("list");
+  expect(hintFor({ listErr: AGENT_MISSING, pickerOpen: true, discoverCount: 0, pickerErr: "" })).toBe("picker");
+});
+
+test("hintFor: picker shows the hint once for empty discover or agent-missing error, never both", () => {
+  expect(hintFor({ listErr: "", pickerOpen: true, discoverCount: 0, pickerErr: "" })).toBe("picker");
+  expect(hintFor({ listErr: "", pickerOpen: true, discoverCount: 3, pickerErr: AGENT_MISSING })).toBe("picker");
+  expect(hintFor({ listErr: "", pickerOpen: true, discoverCount: 0, pickerErr: AGENT_MISSING })).toBe("picker");
+  expect(hintFor({ listErr: "", pickerOpen: true, discoverCount: 3, pickerErr: "" })).toBeNull();
+});
+
+test("hintFor: non-agent errors never produce the hint", () => {
+  expect(hintFor({ listErr: "timeout", pickerOpen: false, discoverCount: 0, pickerErr: "" })).toBeNull();
+  expect(hintFor({ listErr: "", pickerOpen: true, discoverCount: 3, pickerErr: "timeout" })).toBeNull();
+  expect(hintFor({ listErr: "", pickerOpen: false, discoverCount: 0, pickerErr: "" })).toBeNull();
+});
+
+test("isAgentMissing matches agent-related error text", () => {
+  expect(isAgentMissing("agent not installed")).toBe(true);
+  expect(isAgentMissing("Agent offline")).toBe(true);
+  expect(isAgentMissing("timeout")).toBe(false);
 });
