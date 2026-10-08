@@ -21,7 +21,7 @@ export class SshPool {
     this.conns.set(id, entry);
     return entry;
   }
-  async exec(id: number, t: Target, cmd: string, timeoutMs = 15000): Promise<string> {
+  async exec(id: number, t: Target, cmd: string, timeoutMs = 15000, stdin?: string): Promise<string> {
     let e = this.conns.get(id);
     if (!e || e.dead) e = this.connect(id, t);
     await e.ready;
@@ -32,6 +32,7 @@ export class SshPool {
         let out = "", errOut = "";
         stream.on("data", (d: Buffer) => (out += d.toString()));
         stream.stderr.on("data", (d: Buffer) => (errOut += d.toString()));
+        if (stdin !== undefined) { stream.end(stdin); }
         stream.on("close", (code: number) => { clearTimeout(timer); code === 0 || code == null ? res(out) : rej(new Error(`exit ${code}: ${errOut.trim() || out.trim()}`)); });
       });
     });

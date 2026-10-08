@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { installScript } from "./install";
+import { installScript, agentFile } from "./install";
 
 const pub = "ssh-ed25519 AAAATESTKEY cc-test";
 test("installer is self-contained: no network callback, embeds agent files and key", () => {
@@ -31,7 +31,8 @@ test("paste command is ONE short line that decodes back to the full installer", 
   const s = installScript({ pubkey: pub, interval: 5 });
   const p = pasteCommand(s);
   expect(p.trim().split("\n").length).toBe(1);          // one line, not a paragraph
-  expect(p.length).toBeLessThan(5600);                    // was ~12300 as a multi-line paragraph
+  // curl is the default install method; this paste is the offline fallback, so its bound is loose (was 5600 before the installer grew to ~9.8k).
+  expect(p.length).toBeLessThan(10500);
   const m = /^echo '([A-Za-z0-9+/=]+)' \| base64 -d \| gunzip \| sudo bash\n?$/.exec(p);
   expect(m).not.toBeNull();
   const back = gunzipSync(Buffer.from(m![1], "base64")).toString();
@@ -78,4 +79,27 @@ test("power control needs no sudo: root path unit + helper, old sudoers rule rem
   expect(s).toContain("ExecStart=/opt/ccagent/ccagent-power");
   expect(s).not.toContain("visudo");
   expect(s).toContain("rm -f /etc/sudoers.d/ccagent"); // migrate older installs
+});
+
+test("service control: helper, path unit, service unit and allowlist dir are installed (no sudo)", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  expect(s).toContain("<<'EOF_ccagent_svc'");
+  expect(s).toContain("/opt/ccagent/ccagent-svc");
+  expect(s).toContain("/etc/systemd/system/ccagent-svc.path");
+  expect(s).toContain("PathExists=/var/lib/ccagent/svc.request");
+  expect(s).toContain("/etc/systemd/system/ccagent-svc.service");
+  expect(s).toContain("ExecStart=/opt/ccagent/ccagent-svc");
+  expect(s).toContain("/etc/ccagent");
+  expect(s).toContain("systemctl enable ccagent.service ccagent-power.path ccagent-svc.path");
+  expect(s).toContain("systemctl restart ccagent-svc.path");
+  expect(s).not.toMatch(/sudo\s+-?\w/);
+});
+test("service control: the embedded helper and gate are the agent files, and the installer bumps the agent version", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  expect(s).toContain("ccagent-svc");
+  expect(s).toMatch(/AGENT_VERSION=\d+/);
+});
+test("service control: uninstall removes the helper, units and allowlist", () => {
+  const u = agentFile("uninstall.sh");
+  for (const f of ["ccagent-svc.path", "ccagent-svc.service", "/etc/ccagent"]) expect(u).toContain(f);
 });

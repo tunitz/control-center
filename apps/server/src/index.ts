@@ -12,6 +12,7 @@ import { COMMANDS, sendWol } from "./commands";
 import { installScript, pasteCommand, curlCommand } from "./install";
 import { deleteUnit, updateUnit } from "./units";
 import { unitView as unitViewOf } from "./unitview";
+import { handleServiceRoute } from "./services";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
@@ -83,6 +84,8 @@ const server = Bun.serve({
 async function api(req: Request, url: URL, path: string, ip: string): Promise<Response> {
   const m = req.method;
   const units = () => db.query("SELECT * FROM units ORDER BY id").all() as any[];
+  const svc = await handleServiceRoute({ db, pool, master, now: now(), pollInterval: pollInterval(), authed: true }, req, url, path, ip);
+  if (svc) return svc;
   if (path === "/api/auth/logout" && m === "POST") { const id = cookieOf(req); if (id) destroySession(db, id); return json({ ok: true }, 200, { "set-cookie": "cc_session=; Path=/; Max-Age=0" }); }
   if (path === "/api/auth/password" && m === "POST") { const b = await req.json(); if (!(await checkPassword(db, String(b.current ?? "")))) return json({ error: "current password wrong" }, 400); await changePassword(db, String(b.next ?? "")); audit(db, "admin", "password.changed", null, "", ip); return json({ ok: true }); }
   if (path === "/api/me") return json({ ok: true });

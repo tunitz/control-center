@@ -3,6 +3,7 @@ import { api, fmt, gb, RANGES, type Metrics, type Unit } from "../api";
 import { cached, useLive } from "../hooks";
 import { Chart, type Series } from "../components/Chart";
 import EditUnit from "../components/EditUnit";
+import Services from "../components/Services";
 
 const S = {
   cpu: [{ key: "cpu_pct", label: "CPU %", color: "#38e1ff" }] as Series[],
@@ -71,6 +72,7 @@ export default function UnitDetail({ id }: { id: number }) {
         <Block title="Memory (MB)" m={m} keys={["ram_used_mb", "ram_cached_mb", "swap_used_mb"]} series={S.mem} unit="" />
         <Block title="Power (W)" m={m} keys={["cpu_w", "gpu_w"]} series={S.pow} unit=" W" />
       </>}</div>
+      {u.online && <Services unitId={id} />}
       {confirm && <div className="modal" role="alertdialog" aria-modal="true" onClick={() => setConfirm(null)}><div className="card" onClick={e => e.stopPropagation()}>
         {confirm === "remove" ? <>
           <h3 style={{ marginTop: 0 }}>Remove {u.name}?</h3><p className="muted">Deletes the unit and all of its history and energy data from the Control Center. This cannot be undone. The agent stays on the unit: run <code>sudo /opt/ccagent/uninstall.sh</code> there to remove it.</p>

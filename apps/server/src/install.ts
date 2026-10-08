@@ -40,22 +40,25 @@ INTERVAL="\${2:-${opts.interval}}"
 [ -n "$PUBKEY" ] || { echo "usage: sudo bash $0 '<ssh-ed25519 public key from the Control Center>' [interval_s]"; exit 1; }`;
   return `#!/usr/bin/env bash
 # Control Center agent installer (self-contained, no network access to the Control Center needed). Run as root.
+AGENT_VERSION=2
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run as root (sudo)"; exit 1; }
 INTERVAL=${opts.interval}
 ${keyLine}
 id ccagent >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/ccagent --shell /bin/bash ccagent
-mkdir -p /opt/ccagent /var/lib/ccagent/.ssh
+mkdir -p /opt/ccagent /var/lib/ccagent/.ssh /etc/ccagent
 cat > /opt/ccagent/ccagent.sh <<'EOF_ccagent_sh'
 ${slim(agentFile("ccagent.sh"))}EOF_ccagent_sh
 cat > /opt/ccagent/ccagent-gate <<'EOF_ccagent_gate'
 ${slim(agentFile("ccagent-gate"))}EOF_ccagent_gate
 cat > /opt/ccagent/ccagent-power <<'EOF_ccagent_power'
 ${slim(agentFile("ccagent-power"))}EOF_ccagent_power
+cat > /opt/ccagent/ccagent-svc <<'EOF_ccagent_svc'
+${slim(agentFile("ccagent-svc"))}EOF_ccagent_svc
 cat > /opt/ccagent/uninstall.sh <<'EOF_uninstall_sh'
 ${slim(agentFile("uninstall.sh"))}EOF_uninstall_sh
-chmod 755 /opt/ccagent/ccagent.sh /opt/ccagent/ccagent-gate /opt/ccagent/ccagent-power /opt/ccagent/uninstall.sh
-printf 'INTERVAL=%s\\nDIR=/var/lib/ccagent\\n' "$INTERVAL" > /etc/ccagent.conf
+chmod 755 /opt/ccagent/ccagent.sh /opt/ccagent/ccagent-gate /opt/ccagent/ccagent-power /opt/ccagent/ccagent-svc /opt/ccagent/uninstall.sh
+printf 'INTERVAL=%s\\nDIR=/var/lib/ccagent\\nSVC_UNIT=/etc/systemd/system/ccagent-svc.path\\n' "$INTERVAL" > /etc/ccagent.conf
 printf '%s\\n' "command=\\"/opt/ccagent/ccagent-gate\\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding${fromOpt} $PUBKEY" > /var/lib/ccagent/.ssh/authorized_keys
 chmod 700 /var/lib/ccagent/.ssh; chmod 600 /var/lib/ccagent/.ssh/authorized_keys
 chown -R ccagent:ccagent /var/lib/ccagent
@@ -77,7 +80,21 @@ Description=Control Center power action
 Type=oneshot
 ExecStart=/opt/ccagent/ccagent-power
 UNIT
-# RAPL counters are root-only on newer kernels: make readable at boot
+cat > /etc/systemd/system/ccagent-svc.path <<UNIT
+[Unit]
+Description=Control Center service requests
+[Path]
+PathExists=/var/lib/ccagent/svc.request
+[Install]
+WantedBy=multi-user.target
+UNIT
+cat > /etc/systemd/system/ccagent-svc.service <<UNIT
+[Unit]
+Description=Control Center service action
+[Service]
+Type=oneshot
+ExecStart=/opt/ccagent/ccagent-svc
+UNIT
 if command -v systemd-tmpfiles >/dev/null; then
   mkdir -p /etc/tmpfiles.d
   printf 'z /sys/class/powercap/*/energy_uj 0444 - - -\\n' > /etc/tmpfiles.d/ccagent-rapl.conf
@@ -99,8 +116,9 @@ ReadWritePaths=/var/lib/ccagent
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload; systemctl enable ccagent.service ccagent-power.path
+systemctl daemon-reload; systemctl enable ccagent.service ccagent-power.path ccagent-svc.path
 systemctl restart ccagent-power.path
+systemctl restart ccagent-svc.path
 # restart (not just start): a re-run must replace a running agent with the freshly installed code
 systemctl restart ccagent.service
 sleep 2; systemctl is-active ccagent.service

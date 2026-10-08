@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Root-owned service-control request executor. Commands are argv-only, never shell strings."""
+import json, os, re, subprocess, time, tempfile
+
+DIR = os.environ.get('CCAGENT_DIR', '/var/lib/ccagent')
+REQ = os.environ.get('CCAGENT_REQ', DIR + '/svc.request')
+ALLOW = os.environ.get('CCAGENT_SERVICES', '/etc/ccagent/services.json')
+BIN = {
+    'systemctl': os.environ.get('CCAGENT_SYSTEMCTL', '/usr/bin/systemctl'),
+    'docker': os.environ.get('CCAGENT_DOCKER', '/usr/bin/docker'),
+    'pct': os.environ.get('CCAGENT_PCT', '/usr/sbin/pct'),
+    'journalctl': os.environ.get('CCAGENT_JOURNALCTL', '/usr/bin/journalctl'),
+}
+NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9@._:-]{0,127}$')
+ID = re.compile(r'^[a-f0-9]{32}$')
+
+def valid(kind, name):
+    return kind in ('systemd', 'docker', 'lxc') and bool((re.fullmatch(r'[0-9]{1,9}', name) if kind == 'lxc' else NAME.fullmatch(name)))
+
+def run(argv, timeout=30):
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+        if p.returncode: raise RuntimeError((p.stderr or p.stdout or 'command failed').strip()[:1000])
+        return p.stdout
+    except FileNotFoundError:
+        return None
+
+def load_allow():
+    try:
+        x = json.load(open(ALLOW))
+        return {(i['kind'], i['name']) for i in x if isinstance(i, dict) and valid(i.get('kind'), i.get('name'))}
+    except Exception: return set()
+
+def systemd_discover():
+    out = run([BIN['systemctl'], 'list-units', '--type=service', '--all', '--plain', '--no-legend'])
+    rows=[]
+    for line in (out or '').splitlines():
+        p=line.split(None,4)
+        if len(p)>=4 and valid('systemd',p[0]): rows.append({'kind':'systemd','name':p[0],'state':p[2],'detail':p[4] if len(p)>4 else p[3]})
+        if len(rows)>=500: break
+    return rows
+
+def docker_discover():
+    out=run([BIN['docker'],'ps','-a','--format','{{json .}}'])
+    rows=[]
+    for line in (out or '').splitlines():
+        try:
+            x=json.loads(line); name=x.get('Names') or x.get('Name'); state=x.get('State','unknown')
+            if name and valid('docker',name): rows.append({'kind':'docker','name':name,'state':state,'detail':x.get('Status','')})
+        except Exception: pass
+        if len(rows)>=500: break
+    return rows
+
+def lxc_discover():
+    out=run([BIN['pct'],'list']); rows=[]
+    for line in (out or '').splitlines()[1:]:
+        p=line.split(None,2)
+        if len(p)>=3 and valid('lxc',p[0]): rows.append({'kind':'lxc','name':p[0],'state':p[1],'detail':p[2]})
+        if len(rows)>=500: break
+    return rows
+
+def discover(): return systemd_discover()+docker_discover()+lxc_discover()
+def state_items():
+    allowed=load_allow(); found={(x['kind'],x['name']):x for x in discover()}; rows=[]
+    for kind,name in sorted(allowed):
+        x=found.get((kind,name),{'kind':kind,'name':name,'state':'missing','detail':''})
+        rows.append(x)
+    return rows
+
+def level(priority):
+    try: p=int(priority)
+    except Exception: return 'info'
+    return 'error' if p<=3 else 'warn' if p==4 else 'info' if p<=6 else 'debug'
+def truncate(s): return s[:2000]
+def journal_lines(out):
+    rows=[]
+    for line in out.splitlines():
+        try:
+            x=json.loads(line); msg=x.get('MESSAGE','')
+            if isinstance(msg,list): msg=bytes(max(0,min(255,int(v))) for v in msg).decode('utf-8','replace')
+            rows.append({'ts':int(x.get('__REALTIME_TIMESTAMP',0))//1000,'level':level(x.get('PRIORITY')),'msg':truncate(str(msg))})
+        except Exception: pass
+    return list(reversed(rows))
+def docker_lines(out):
+    rows=[]
+    ansi=re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+    stamp=re.compile(r'^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d))\s?(.*)$')
+    for line in out.splitlines():
+        m=stamp.match(line); ts=0; msg=line
+        if m:
+            try:
+                from datetime import datetime
+                ts=int(datetime.fromisoformat(m.group(1).replace('Z','+00:00')).timestamp()*1000); msg=m.group(2)
+            except Exception: pass
+        msg=ansi.sub('',msg); low=msg.lower()
+        lev='error' if any(x in low for x in ('error','fatal','panic')) else 'warn' if 'warn' in low else 'info'
+        rows.append({'ts':ts,'level':lev,'msg':truncate(msg)})
+    return list(reversed(rows))
+
+def process(r, body):
+    verb=r.get('verb')
+    if verb == 'allow':
+        try: x=json.loads(body); items=x.get('items')
+        except Exception: raise ValueError('bad allow payload')
+        if not isinstance(items,list) or len(items)>200: raise ValueError('bad allow payload')
+        out=[]; seen=set()
+        for i in items:
+            if not isinstance(i,dict) or not valid(i.get('kind'),i.get('name')): raise ValueError('bad allow item')
+            if i['kind']=='systemd' and (i['name'].startswith('ccagent') or i['name'] in ('ssh','ssh.service','sshd','sshd.service')): raise ValueError('protected unit')
+            k=(i['kind'],i['name'])
+            if k not in seen: seen.add(k); out.append({'kind':k[0],'name':k[1]})
+        os.makedirs(os.path.dirname(ALLOW),exist_ok=True)
+        fd,tmp=tempfile.mkstemp(dir=os.path.dirname(ALLOW),prefix='.services.')
+        with os.fdopen(fd,'w') as f: json.dump(out,f); f.write('\n')
+        os.chmod(tmp,0o644); os.replace(tmp,ALLOW)
+        return {'ok':True,'data':{'items':out}}
+    if verb not in ('list','discover','act','logs'): raise PermissionError('denied')
+    if verb in ('list','discover'): return {'ok':True,'data':{'items':state_items() if verb=='list' else discover()}}
+    kind,name=r.get('kind'),r.get('name')
+    if not valid(kind,name): raise ValueError('bad request')
+    if (kind,name) not in load_allow(): raise PermissionError('not allowlisted')
+    if verb=='act':
+        action=r.get('action')
+        if action not in ('start','stop','restart'): raise ValueError('bad action')
+        if kind=='systemd' and (name.startswith('ccagent') or name in ('ssh','ssh.service','sshd','sshd.service') or name.startswith('sshd@')): raise PermissionError('protected unit')
+        # '--' ends option parsing so a name can never be read as a flag (names also may not start with '-').
+        argv=([BIN['systemctl'],action,'--',name] if kind=='systemd' else [BIN['docker'],action,'--',name] if kind=='docker' else [BIN['pct'],{'start':'start','stop':'shutdown','restart':'reboot'}[action],name])
+        out=run(argv)
+        if out is None: raise RuntimeError('required tool missing')
+        return {'ok':True,'data':{'output':out.strip()}}
+    try: n=max(1,min(500,int(r.get('n',200))))
+    except Exception: n=200
+    if kind=='systemd': out=run([BIN['journalctl'],'-u',name,'-n',str(n),'-o','json','--no-pager'])
+    elif kind=='docker': out=run([BIN['docker'],'logs','--timestamps','--tail',str(n),'--',name])
+    else: out=run([BIN['pct'],'exec',name,'--','journalctl','-n',str(n),'-o','json','--no-pager'])
+    if out is None: raise RuntimeError('required tool missing')
+    lines=journal_lines(out) if kind!='docker' else docker_lines(out)
+    return {'ok':True,'data':{'lines':lines[:n]}}
+
+def main():
+    try:
+        with open(REQ,'rb') as f: raw=f.read(70000)
+        os.unlink(REQ)
+    except FileNotFoundError: return
+    try:
+        rline,body=raw.decode('utf-8').split('\n',1); r=json.loads(rline)
+        ident=r.get('id','')
+        # ts is written by the gate. Drop requests older than 120 s, or more than 60 s in the future (clock skew allowance).
+        age=int(time.time())-int(r.get('ts',0))
+        if age>120 or age<-60: return
+        if not ID.fullmatch(ident): return
+        result=process(r,body)
+    except PermissionError as e: result={'ok':False,'code':'denied','error':str(e)}
+    except ValueError as e: result={'ok':False,'code':'bad_request','error':str(e)}
+    except Exception as e: result={'ok':False,'code':'failed','error':str(e)[:1000]}
+    path=DIR+'/svc.result.'+ident
+    tmp=path+'.tmp';
+    with open(tmp,'w') as f: json.dump(result,f); f.write('\n')
+    os.chmod(tmp,0o600); os.replace(tmp,path)
+if __name__=='__main__': main()
