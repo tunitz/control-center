@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, gb, RANGES, type Metrics, type Unit } from "../api";
 import { cached, useLive } from "../hooks";
 import { Chart, type Series } from "../components/Chart";
 import EditUnit from "../components/EditUnit";
 import Services from "../components/Services";
 import { navigate } from "../route";
+import { useDismiss } from "../lib/useDismiss";
 
 const S = {
   cpu: [{ key: "cpu_pct", label: "CPU %", color: "var(--s1)" }] as Series[],
@@ -34,6 +35,8 @@ export default function UnitDetail({ id }: { id: number }) {
   const [editing, setEditing] = useState(false);
   const { data: m } = useLive<Metrics>(`/units/${id}/metrics?range=${range}`, range === "1h" ? 10000 : 60000);
   const [menu, setMenu] = useState(false), [confirm, setConfirm] = useState<null | "shutdown" | "restart" | "remove">(null), [toast, setToast] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null), closeMenu = useCallback(() => setMenu(false), []);
+  useDismiss(menu, menuRef, closeMenu);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 3500); return () => clearTimeout(t); } }, [toast]);
   const remove = async () => {
     try { await api(`/units/${id}`, { method: "DELETE" }); navigate("#/"); } catch (e: any) { setToast(e.message); setConfirm(null); }
@@ -53,7 +56,7 @@ export default function UnitDetail({ id }: { id: number }) {
   return (
     <>
       <div className="uhead"><a href="#/" className="btn" aria-label="Back">←</a><span className={"dot" + (u.online ? " on" : "")} /><div><h3 style={{ fontSize: 22 }}>{u.name}</h3><div className="host">{u.host} · {u.online ? "online" : "offline"}</div></div><div className="spacer" />
-        <div className="menu"><button className="btn pri" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>Power ▾</button>
+        <div className="menu" ref={menuRef}><button className="btn pri" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>Power ▾</button>
           {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => { setEditing(true); setMenu(false); }}>Edit IP / MAC</button><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => { setConfirm("restart"); setMenu(false); }}>Restart</button><button role="menuitem" className="dng" onClick={() => { setConfirm("shutdown"); setMenu(false); }}>Shut down</button><button role="menuitem" className="dng" onClick={() => { setConfirm("remove"); setMenu(false); }}>Remove unit</button></div>}
         </div>
       </div>
