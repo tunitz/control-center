@@ -9,6 +9,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import UnitDetail from "./pages/UnitDetail";
 import Settings from "./pages/Settings";
+import { initTheme } from "./theme";
 
 function useHash() {
   const [h, setH] = useState(location.hash || "#/");
@@ -50,4 +51,5 @@ function App() {
     </div>
   );
 }
+initTheme();
 createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);

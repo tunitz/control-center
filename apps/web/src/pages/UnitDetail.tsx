@@ -6,13 +6,13 @@ import EditUnit from "../components/EditUnit";
 import Services from "../components/Services";
 
 const S = {
-  cpu: [{ key: "cpu_pct", label: "CPU %", color: "#38e1ff" }] as Series[],
-  clk: [{ key: "cpu_mhz", label: "CPU MHz", color: "#34d399" }] as Series[],
-  gpu: [{ key: "gpu_pct", label: "GPU %", color: "#a78bfa" }] as Series[],
-  gclk: [{ key: "gpu_mhz", label: "GPU MHz", color: "#f472b6" }] as Series[],
-  vram: [{ key: "vram_used_mb", label: "VRAM MB", color: "#fbbf24" }] as Series[],
-  mem: [{ key: "ram_used_mb", label: "Used MB", color: "#f472b6" }, { key: "ram_cached_mb", label: "Cached MB", color: "#38e1ff", fill: false }, { key: "swap_used_mb", label: "Swap MB", color: "#fbbf24", fill: false }] as Series[],
-  pow: [{ key: "cpu_w", label: "CPU W", color: "#38e1ff" }, { key: "gpu_w", label: "GPU W", color: "#a78bfa" }] as Series[],
+  cpu: [{ key: "cpu_pct", label: "CPU %", color: "var(--s1)" }] as Series[],
+  clk: [{ key: "cpu_mhz", label: "CPU MHz", color: "var(--s2)" }] as Series[],
+  gpu: [{ key: "gpu_pct", label: "GPU %", color: "var(--s3)" }] as Series[],
+  gclk: [{ key: "gpu_mhz", label: "GPU MHz", color: "var(--s4)" }] as Series[],
+  vram: [{ key: "vram_used_mb", label: "VRAM MB", color: "var(--s5)" }] as Series[],
+  mem: [{ key: "ram_used_mb", label: "Used MB", color: "var(--s4)" }, { key: "ram_cached_mb", label: "Cached MB", color: "var(--s1)", fill: false }, { key: "swap_used_mb", label: "Swap MB", color: "var(--s5)", fill: false }] as Series[],
+  pow: [{ key: "cpu_w", label: "CPU W", color: "var(--s1)" }, { key: "gpu_w", label: "GPU W", color: "var(--s3)" }] as Series[],
 };
 function Block({ title, m, keys, series, unit, max }: { title: string; m: Metrics; keys: string[]; series: Series[]; unit: string; max?: number }) {
   const has = keys.some(k => m.summary[k]?.avg != null);
@@ -53,7 +53,7 @@ export default function UnitDetail({ id }: { id: number }) {
     <>
       <div className="uhead"><a href="#/" className="btn" aria-label="Back">←</a><span className={"dot" + (u.online ? " on" : "")} /><div><h3 style={{ fontSize: 22 }}>{u.name}</h3><div className="host">{u.host} · {u.online ? "online" : "offline"}</div></div><div className="spacer" />
         <div className="menu"><button className="btn pri" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>Power ▾</button>
-          {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => { setEditing(true); setMenu(false); }}>Edit IP / MAC</button><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => { setConfirm("restart"); setMenu(false); }}>Restart</button><button role="menuitem" onClick={() => { setConfirm("shutdown"); setMenu(false); }}>Shut down</button><button role="menuitem" onClick={() => { setConfirm("remove"); setMenu(false); }} style={{ color: "#fecaca" }}>Remove unit</button></div>}
+          {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => { setEditing(true); setMenu(false); }}>Edit IP / MAC</button><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => { setConfirm("restart"); setMenu(false); }}>Restart</button><button role="menuitem" className="dng" onClick={() => { setConfirm("shutdown"); setMenu(false); }}>Shut down</button><button role="menuitem" className="dng" onClick={() => { setConfirm("remove"); setMenu(false); }}>Remove unit</button></div>}
         </div>
       </div>
       <div className="card specs" style={{ marginBottom: 14 }}>

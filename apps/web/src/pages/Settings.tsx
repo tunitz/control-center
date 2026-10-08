@@ -3,8 +3,17 @@ import { api, type Unit } from "../api";
 import { cached, remember, useLive } from "../hooks";
 import InstallPanel from "../components/InstallPanel";
 import EditUnit from "../components/EditUnit";
+import { getThemeMode, setThemeMode, type ThemeMode } from "../theme";
+
+const THEME_OPTIONS: { mode: ThemeMode; label: string }[] = [
+  { mode: "system", label: "System" },
+  { mode: "light", label: "Light" },
+  { mode: "dark", label: "Dark" },
+];
 
 export default function Settings() {
+  const [theme, setTheme] = useState<ThemeMode>(getThemeMode);
+  const pickTheme = (mode: ThemeMode) => { setThemeMode(mode); setTheme(mode); };
   const { data: rates, reload: rr } = useLive<{ month: string; php_per_kwh: number }[]>("/rates", 60000);
   const { data: units, reload: ru } = useLive<Unit[]>("/units", 20000);
   const { data: audit } = useLive<any[]>("/audit?limit=30", 15000);
@@ -17,6 +26,12 @@ export default function Settings() {
   return (
     <div className="grid" style={{ gap: 14 }}>
       {msg && <div className="toast" role="status" onAnimationEnd={() => setTimeout(() => setMsg(""), 3000)}>{msg}</div>}
+      <div className="card"><h3 style={{ marginTop: 0 }}>Appearance</h3>
+        <p className="muted">Follow the device setting, or pick light or dark for this browser.</p>
+        <div className="segmented" role="group" aria-label="Theme">
+          {THEME_OPTIONS.map(o => <button key={o.mode} type="button" aria-pressed={theme === o.mode} onClick={() => pickTheme(o.mode)}>{o.label}</button>)}
+        </div>
+      </div>
       <div className="card"><h3 style={{ marginTop: 0 }}>Electricity rate</h3>
         <p className="muted">Applies to the current month ({month}) only. Past months keep the rate they had.</p>
         <label htmlFor="rate">PHP per kWh</label><input id="rate" type="number" step="0.01" min="0" value={rate} onChange={e => setRate(e.target.value)} style={{ maxWidth: 200 }} />

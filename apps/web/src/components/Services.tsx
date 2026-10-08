@@ -67,9 +67,9 @@ function Row({ unitId, item, onChanged }: { unitId: number; item: ServiceItem; o
         <span className="chev" aria-hidden="true">{open ? "▾" : "▸"}</span>
       </button>
       <div className="svc-actions">
-        <button className="btn sm" disabled={!!busy || !canStart(item.state)} onClick={() => act("start")}>Start</button>
-        <button className="btn sm" disabled={!!busy || !canStop(item.state)} onClick={() => act("stop")}>Stop</button>
-        <button className="btn sm" disabled={!!busy} onClick={() => act("restart")}>Restart</button>
+        <button className="btn sm ok" disabled={!!busy || !canStart(item.state)} onClick={() => act("start")}>Start</button>
+        <button className="btn sm dng" disabled={!!busy || !canStop(item.state)} onClick={() => act("stop")}>Stop</button>
+        <button className="btn sm warn" disabled={!!busy} onClick={() => act("restart")}>Restart</button>
       </div>
       {rowErr && <div className="err" role="alert">{rowErr}</div>}
       {open && <Logs unitId={unitId} item={item} />}

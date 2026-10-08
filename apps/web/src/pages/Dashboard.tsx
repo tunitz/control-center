@@ -14,11 +14,11 @@ function UnitCard({ u }: { u: Unit }) {
     <a className="card" href={`#/unit/${u.id}`} aria-label={`Open ${u.name}`}>
       <div className="uhead"><span className={"dot" + (u.online ? " on" : "")} title={u.online ? "online" : "offline"} /><div><h3>{u.name}</h3><div className="host">{u.host}{u.online ? "" : u.last_error ? ` · ${u.last_error}` : " · offline"}</div></div></div>
       <div className="gauges">
-        <Gauge label="CPU" value={l?.cpu_pct ?? null} color="#38e1ff" sub={l?.cpu_mhz ? (l.cpu_mhz / 1000).toFixed(1) + " GHz" : undefined} />
-        <Gauge label="GPU" value={l?.gpu_pct ?? null} color="#a78bfa" />
-        <Gauge label="RAM" value={u.ram_pct} color="#f472b6" />
+        <Gauge label="CPU" value={l?.cpu_pct ?? null} color="var(--s1)" sub={l?.cpu_mhz ? (l.cpu_mhz / 1000).toFixed(1) + " GHz" : undefined} />
+        <Gauge label="GPU" value={l?.gpu_pct ?? null} color="var(--s2)" />
+        <Gauge label="RAM" value={u.ram_pct} color="var(--s3)" />
       </div>
-      <Sparkline values={spark} color="#38e1ff" />
+      <Sparkline values={spark} color="var(--s1)" />
       <div className="row"><span>Power <b>{w != null ? fmt(w, 1, " W") : "—"}</b></span><span>Month <b>{u.month ? `${u.month.kwh.toFixed(3)} kWh · ₱${u.month.php.toFixed(2)}` : "—"}</b></span></div>
     </a>
   );
