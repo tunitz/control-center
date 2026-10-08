@@ -9,7 +9,7 @@ type Cost = { month: string; rate: number; total_php: number; total_kwh: number 
 function UnitCard({ u }: { u: Unit }) {
   const [spark, setSpark] = useState<(number | null)[]>(() => cached<(number | null)[]>(`spark:${u.id}`) ?? []);
   useEffect(() => { let on = true; const f = () => api<Metrics>(`/units/${u.id}/metrics?range=1h`).then(m => { if (!on) return; const v = m.points.filter((_, i) => i % 4 === 0).map(p => p.cpu_pct); remember(`spark:${u.id}`, v); setSpark(v); }).catch(() => {}); f(); const t = setInterval(f, 30000); return () => { on = false; clearInterval(t); }; }, [u.id]);
-  const l = u.latest, w = (l?.cpu_w ?? 0) + (l?.gpu_w ?? 0), hasW = l?.cpu_w != null || l?.gpu_w != null;
+  const l = u.latest, w = u.live_w;
   return (
     <a className="card" href={`#/unit/${u.id}`} aria-label={`Open ${u.name}`}>
       <div className="uhead"><span className={"dot" + (u.online ? " on" : "")} title={u.online ? "online" : "offline"} /><div><h3>{u.name}</h3><div className="host">{u.host}{u.online ? "" : u.last_error ? ` · ${u.last_error}` : " · offline"}</div></div></div>
@@ -19,7 +19,7 @@ function UnitCard({ u }: { u: Unit }) {
         <Gauge label="RAM" value={u.ram_pct} color="#f472b6" />
       </div>
       <Sparkline values={spark} color="#38e1ff" />
-      <div className="row"><span>Power <b>{hasW ? fmt(w, 1, " W") : "n/a"}</b></span><span>Month <b>{u.month ? `${u.month.kwh.toFixed(3)} kWh · ₱${u.month.php.toFixed(2)}` : "—"}</b></span></div>
+      <div className="row"><span>Power <b>{w != null ? fmt(w, 1, " W") : "—"}</b></span><span>Month <b>{u.month ? `${u.month.kwh.toFixed(3)} kWh · ₱${u.month.php.toFixed(2)}` : "—"}</b></span></div>
     </a>
   );
 }
@@ -28,7 +28,7 @@ export default function Dashboard() {
   const { data: cost } = useLive<Cost>("/cost", 15000);
   const [adding, setAdding] = useState(false);
   const online = units?.filter(u => u.online).length ?? 0;
-  const watts = units?.reduce((a, u) => a + (u.latest?.cpu_w ?? 0) + (u.latest?.gpu_w ?? 0), 0) ?? 0;
+  const watts = units?.reduce((a, u) => a + (u.live_w ?? 0), 0) ?? 0;
   return (
     <>
       <div className="grid g-hero">

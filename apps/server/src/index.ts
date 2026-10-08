@@ -11,6 +11,7 @@ import { Scheduler, targetOf, type UnitRow } from "./poller";
 import { COMMANDS, sendWol } from "./commands";
 import { installScript, pasteCommand, curlCommand } from "./install";
 import { deleteUnit, updateUnit } from "./units";
+import { unitView as unitViewOf } from "./unitview";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
@@ -38,17 +39,10 @@ rollup(db, now());
 function latest(unitId: number) {
   return db.query("SELECT * FROM samples_raw WHERE unit_id=? ORDER BY ts DESC LIMIT 1").get(unitId) as Record<string, number | null> | null;
 }
-const online = (u: { last_seen: number | null }) => !!u.last_seen && now() - u.last_seen < Math.max(30, pollInterval() * 4);
-const unitView = (u: any) => {
-  const l = latest(u.id), st = db.query("SELECT json FROM unit_static WHERE unit_id=?").get(u.id) as { json: string } | null;
-  const s = st ? JSON.parse(st.json) : null;
-  return {
-    id: u.id, name: u.name, host: u.host, ssh_port: u.ssh_port, mac: u.mac, broadcast: u.broadcast, enabled: !!u.enabled, online: online(u), last_seen: u.last_seen, last_error: u.last_error,
-    fingerprint: u.fingerprint, sample_interval_s: u.sample_interval_s, static: s, latest: l,
-    ram_pct: l && s && l.ram_used_mb != null ? (l.ram_used_mb / s.ram_total_mb) * 100 : null,
-    vram_pct: l && s?.vram_total_mb && l.vram_used_mb != null ? (l.vram_used_mb / s.vram_total_mb) * 100 : null,
-  };
-};
+const unitView = (u: any) => unitViewOf(u, {
+  now: now(), pollInterval: pollInterval(), latest,
+  staticJson: (id: number) => (db.query("SELECT json FROM unit_static WHERE unit_id=?").get(id) as { json: string } | null)?.json ?? null,
+});
 const json = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
 const cookieOf = (req: Request) => /(?:^|; )cc_session=([^;]+)/.exec(req.headers.get("cookie") ?? "")?.[1];
 const loginLimit = makeLimiter(5, 60);
