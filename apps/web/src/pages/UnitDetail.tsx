@@ -4,6 +4,7 @@ import { cached, useLive } from "../hooks";
 import { Chart, type Series } from "../components/Chart";
 import EditUnit from "../components/EditUnit";
 import Services from "../components/Services";
+import { navigate } from "../route";
 
 const S = {
   cpu: [{ key: "cpu_pct", label: "CPU %", color: "var(--s1)" }] as Series[],
@@ -35,7 +36,7 @@ export default function UnitDetail({ id }: { id: number }) {
   const [menu, setMenu] = useState(false), [confirm, setConfirm] = useState<null | "shutdown" | "restart" | "remove">(null), [toast, setToast] = useState("");
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 3500); return () => clearTimeout(t); } }, [toast]);
   const remove = async () => {
-    try { await api(`/units/${id}`, { method: "DELETE" }); location.hash = "#/"; } catch (e: any) { setToast(e.message); setConfirm(null); }
+    try { await api(`/units/${id}`, { method: "DELETE" }); navigate("#/"); } catch (e: any) { setToast(e.message); setConfirm(null); }
   };
   const act = async (action: string) => {
     try { await api(`/units/${id}/power`, { method: "POST", body: { action, confirm: action !== "wake" } }); setToast(`${action} sent`); } catch (e: any) { setToast(e.message); }

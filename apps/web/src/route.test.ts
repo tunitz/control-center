@@ -38,9 +38,9 @@ test("empty location.hash reports #/", () => {
   off();
 });
 
-test("the returned function removes all three listeners (registry empty afterwards)", () => {
+test("the returned function removes all listeners (registry empty afterwards)", () => {
   const off = subscribeHash(() => {});
-  expect([...registry.keys()].sort()).toEqual(["hashchange", "pageshow", "popstate"]);
+  expect([...registry.keys()].sort()).toEqual(["cc-nav", "hashchange", "pageshow", "popstate"]);
   off();
   expect([...registry.values()].every(s => s.size === 0)).toBe(true);
 });

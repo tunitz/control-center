@@ -1,4 +1,4 @@
-const EVENTS = ["hashchange", "popstate", "pageshow"];
+const EVENTS = ["hashchange", "popstate", "pageshow", "cc-nav"];
 
 /** Reports the current hash on subscribe and on every navigation event.
  *  iOS Home Screen swipe-back can restore the page without firing hashchange,
@@ -11,4 +11,10 @@ export function subscribeHash(onChange: (hash: string) => void): () => void {
   return () => {
     for (const ev of EVENTS) removeEventListener(ev, f);
   };
+}
+
+/** Go to a hash route without adding a history entry. */
+export function navigate(hash: string): void {
+  history.replaceState(null, "", hash);
+  dispatchEvent(new Event("cc-nav"));
 }

@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import UnitDetail from "./pages/UnitDetail";
 import Settings from "./pages/Settings";
 import { initTheme } from "./theme";
+import { initSwipeBack } from "./swipe";
 
 function useHash() {
   const [h, setH] = useState(location.hash || "#/");
@@ -41,7 +42,7 @@ function App() {
   return (
     <div className="app">
       <header className="top">
-        <div className="brand"><div className="logo" />Control Center</div>
+        <div className="brand"><img className="logo" src="/favicon.svg" alt="" width="26" height="26" />Control Center</div>
         <nav className="tabs"><a href="#/" className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
         <div className="spacer" />
         <button className="btn" onClick={async () => { await api("/auth/logout", { method: "POST" }); clearCache(); writeAuthed(false); setAuthed(false); }}>Sign out</button>
@@ -52,4 +53,5 @@ function App() {
   );
 }
 initTheme();
+initSwipeBack();
 createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
