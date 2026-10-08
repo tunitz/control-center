@@ -11,6 +11,7 @@ import { Scheduler, targetOf, type UnitRow } from "./poller";
 import { COMMANDS, sendWol } from "./commands";
 import { installScript, pasteCommand, curlCommand } from "./install";
 import { deleteUnit, updateUnit } from "./units";
+import { createChat } from "./chat";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
@@ -52,6 +53,7 @@ const unitView = (u: any) => {
 const json = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
 const cookieOf = (req: Request) => /(?:^|; )cc_session=([^;]+)/.exec(req.headers.get("cookie") ?? "")?.[1];
 const loginLimit = makeLimiter(5, 60);
+const chat = createChat({ baseUrl: process.env.HERMES_API_URL ?? "http://127.0.0.1:8642", key: process.env.HERMES_API_KEY ?? "" });
 const WEB = join(import.meta.dir, "../../web/dist");
 
 const server = Bun.serve({
@@ -70,6 +72,7 @@ const server = Bun.serve({
       if (path.startsWith("/api/")) {
         if (!validSession(db, cookieOf(req), now())) return json({ error: "unauthorized" }, 401);
         if (req.method !== "GET" && req.headers.get("x-cc") !== "1") return json({ error: "csrf" }, 403);
+        if (path.startsWith("/api/chat/")) return await chat.handle(req, path);
         return await api(req, url, path, ip);
       }
       if (path.includes("..")) return new Response("bad path", { status: 400 });
