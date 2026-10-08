@@ -73,9 +73,13 @@ const server = Bun.serve({
         return await api(req, url, path, ip);
       }
       if (path.includes("..")) return new Response("bad path", { status: 400 });
-      let f = Bun.file(join(WEB, path === "/" ? "index.html" : path));
-      if (!(await f.exists())) f = Bun.file(join(WEB, "index.html"));
-      return (await f.exists()) ? new Response(f) : new Response("web not built: run bun run build:web\n", { status: 404 });
+      const rel = path === "/" ? "/index.html" : path;
+      let f = Bun.file(join(WEB, rel)), key = rel;
+      if (!(await f.exists())) { f = Bun.file(join(WEB, "index.html")); key = "/index.html"; }
+      if (!(await f.exists())) return new Response("web not built: run bun run build:web\n", { status: 404 });
+      const headers: Record<string, string> = key === "/index.html" ? { "cache-control": "no-cache" }
+        : key.startsWith("/assets/") ? { "cache-control": "public, max-age=31536000, immutable" } : {};
+      return new Response(f, { headers });
     } catch (e: any) {
       return json({ error: String(e?.message ?? e) }, 400);
     }

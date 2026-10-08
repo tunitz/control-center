@@ -12,19 +12,42 @@ export const clearCache = () => cache.clear();
  *  subscriber, closed when the last one unsubscribes. Each subscriber gets its own "sample" listener. */
 let sharedES: EventSource | null = null;
 let sharedRefs = 0;
+/** Every live "sample" handler, so a re-opened EventSource can re-attach them. */
+const sampleHandlers = new Set<() => void>();
+
+function openShared(): EventSource {
+  const es = new EventSource("/api/events");
+  for (const h of sampleHandlers) es.addEventListener("sample", h);
+  sharedES = es;
+  return es;
+}
+
 function subscribeSample(onSample: () => void): () => void {
-  if (!sharedES) sharedES = new EventSource("/api/events");
-  const es = sharedES;
-  sharedRefs++;
   const handler = () => onSample();
-  es.addEventListener("sample", handler);
+  sampleHandlers.add(handler);
+  sharedRefs++;
+  if (sharedES) sharedES.addEventListener("sample", handler);
+  else openShared();
   return () => {
-    es.removeEventListener("sample", handler);
+    sampleHandlers.delete(handler);
+    sharedES?.removeEventListener("sample", handler);
     if (--sharedRefs === 0) {
-      es.close();
-      if (sharedES === es) sharedES = null;
+      sharedES?.close();
+      sharedES = null;
     }
   };
+}
+
+// bfcache: close the stream on pagehide so the page is eligible for back/forward cache,
+// re-open it on pageshow, and refresh subscribers after a bfcache restore.
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    if (sharedES) { sharedES.close(); sharedES = null; }
+  });
+  window.addEventListener("pageshow", (e: PageTransitionEvent) => {
+    if (sharedRefs > 0 && !sharedES) openShared();
+    if (e.persisted) for (const h of [...sampleHandlers]) h();
+  });
 }
 
 /** Loads a resource (stale-while-revalidate), refetches on SSE "sample" events (throttled) and on a slow timer as fallback.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, fmt, gb, RANGES, type Metrics, type Unit } from "../api";
-import { useLive } from "../hooks";
+import { cached, useLive } from "../hooks";
 import { Chart, type Series } from "../components/Chart";
 import EditUnit from "../components/EditUnit";
 
@@ -26,7 +26,9 @@ function Block({ title, m, keys, series, unit, max }: { title: string; m: Metric
 }
 export default function UnitDetail({ id }: { id: number }) {
   const [range, setRange] = useState<(typeof RANGES)[number]>("1h");
-  const { data: u, reload } = useLive<Unit>(`/units/${id}`, 5000);
+  const { data: live, reload } = useLive<Unit>(`/units/${id}`, 5000);
+  const listed = cached<Unit[]>("/units")?.find(x => x.id === id);
+  const u = live ?? listed;
   const [editing, setEditing] = useState(false);
   const { data: m } = useLive<Metrics>(`/units/${id}/metrics?range=${range}`, range === "1h" ? 10000 : 60000);
   const [menu, setMenu] = useState(false), [confirm, setConfirm] = useState<null | "shutdown" | "restart" | "remove">(null), [toast, setToast] = useState("");
@@ -40,7 +42,12 @@ export default function UnitDetail({ id }: { id: number }) {
   };
   const s = u?.static, l = u?.latest;
   const energy = useMemo(() => (m ? m.energy_wh : null), [m]);
-  if (!u) return null;
+  if (!u) return (
+    <>
+      <div className="uhead"><a href="#/" className="btn" aria-label="Back">←</a><span className="dot" /><div><h3 style={{ fontSize: 22 }}>&nbsp;</h3><div className="host">&nbsp;</div></div></div>
+      <div className="charts" />
+    </>
+  );
   return (
     <>
       <div className="uhead"><a href="#/" className="btn" aria-label="Back">←</a><span className={"dot" + (u.online ? " on" : "")} /><div><h3 style={{ fontSize: 22 }}>{u.name}</h3><div className="host">{u.host} · {u.online ? "online" : "offline"}</div></div><div className="spacer" />
@@ -55,7 +62,7 @@ export default function UnitDetail({ id }: { id: number }) {
         <div><div className="k">Energy this range</div><div className="v">{energy == null ? "—" : energy >= 1000 ? (energy / 1000).toFixed(3) + " kWh" : energy.toFixed(2) + " Wh"}</div><div className="k">Month {u.month ? `${u.month.kwh.toFixed(3)} kWh · ₱${u.month.php.toFixed(2)}` : ""}</div></div>
       </div>
       <div className="sticky"><div className="chips" role="tablist" aria-label="Time range">{RANGES.map(r => <button key={r} role="tab" aria-selected={r === range} className={"chip" + (r === range ? " on" : "")} onClick={() => setRange(r)}>{r}</button>)}</div></div>
-      {m && <div className="charts">
+      <div className="charts">{m && <>
         <Block title="CPU usage" m={m} keys={["cpu_pct"]} series={S.cpu} unit="%" max={100} />
         <Block title="CPU clock" m={m} keys={["cpu_mhz"]} series={S.clk} unit="" />
         <Block title="GPU usage" m={m} keys={["gpu_pct"]} series={S.gpu} unit="%" max={100} />
@@ -63,7 +70,7 @@ export default function UnitDetail({ id }: { id: number }) {
         <Block title="VRAM" m={m} keys={["vram_used_mb"]} series={S.vram} unit="" />
         <Block title="Memory (MB)" m={m} keys={["ram_used_mb", "ram_cached_mb", "swap_used_mb"]} series={S.mem} unit="" />
         <Block title="Power (W)" m={m} keys={["cpu_w", "gpu_w"]} series={S.pow} unit=" W" />
-      </div>}
+      </>}</div>
       {confirm && <div className="modal" role="alertdialog" aria-modal="true" onClick={() => setConfirm(null)}><div className="card" onClick={e => e.stopPropagation()}>
         {confirm === "remove" ? <>
           <h3 style={{ marginTop: 0 }}>Remove {u.name}?</h3><p className="muted">Deletes the unit and all of its history and energy data from the Control Center. This cannot be undone. The agent stays on the unit: run <code>sudo /opt/ccagent/uninstall.sh</code> there to remove it.</p>
