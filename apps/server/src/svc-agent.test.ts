@@ -506,3 +506,67 @@ test("svc-logs upgrades info/missing PRIORITY by keyword in the cleaned msg (lxc
     ]);
   }
 });
+
+// ---------- gate: concurrent callers queue on a lock instead of failing "busy" ----------
+
+/** Fake svc helper: answers each queued request ok:true after `delayS`, like the real helper would after its path unit fires. */
+function fakeHelper(delayS = 0.3) {
+  const script = join(dir, "fake-helper.sh");
+  writeFileSync(script, `#!/bin/bash
+while :; do
+  if [ -f "${req}" ] && [ $(( $(date +%s) - $(stat -c %Y "${req}" 2>/dev/null || date +%s) )) -lt 150 ]; then
+    id=$(head -n1 "${req}" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p')
+    sleep ${delayS}
+    rm -f "${req}"
+    printf '{"ok":true,"data":{"items":[]}}' > "${dir}/svc.result.$id"
+  fi
+  sleep 0.02
+done
+`);
+  const p = Bun.spawn(["bash", script], { stdout: "ignore", stderr: "ignore" });
+  return () => p.kill();
+}
+const runGate = (cmd: string, extra: Record<string, string> = {}) =>
+  Bun.spawn(["bash", GATE], { env: { ...gateEnv(cmd), ...extra }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+const finish = async (p: ReturnType<typeof runGate>) => ({
+  code: await p.exited, out: await new Response(p.stdout).text(), err: await new Response(p.stderr).text(),
+});
+
+test("four concurrent gate calls all queue and succeed (none print 'busy')", async () => {
+  writeFileSync(allow, JSON.stringify([{ kind: "systemd", name: "nginx.service" }]));
+  const stop = fakeHelper(0.3);
+  try {
+    const procs = [1, 2, 3, 4].map(() => runGate("svc-list"));
+    const rs = await Promise.all(procs.map(finish));
+    for (const r of rs) {
+      expect(r.err).not.toMatch(/busy/i);
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.out)).toMatchObject({ ok: true });
+    }
+    expect(existsSync(req)).toBe(false);
+  } finally { stop(); }
+});
+
+test("a stale svc.request (older than 150 s) is cleared and the call succeeds", async () => {
+  writeFileSync(allow, JSON.stringify([{ kind: "systemd", name: "nginx.service" }]));
+  const staleId = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";
+  writeFileSync(req, JSON.stringify({ id: staleId, verb: "list", ts: 1 }) + "\n");
+  const t = Date.now() / 1000 - 200; utimesSync(req, t, t);
+  const stop = fakeHelper(0.1);
+  try {
+    const r = await finish(runGate("svc-list"));
+    expect(r.err).not.toMatch(/busy/i);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out)).toMatchObject({ ok: true });
+    expect(existsSync(req)).toBe(false);
+  } finally { stop(); }
+});
+
+test("a fresh svc.request from another actor with no helper => exit 3 'busy' after the short lock wait", async () => {
+  writeFileSync(req, JSON.stringify({ id: "6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b", verb: "list", ts: Math.floor(Date.now() / 1000) }) + "\n");
+  const before = readFileSync(req, "utf8");
+  const r = await finish(runGate("svc-list", { CCAGENT_SVC_LOCK_WAIT: "1", CCAGENT_SVC_WAIT: "1" }));
+  expect(r.code).toBe(3);
+  expect(r.err).toMatch(/busy/i);
+  expect(readFileSync(req, "utf8")).toBe(before); // not ours: left alone
+});

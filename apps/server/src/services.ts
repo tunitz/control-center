@@ -36,7 +36,7 @@ export async function handleServiceRoute(d: ServiceDeps, req: Request, url: URL,
   const id = Number(root[1]), u = d.db.query("SELECT * FROM units WHERE id=?").get(id) as any;
   if (!u) return json({ error: "no such unit" }, 404);
   const sub = root[2] ?? "", online = isOnline(u, d), target = () => targetOf(u as UnitRow, d.master);
-  const exec = (cmd: string, stdin?: string) => d.pool.exec(id, target(), cmd, 35000, stdin);
+  const exec = (cmd: string, stdin?: string) => d.pool.exec(id, target(), cmd, 40000, stdin); // svc-* can queue up to LOCK_WAIT(20s)+SVC_WAIT(8s); keep >= 40s
   if (sub === "" && req.method === "GET") {
     if (!online) return json({ error: "unit offline" }, 409);
     try { return json({ items: parseAgent(await exec(LIST_CMD)).items ?? [] }); } catch (e) { return json({ items: [], error: errorText(e) }); }

@@ -103,3 +103,17 @@ test("service control: uninstall removes the helper, units and allowlist", () =>
   const u = agentFile("uninstall.sh");
   for (const f of ["ccagent-svc.path", "ccagent-svc.service", "/etc/ccagent"]) expect(u).toContain(f);
 });
+
+test("service control: svc path+service units disable start-rate limiting; power units do not", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  const units: Record<string, string> = {};
+  for (const m of s.matchAll(/cat > (\S+) <<UNIT\n([\s\S]*?)\nUNIT\n/g)) units[m[1]] = m[2];
+  for (const u of ["/etc/systemd/system/ccagent-svc.path", "/etc/systemd/system/ccagent-svc.service"]) {
+    expect(units[u]).toBeDefined();
+    expect(units[u]!.split("[Unit]")[1]!.split("\n[")[0]).toContain("StartLimitIntervalSec=0");
+  }
+  for (const u of ["/etc/systemd/system/ccagent-power.path", "/etc/systemd/system/ccagent-power.service"]) {
+    expect(units[u]).toBeDefined();
+    expect(units[u]).not.toContain("StartLimitIntervalSec");
+  }
+});

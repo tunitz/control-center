@@ -7,6 +7,7 @@ LOG=$DIR/metrics.jsonl
 POWER_UNIT=${POWER_UNIT:-/etc/systemd/system/ccagent-power.path}
 SVC_UNIT=${SVC_UNIT:-/etc/systemd/system/ccagent-svc.path}
 SVC_WAIT=${CCAGENT_SVC_WAIT:-8}
+LOCK_WAIT=${CCAGENT_SVC_LOCK_WAIT:-20}
 # Parse only fixed positional words; never execute or interpolate a supplied word.
 read -r -a args <<< "${SSH_ORIGINAL_COMMAND:-}"
 verb=${args[0]:-}
@@ -14,7 +15,17 @@ valid_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9@._:-]{0,127}$ ]]; }
 valid_kind() { [[ "$1" == systemd || "$1" == docker || "$1" == lxc ]]; }
 svc_request() {
   [ -f "$SVC_UNIT" ] || { echo "svc helper missing: re-run the installer" >&2; exit 3; }
-  [ ! -e "$DIR/svc.request" ] || { echo "svc helper busy" >&2; exit 3; }
+  # Serialize the whole request/response cycle: concurrent callers queue here instead of colliding on svc.request.
+  # The lock is an fd held until this process exits. Without flock (util-linux) fall back to the old single-slot behaviour.
+  if command -v flock >/dev/null 2>&1; then
+    exec {LFD}>"$DIR/.svc.lock" || { echo "svc helper busy" >&2; exit 3; }
+    flock -w "$LOCK_WAIT" "$LFD" || { echo "svc helper busy" >&2; exit 3; }
+  fi
+  # Under the lock, a request file can only be ours-from-a-crashed-run (stale) or a genuinely stuck helper.
+  if [ -e "$DIR/svc.request" ]; then
+    mt=$(stat -c %Y "$DIR/svc.request" 2>/dev/null) || mt=$(date +%s)
+    if (( $(date +%s) - mt > 150 )); then rm -f "$DIR/svc.request"; else echo "svc helper busy" >&2; exit 3; fi
+  fi
   id=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n'); tmp="$DIR/.svc.request.$$"; body=''
   if [ "$verb" = svc-allow ]; then
     body=$(head -c 65537)

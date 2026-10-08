@@ -83,6 +83,7 @@ UNIT
 cat > /etc/systemd/system/ccagent-svc.path <<UNIT
 [Unit]
 Description=Control Center service requests
+StartLimitIntervalSec=0
 [Path]
 PathExists=/var/lib/ccagent/svc.request
 [Install]
@@ -91,6 +92,7 @@ UNIT
 cat > /etc/systemd/system/ccagent-svc.service <<UNIT
 [Unit]
 Description=Control Center service action
+StartLimitIntervalSec=0
 [Service]
 Type=oneshot
 ExecStart=/opt/ccagent/ccagent-svc
