@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Unit } from "../api";
-import { useLive } from "../hooks";
+import { cached, remember, useLive } from "../hooks";
 import InstallPanel from "../components/InstallPanel";
 import EditUnit from "../components/EditUnit";
 
@@ -8,8 +8,9 @@ export default function Settings() {
   const { data: rates, reload: rr } = useLive<{ month: string; php_per_kwh: number }[]>("/rates", 60000);
   const { data: units, reload: ru } = useLive<Unit[]>("/units", 20000);
   const { data: audit } = useLive<any[]>("/audit?limit=30", 15000);
-  const [s, setS] = useState({ poll_interval_s: 5, sample_interval_s: 5, retention_days: 90 }), [rate, setRate] = useState(""), [msg, setMsg] = useState(""), [pw, setPw] = useState({ current: "", next: "" }), [edit, setEdit] = useState<Unit | null>(null), [key, setKey] = useState<null | { id: number; name: string; public_key: string; fingerprint: string }>(null);
-  useEffect(() => { api("/settings").then(setS as any); }, []);
+  const DEFAULT_SETTINGS = { poll_interval_s: 5, sample_interval_s: 5, retention_days: 90 };
+  const [s, setS] = useState<typeof DEFAULT_SETTINGS>(() => cached<typeof DEFAULT_SETTINGS>("/settings") ?? DEFAULT_SETTINGS), [rate, setRate] = useState(""), [msg, setMsg] = useState(""), [pw, setPw] = useState({ current: "", next: "" }), [edit, setEdit] = useState<Unit | null>(null), [key, setKey] = useState<null | { id: number; name: string; public_key: string; fingerprint: string }>(null);
+  useEffect(() => { api<any>("/settings").then(v => { remember("/settings", v); setS(v); }); }, []);
   useEffect(() => { if (rates?.[0] && !rate) setRate(String(rates[0].php_per_kwh)); }, [rates]);
   const run = async (f: () => Promise<any>, ok: string) => { try { await f(); setMsg(ok); } catch (e: any) { setMsg(e.message); } };
   const month = rates?.[0]?.month;

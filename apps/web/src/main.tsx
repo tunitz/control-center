@@ -22,10 +22,18 @@ function useHash() {
   }, [h]);
   return h;
 }
+const AUTH_KEY = "cc:authed";
+/** Previous-session hint: lets a cold load render immediately while /me validates in the background. */
+const readAuthed = (): boolean | null => { try { return localStorage.getItem(AUTH_KEY) === "1" ? true : null; } catch { return null; } };
+const writeAuthed = (on: boolean) => { try { if (on) localStorage.setItem(AUTH_KEY, "1"); else localStorage.removeItem(AUTH_KEY); } catch { /* ignore */ } };
 function App() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [authed, setAuthed] = useState<boolean | null>(readAuthed);
   const hash = useHash();
-  useEffect(() => { api("/me").then(() => setAuthed(true)).catch(() => setAuthed(false)); }, []);
+  useEffect(() => {
+    api("/me")
+      .then(() => { writeAuthed(true); setAuthed(true); })
+      .catch(() => { writeAuthed(false); clearCache(); setAuthed(false); });
+  }, []);
   if (authed === null) return null;
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
   const unit = /^#\/unit\/(\d+)/.exec(hash), settings = hash.startsWith("#/settings");
@@ -35,7 +43,7 @@ function App() {
         <div className="brand"><div className="logo" />Control Center</div>
         <nav className="tabs"><a href="#/" className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
         <div className="spacer" />
-        <button className="btn" onClick={async () => { await api("/auth/logout", { method: "POST" }); clearCache(); setAuthed(false); }}>Sign out</button>
+        <button className="btn" onClick={async () => { await api("/auth/logout", { method: "POST" }); clearCache(); writeAuthed(false); setAuthed(false); }}>Sign out</button>
       </header>
       <main>{unit ? <UnitDetail id={Number(unit[1])} /> : settings ? <Settings /> : <Dashboard />}</main>
       <nav className="tabbar"><a href="#/" className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>

@@ -2,11 +2,34 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Unit } from "./api";
 
 /** Last good response per path. A remounted page paints this instantly instead of
- *  blanking and refetching, which is what made tab/unit navigation flicker. */
-const cache = new Map<string, unknown>();
+ *  blanking and refetching, which is what made tab/unit navigation flicker.
+ *  Persisted to localStorage so a cold load (iOS standalone has no bfcache) also paints last-known data. */
+const STORE_KEY = "cc:cache:v1";
+const hasLS = () => typeof localStorage !== "undefined";
+function hydrate(): Map<string, unknown> {
+  try {
+    if (!hasLS()) return new Map();
+    const raw = localStorage.getItem(STORE_KEY);
+    return raw ? new Map(JSON.parse(raw)) : new Map();
+  } catch { return new Map(); }
+}
+const cache = hydrate();
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+/** Single debounced writer: one pending timer, writes whatever the cache holds when it fires. */
+function schedulePersist() {
+  if (!hasLS() || persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    try { localStorage.setItem(STORE_KEY, JSON.stringify([...cache])); } catch { /* quota: ignore */ }
+  }, 500);
+}
 export const cached = <T,>(path: string) => cache.get(path) as T | undefined;
-export const remember = (path: string, v: unknown) => { cache.set(path, v); };
-export const clearCache = () => cache.clear();
+export const remember = (path: string, v: unknown) => { cache.set(path, v); schedulePersist(); };
+export const clearCache = () => {
+  cache.clear();
+  if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+  if (hasLS()) { try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ } }
+};
 
 /** One shared EventSource for all live hooks, ref-counted: opened by the first
  *  subscriber, closed when the last one unsubscribes. Each subscriber gets its own "sample" listener. */
@@ -70,6 +93,7 @@ export function useLive<T>(path: string, everyMs = 15000) {
     last.current = Date.now();
     api<T>(path).then(d => {
       cache.set(path, d);
+      schedulePersist();
       const s = JSON.stringify(d);
       if (s !== shown.current) { shown.current = s; setData(d); }
       setErr("");
