@@ -56,7 +56,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;p
 .chat-main{display:flex;flex-direction:column;min-height:0;min-width:0;padding:0;overflow:hidden}
 .chat-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .chat-head-title{flex:1;min-width:0;overflow:hidden;text-overflow:clip;white-space:nowrap}
-.chat-rename{display:flex;gap:8px;flex:1;flex-wrap:wrap}.chat-rename input{flex:1;min-width:160px}
+.chat-rename{display:flex;gap:8px;flex:1;flex-wrap:wrap}.chat-rename input{flex:1;min-width:160px;font-size:16px;color:var(--text)}
 .chat-log{flex:1;min-height:0;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
 .chat-empty{margin:auto;text-align:center}
 .bubble{max-width:78ch;padding:10px 14px;border-radius:14px;border:1px solid var(--line);background:var(--glass);white-space:pre-wrap;overflow-wrap:anywhere}
@@ -66,7 +66,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;p
 @keyframes blink{50%{opacity:0}}
 .chat-err{margin:0 16px;padding:8px 12px;border-radius:10px;border:1px solid #f8717166;color:#fecaca}
 .chat-compose{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--line);align-items:flex-end}
-.chat-compose textarea{flex:1;min-width:0;resize:none;background:#0b1020aa;border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-height:44px}
+.chat-compose textarea{flex:1;min-width:0;resize:none;background:#0b1020aa;color:var(--text);font-size:16px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-height:44px}
 @media (max-width:760px){
   .chat{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr);height:calc(100vh - 170px);min-height:0;gap:10px}
   .chat-side{max-height:116px}
