@@ -9,8 +9,8 @@ header.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 
 .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--cyan),var(--vio));box-shadow:0 0 22px #38e1ff55}
 .spacer{flex:1}
 nav.tabs{display:flex;gap:4px}nav.tabs a{padding:8px 14px;border-radius:10px;color:var(--mut)}nav.tabs a.on{background:var(--glass);color:var(--text);border:1px solid var(--line)}
-.card{background:var(--glass);border:1px solid var(--line);border-radius:18px;padding:16px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 10px 30px #0006;transition:transform .2s,border-color .2s}
-a.card:hover{transform:translateY(-2px);border-color:#38e1ff66}
+.card{background:var(--glass);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 10px 30px #0006;transition:transform .2s,border-color .2s}
+@media(hover:hover){a.card:hover{transform:translateY(-2px);border-color:#38e1ff66}}
 .grid{display:grid;gap:14px}.grid>*,.charts>*{min-width:0}.g-units{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}.g-hero{grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:14px}
 .hero .lab{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.08em}.hero .val{font-size:32px;font-weight:700;margin-top:4px;background:linear-gradient(90deg,var(--cyan),var(--vio));-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero .sub{color:var(--mut);font-size:13px}

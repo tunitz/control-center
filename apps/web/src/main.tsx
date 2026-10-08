@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "uplot/dist/uPlot.min.css";
 import "./styles.css";
@@ -12,7 +12,14 @@ import Settings from "./pages/Settings";
 
 function useHash() {
   const [h, setH] = useState(location.hash || "#/");
+  const prev = useRef(h);
   useEffect(() => subscribeHash(setH), []);
+  // scroll to top on navigation only (not on first render / StrictMode re-runs)
+  useEffect(() => {
+    if (prev.current === h) return;
+    prev.current = h;
+    window.scrollTo(0, 0);
+  }, [h]);
   return h;
 }
 function App() {
