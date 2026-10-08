@@ -121,6 +121,55 @@ test("an unreachable Hermes is a 502 with the error text", async () => {
   expect((await res.json()).error).toMatch(/ECONNREFUSED/);
 });
 
+test("model options are fetched from Hermes with the bearer key", async () => {
+  const { f, calls } = fakeUpstream(() => Response.json({ providers: [] }));
+  const res = await chatWith(f).handle(req("/api/chat/model-options"), "/api/chat/model-options");
+  expect(res.status).toBe(200);
+  expect(calls[0].url).toBe("http://hermes.test/api/model/options");
+  expect(calls[0].headers.authorization).toBe("Bearer k-test");
+});
+
+test("setting a session model posts provider and model to the matching Hermes lock route", async () => {
+  const { f, calls } = fakeUpstream(() => Response.json({ object: "hermes.session.model_lock" }));
+  const res = await chatWith(f).handle(
+    req("/api/chat/sessions/s1/model", { method: "POST", body: JSON.stringify({ provider: "nous", model: "anthropic/claude-haiku-5.5" }) }),
+    "/api/chat/sessions/s1/model");
+  expect(res.status).toBe(200);
+  expect(calls[0].url).toBe("http://hermes.test/api/sessions/s1/model");
+  expect(calls[0].method).toBe("POST");
+  expect(calls[0].body).toEqual({ provider: "nous", model: "anthropic/claude-haiku-5.5" });
+});
+
+test("a session model call without a model is rejected before reaching Hermes", async () => {
+  const { f, calls } = fakeUpstream();
+  const res = await chatWith(f).handle(
+    req("/api/chat/sessions/s1/model", { method: "POST", body: JSON.stringify({ provider: "nous" }) }),
+    "/api/chat/sessions/s1/model");
+  expect(res.status).toBe(400);
+  expect(calls.length).toBe(0);
+});
+
+test("a turn forwards the chosen reasoning effort as model_options", async () => {
+  const sse = 'event: run.completed\ndata: {"completed":true}\n\n';
+  const { f, calls } = fakeUpstream(() => new Response(sse, { headers: { "content-type": "text/event-stream" } }));
+  await chatWith(f).handle(
+    req("/api/chat/sessions/s1/stream", { method: "POST", body: JSON.stringify({ input: "hi", model_options: { reasoning: { enabled: true, effort: "high" } } }) }),
+    "/api/chat/sessions/s1/stream");
+  expect(calls[0].body).toEqual({ input: "hi", model_options: { reasoning: { enabled: true, effort: "high" } } });
+});
+
+test("a turn without model_options sends only the input", async () => {
+  const { f, calls } = fakeUpstream(() => new Response("", { headers: { "content-type": "text/event-stream" } }));
+  await chatWith(f).handle(req("/api/chat/sessions/s1/stream", { method: "POST", body: JSON.stringify({ input: "hi" }) }), "/api/chat/sessions/s1/stream");
+  expect(calls[0].body).toEqual({ input: "hi" });
+});
+
+test("unknown reasoning effort is dropped before reaching Hermes", async () => {
+  const { f, calls } = fakeUpstream(() => new Response("", { headers: { "content-type": "text/event-stream" } }));
+  await chatWith(f).handle(req("/api/chat/sessions/s1/stream", { method: "POST", body: JSON.stringify({ input: "hi", model_options: { reasoning: { effort: "turbo" } } }) }), "/api/chat/sessions/s1/stream");
+  expect(calls[0].body).toEqual({ input: "hi" });
+});
+
 test("unknown chat sub-route is a 404", async () => {
   const { f } = fakeUpstream();
   const res = await chatWith(f).handle(req("/api/chat/nope"), "/api/chat/nope");

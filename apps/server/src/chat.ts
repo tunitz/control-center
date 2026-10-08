@@ -5,6 +5,16 @@
 export const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_INPUT = 20000;
 const PREFIX = "/api/chat/sessions";
+const EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
+
+/** Keeps only a known reasoning setting; anything else is dropped rather than sent upstream. */
+export function sanitizeModelOptions(raw: unknown): { reasoning: { enabled?: boolean; effort?: string } } | undefined {
+  const r = (raw as any)?.reasoning;
+  if (!r || typeof r !== "object") return undefined;
+  if (r.enabled === false) return { reasoning: { enabled: false } };
+  if (typeof r.effort === "string" && EFFORTS.has(r.effort)) return { reasoning: { enabled: true, effort: r.effort } };
+  return undefined;
+}
 
 export type SseEvent = { event: string; data: unknown };
 
@@ -61,6 +71,10 @@ export function createChat(opts: { baseUrl: string; key: string; fetch?: typeof 
 
   async function handle(req: Request, path: string): Promise<Response> {
     if (!opts.key) return json({ error: "HERMES_API_KEY is not set on the Control Center" }, 503);
+    if (path === "/api/chat/model-options") {
+      if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
+      return forward("/api/model/options", {});
+    }
     if (path === PREFIX) {
       if (req.method === "GET") return forward("/api/sessions?limit=100&include_children=false", {});
       if (req.method === "POST") {
@@ -84,13 +98,21 @@ export function createChat(opts: { baseUrl: string; key: string; fetch?: typeof 
       return json({ error: "method not allowed" }, 405);
     }
     if (sub === "messages" && req.method === "GET") return forward(`/api/sessions/${id}/messages?inline_images=false`, {});
+    if (sub === "model" && req.method === "POST") {
+      const body = await req.json().catch(() => null) as { provider?: unknown; model?: unknown } | null;
+      const model = typeof body?.model === "string" ? body.model.trim() : "";
+      const provider = typeof body?.provider === "string" ? body.provider.trim() : "";
+      if (!model) return json({ error: "model is required" }, 400);
+      return forward(`/api/sessions/${id}/model`, { method: "POST", body: JSON.stringify({ model, ...(provider ? { provider } : {}) }) });
+    }
     if (sub === "stream" && req.method === "POST") {
-      const body = await req.json().catch(() => null) as { input?: unknown } | null;
+      const body = await req.json().catch(() => null) as { input?: unknown; model_options?: unknown } | null;
       const input = typeof body?.input === "string" ? body.input.trim() : "";
       if (!input) return json({ error: "message is empty" }, 400);
       if (input.length > MAX_INPUT) return json({ error: `message is over ${MAX_INPUT} characters` }, 400);
+      const modelOptions = sanitizeModelOptions(body?.model_options);
       try {
-        const r = await up(`/api/sessions/${id}/chat/stream`, { method: "POST", body: JSON.stringify({ input }), accept: "text/event-stream" });
+        const r = await up(`/api/sessions/${id}/chat/stream`, { method: "POST", body: JSON.stringify({ input, ...(modelOptions ? { model_options: modelOptions } : {}) }), accept: "text/event-stream" });
         if (!r.ok || !r.body) return json({ error: `Hermes returned ${r.status}`, detail: await r.text() }, 502);
         return new Response(r.body, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" } });
       } catch (e: any) {

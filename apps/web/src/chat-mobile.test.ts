@@ -10,10 +10,10 @@ test("phone chat sits in the viewport height (dvh with vh fallback)", () => {
   expect(mobile).toMatch(/height:\s*calc\(100dvh - \d+px\)/);
 });
 
-test("phone session list is a horizontal strip, not a stacked column", () => {
-  expect(mobile).toMatch(/\.chat-list\{[^}]*flex-direction:\s*row/);
+test("phone session list is a vertical column inside the drawer", () => {
+  expect(mobile).toMatch(/\.chat-list\{[^}]*flex-direction:\s*column/);
 });
 
-test("phone session list scrolls sideways instead of growing the page", () => {
-  expect(mobile).toMatch(/\.chat-list\{[^}]*overflow-x:\s*auto/);
+test("phone session list scrolls vertically inside the drawer", () => {
+  expect(mobile).toMatch(/\.chat-list\{[^}]*overflow-y:\s*auto/);
 });

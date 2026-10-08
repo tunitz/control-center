@@ -23,11 +23,15 @@ export function parseSse(prev: string, chunk: string): { events: SseEvent[]; res
   return { events, rest };
 }
 
-export type StreamState = { text: string; status: "idle" | "streaming" | "done" | "error" | "cancelled"; error: string };
-export const initialStream: StreamState = { text: "", status: "idle", error: "" };
+export type StreamState = { text: string; thinking: string; status: "idle" | "streaming" | "done" | "error" | "cancelled"; error: string };
+export const initialStream: StreamState = { text: "", thinking: "", status: "idle", error: "" };
 
 export function applyEvent(s: StreamState, e: SseEvent): StreamState {
   switch (e.event) {
+    case "tool.progress":
+      // Hermes sends the model's reasoning as tool.progress with tool_name "_thinking".
+      if (e.data?.tool_name === "_thinking") return { ...s, thinking: s.thinking + String(e.data?.delta ?? "") };
+      return s;
     case "assistant.delta":
       return { ...s, status: "streaming", text: s.text + String(e.data?.delta ?? "") };
     case "assistant.completed":
@@ -45,16 +49,63 @@ export function applyEvent(s: StreamState, e: SseEvent): StreamState {
   }
 }
 
-export type ViewMessage = { role: "user" | "assistant"; content: string };
+export type ViewMessage = { role: "user" | "assistant"; content: string; thinking?: string };
+
+// Gateway-generated notices (background process, internal) are not chat messages.
+const GATEWAY_NOTICE = /^\[(IMPORTANT: Background process|INTERNAL NOTIFICATION)/;
+/** Strips the sender prefix and the triggering-id line that Discord messages carry. */
+export function cleanUserText(text: string): string {
+  return text
+    .replace(/^\s*\[Triggering message id:[^\]\n]*(\]|…|\n|$)\s*/, "")
+    .replace(/^\s*\[tun\]\s*/, "")
+    .trim();
+}
+
 export function toViewMessages(raw: { role: string; content: string | null }[]): ViewMessage[] {
-  return raw.flatMap(m =>
-    (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim()
-      ? [{ role: m.role as "user" | "assistant", content: m.content }]
-      : []);
+  return raw.flatMap((m): ViewMessage[] => {
+    if (!(m.role === "user" || m.role === "assistant") || typeof m.content !== "string" || !m.content.trim()) return [];
+    if (m.role === "user") {
+      if (GATEWAY_NOTICE.test(m.content.trim())) return [];
+      const text = cleanUserText(m.content);
+      return text ? [{ role: "user" as const, content: text }] : [];
+    }
+    return [{ role: "assistant" as const, content: m.content }];
+  });
 }
 
 export function sessionLabel(s: { title: string | null; preview: string | null }): string {
-  if (s.title && s.title.trim()) return s.title.trim();
-  if (s.preview && s.preview.trim()) return s.preview.trim().slice(0, 60);
+  const title = s.title ? cleanUserText(s.title) : "";
+  if (title) return title;
+  const preview = s.preview ? cleanUserText(s.preview) : "";
+  if (preview) return preview.slice(0, 60);
   return "New chat";
+}
+
+
+export type ModelChoice = { value: string; label: string; provider: string; model: string };
+
+/** Flattens Hermes' /api/model/options providers into one picker list; value = "provider|model". */
+export function modelChoices(payload: { providers?: { slug: string; name: string; models?: string[] }[] }): ModelChoice[] {
+  return (payload.providers ?? []).flatMap(p =>
+    (p.models ?? []).map(model => ({
+      value: `${p.slug}|${model}`,
+      label: `${p.name} · ${model}`,
+      provider: p.slug,
+      model,
+    })));
+}
+
+/** Reasoning levels offered in the chat picker; "none" turns reasoning off. */
+export const REASONING_CHOICES: { value: string; label: string }[] = [
+  { value: "none", label: "Off" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
+
+/** Hermes model_options for a reasoning choice; "" means leave the session default. */
+export function reasoningOptions(effort: string): { reasoning: { enabled?: boolean; effort?: string } } | undefined {
+  if (!effort) return undefined;
+  if (effort === "none") return { reasoning: { enabled: false } };
+  return { reasoning: { enabled: true, effort } };
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { parseSse, applyEvent, initialStream, toViewMessages, sessionLabel, type StreamState, type ViewMessage } from "../chatStream";
+import { parseSse, applyEvent, initialStream, toViewMessages, sessionLabel, modelChoices, reasoningOptions, REASONING_CHOICES, type ModelChoice, type StreamState, type ViewMessage } from "../chatStream";
 
 type Session = { id: string; title: string | null; preview: string | null; last_active: number | null; message_count: number };
 
@@ -16,7 +16,26 @@ export default function Chat() {
   const [title, setTitle] = useState("");
   const abort = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState(false);
+  const [drawer, setDrawer] = useState(false);
+  const [models, setModels] = useState<ModelChoice[]>([]);
+  const [modelValue, setModelValue] = useState("");
+  const [reasoning, setReasoning] = useState("");
+  const [modelErr, setModelErr] = useState("");
   const bottom = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    api<any>("/chat/model-options").then(r => setModels(modelChoices(r))).catch(() => setModels([]));
+  }, []);
+
+  const pickModel = async (value: string) => {
+    const c = models.find(m => m.value === value);
+    if (!c) return;
+    setModelValue(value); setModelErr("");
+    if (!active) return; // applied when the first message creates the chat
+    try {
+      await api(`/chat/sessions/${active}/model`, { method: "POST", body: { provider: c.provider, model: c.model } });
+    } catch (e: any) { setModelErr(e.message); }
+  };
 
   const loadSessions = async () => {
     try { const r = await api<{ data: Session[] }>("/chat/sessions"); setSessions(r.data); setErr(""); }
@@ -37,11 +56,11 @@ export default function Chat() {
       const s = await api<any>("/chat/sessions", { method: "POST", body: {} });
       const id: string = s.id ?? s.session?.id;
       await loadSessions();
-      setActive(id); setMessages([]); setErr("");
+      setActive(id); setMessages([]); setErr(""); setDrawer(false);
     } catch (e: any) { setErr(e.message); }
   };
 
-  const select = (id: string) => { if (!abort.current) { setActive(id); setErr(""); setRenaming(false); } };
+  const select = (id: string) => { if (!abort.current) { setActive(id); setErr(""); setRenaming(false); setDrawer(false); } };
 
   const send = async () => {
     const text = draft.trim();
@@ -51,6 +70,12 @@ export default function Chat() {
       try { const s = await api<any>("/chat/sessions", { method: "POST", body: {} }); id = s.id ?? s.session?.id; setActive(id); }
       catch (e: any) { setErr(e.message); return; }
     }
+    const chosen = models.find(m => m.value === modelValue);
+    if (chosen) {
+      try { await api(`/chat/sessions/${id}/model`, { method: "POST", body: { provider: chosen.provider, model: chosen.model } }); }
+      catch (e: any) { setModelErr(e.message); return; }
+    }
+    const options = reasoningOptions(reasoning);
     setDraft(""); setErr(""); setPending(text);
     setMessages(m => [...m, { role: "user", content: text }]);
     setStream({ ...initialStream, status: "streaming" });
@@ -59,7 +84,7 @@ export default function Chat() {
       const r = await fetch(`/api/chat/sessions/${id}/stream`, {
         method: "POST", credentials: "same-origin", signal: ac.signal,
         headers: { "content-type": "application/json", accept: "text/event-stream", "x-cc": "1" },
-        body: JSON.stringify({ input: text }),
+        body: JSON.stringify({ input: text, ...(options ? { model_options: options } : {}) }),
       });
       if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw new Error(j.error ?? `HTTP ${r.status}`); }
       const reader = r.body.getReader(), dec = new TextDecoder();
@@ -73,7 +98,7 @@ export default function Chat() {
       }
       if (s.status === "streaming") s = { ...s, status: "done" };
       if (s.status === "error") setErr(s.error);
-      if (s.status === "done" && s.text) setMessages(m => [...m, { role: "assistant", content: s.text }]);
+      if (s.status === "done" && s.text) setMessages(m => [...m, { role: "assistant", content: s.text, thinking: s.thinking || undefined }]);
       if (s.status === "cancelled") setErr("The reply was cancelled.");
     } catch (e: any) {
       if (e.name !== "AbortError") setErr(e.message);
@@ -99,8 +124,11 @@ export default function Chat() {
 
   return (
     <div className="chat">
-      <aside className="chat-side card">
-        <button className="btn pri" onClick={newChat} disabled={busy}>New chat</button>
+      <aside className={`chat-side card${drawer ? " open" : ""}`}>
+        <div className="chat-side-top">
+          <button className="btn pri" onClick={newChat} disabled={busy}>New chat</button>
+          <button className="btn chat-close" aria-label="Close chats" onClick={() => setDrawer(false)}>Close</button>
+        </div>
         <ul className="chat-list" aria-label="Chats">
           {sessions.map(s => (
             <li key={s.id}>
@@ -116,6 +144,7 @@ export default function Chat() {
 
       <section className="chat-main card">
         <header className="chat-head">
+          <button className="btn chat-menu" aria-label="Open chats" aria-expanded={drawer} onClick={() => setDrawer(true)}>Chats</button>
           {renaming ? (
             <form className="chat-rename" onSubmit={e => { e.preventDefault(); rename(); }}>
               <input aria-label="Chat title" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
@@ -135,9 +164,9 @@ export default function Chat() {
 
         <div className="chat-log" role="log" aria-live="polite">
           {!messages.length && !stream.text && <p className="muted chat-empty">Ask Hermes anything. Each chat keeps its own history.</p>}
-          {messages.map((m, i) => <Bubble key={i} role={m.role} text={m.content} />)}
+          {messages.map((m, i) => <Bubble key={i} role={m.role} text={m.content} thinking={m.thinking} />)}
           {pending && busy && (
-            stream.text ? <Bubble role="assistant" text={stream.text} streaming /> : <Bubble role="assistant" text="" thinking />
+            stream.text ? <Bubble role="assistant" text={stream.text} thinkingText={stream.thinking} streaming /> : <Bubble role="assistant" text="" thinkingText={stream.thinking} waiting />
           )}
           <div ref={bottom} />
         </div>
@@ -158,16 +187,37 @@ export default function Chat() {
             ? <button className="btn dng" type="button" onClick={stop}>Stop</button>
             : <button className="btn pri" type="submit" disabled={!draft.trim()}>Send</button>}
         </form>
+        <div className="chat-model">
+          <label htmlFor="chat-model-pick">Model</label>
+          <select id="chat-model-pick" value={modelValue} onChange={e => pickModel(e.target.value)} disabled={busy || !models.length}>
+            <option value="">{models.length ? "Default model" : "No models available"}</option>
+            {models.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+          <label htmlFor="chat-reasoning-pick">Reasoning</label>
+          <select id="chat-reasoning-pick" value={reasoning} onChange={e => setReasoning(e.target.value)} disabled={busy}>
+            <option value="">Default</option>
+            {REASONING_CHOICES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </select>
+          {modelErr && <span className="chat-err-inline" role="alert">{modelErr}</span>}
+        </div>
       </section>
+      {drawer && <div className="chat-scrim" onClick={() => setDrawer(false)} aria-hidden="true" />}
     </div>
   );
 }
 
-function Bubble({ role, text, streaming, thinking }: { role: "user" | "assistant"; text: string; streaming?: boolean; thinking?: boolean }) {
+function Bubble({ role, text, streaming, thinkingText, waiting, thinking }: { role: "user" | "assistant"; text: string; streaming?: boolean; thinkingText?: string; waiting?: boolean; thinking?: string }) {
   return (
     <div className={`bubble ${role}`}>
       <div className="bubble-role muted">{role === "user" ? "You" : "Hermes"}</div>
-      <div className="bubble-text">{thinking ? <span className="muted">Thinking</span> : text}{streaming && <span className="caret" aria-hidden="true" />}</div>
+      {role === "assistant" && (thinking || thinkingText) && (
+        <details className="thinking">
+          <summary>Thinking</summary>
+          <div className="thinking-text">{thinking ?? thinkingText}</div>
+        </details>
+      )}
+      <div className="bubble-text">{waiting ? <span className="muted">Thinking</span> : text}{streaming && <span className="caret" aria-hidden="true" />}</div>
     </div>
   );
 }
+
