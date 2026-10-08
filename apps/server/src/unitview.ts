@@ -3,6 +3,7 @@ export type UnitViewDeps = {
   pollInterval: number;
   latest: (unitId: number) => Record<string, number | null> | null;
   staticJson: (unitId: number) => string | null;
+  disks?: (unitId: number) => { ts: number; mounts: unknown[] } | null;
 };
 
 export const isOnline = (u: { last_seen: number | null }, now: number, pollInterval: number) =>
@@ -20,6 +21,7 @@ export function unitView(u: any, deps: UnitViewDeps) {
     live_w,
     id: u.id, name: u.name, host: u.host, ssh_port: u.ssh_port, mac: u.mac, broadcast: u.broadcast, enabled: !!u.enabled, online, last_seen: u.last_seen, last_error: u.last_error,
     fingerprint: u.fingerprint, sample_interval_s: u.sample_interval_s, static: s, latest: l,
+    disks: deps.disks?.(u.id) ?? null,
     ram_pct: l && s && l.ram_used_mb != null ? (l.ram_used_mb / s.ram_total_mb) * 100 : null,
     vram_pct: l && s?.vram_total_mb && l.vram_used_mb != null ? (l.vram_used_mb / s.vram_total_mb) * 100 : null,
   };

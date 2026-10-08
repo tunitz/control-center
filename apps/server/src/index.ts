@@ -13,6 +13,7 @@ import { installScript, pasteCommand, curlCommand } from "./install";
 import { deleteUnit, updateUnit } from "./units";
 import { unitView as unitViewOf } from "./unitview";
 import { handleServiceRoute } from "./services";
+import { latestDisks } from "./disks";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
@@ -41,7 +42,7 @@ function latest(unitId: number) {
   return db.query("SELECT * FROM samples_raw WHERE unit_id=? ORDER BY ts DESC LIMIT 1").get(unitId) as Record<string, number | null> | null;
 }
 const unitView = (u: any) => unitViewOf(u, {
-  now: now(), pollInterval: pollInterval(), latest,
+  now: now(), pollInterval: pollInterval(), latest, disks: (id: number) => latestDisks(db, id),
   staticJson: (id: number) => (db.query("SELECT json FROM unit_static WHERE unit_id=?").get(id) as { json: string } | null)?.json ?? null,
 });
 const json = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });

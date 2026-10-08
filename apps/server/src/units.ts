@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 
-const UNIT_TABLES = ["samples_raw", "samples_1m", "samples_15m", "energy_hourly", "unit_static"];
+const UNIT_TABLES = ["samples_raw", "samples_1m", "samples_15m", "energy_hourly", "unit_static", "unit_disks"];
 /** Removes a unit and every row that belongs to it. Returns false if it did not exist. */
 export function deleteUnit(db: Database, id: number): boolean {
   return db.transaction(() => {

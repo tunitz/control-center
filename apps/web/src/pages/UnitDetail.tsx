@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, gb, RANGES, type Metrics, type Unit } from "../api";
+import type { DiskSnapshot } from "../lib/disks";
 import { cached, useLive } from "../hooks";
 import { Chart, type Series } from "../components/Chart";
 import EditUnit from "../components/EditUnit";
 import Services from "../components/Services";
 import { navigate } from "../route";
 import { useDismiss } from "../lib/useDismiss";
+import { DiskList } from "../components/DiskList";
+import { hasSeries, rateUnit } from "../lib/disks";
 
 const S = {
   cpu: [{ key: "cpu_pct", label: "CPU %", color: "var(--s1)" }] as Series[],
@@ -15,17 +18,27 @@ const S = {
   vram: [{ key: "vram_used_mb", label: "VRAM MB", color: "var(--s5)" }] as Series[],
   mem: [{ key: "ram_used_mb", label: "Used MB", color: "var(--s4)" }, { key: "ram_cached_mb", label: "Cached MB", color: "var(--s1)", fill: false }, { key: "swap_used_mb", label: "Swap MB", color: "var(--s5)", fill: false }] as Series[],
   pow: [{ key: "cpu_w", label: "CPU W", color: "var(--s1)" }, { key: "gpu_w", label: "GPU W", color: "var(--s3)" }] as Series[],
+  diskIo: [{ key: "disk_read_kbs", label: "Read", color: "var(--s1)" }, { key: "disk_write_kbs", label: "Write", color: "var(--s4)" }] as Series[],
+  diskUse: [{ key: "disk_used_pct", label: "Used %", color: "var(--s3)" }] as Series[],
+  diskTemp: [{ key: "disk_temp_c", label: "Temp C", color: "var(--s5)" }] as Series[],
 };
-function Block({ title, m, keys, series, unit, max }: { title: string; m: Metrics; keys: string[]; series: Series[]; unit: string; max?: number }) {
+function Block({ title, m, keys, series, unit, max, labels, scale = 1 }: { title: string; m: Metrics; keys: string[]; series: Series[]; unit: string; max?: number; labels?: Record<string, string>; scale?: number }) {
   const has = keys.some(k => m.summary[k]?.avg != null);
+  const sc = (v: number | null | undefined) => (v == null ? null : v * scale);
   return (
     <div className="card"><h4>{title}</h4>
       {has ? <>
-        <div className="strip">{keys.map(k => <span key={k}>{k.replace(/_(pct|mhz|mb|w)$/, "")}: min <b>{fmt(m.summary[k]?.min, 1)}</b> · avg <b>{fmt(m.summary[k]?.avg, 1)}</b> · max <b>{fmt(m.summary[k]?.max, 1)}</b></span>)}</div>
+        <div className="strip">{keys.map(k => <span key={k}>{labels?.[k] ?? k.replace(/_(pct|mhz|mb|w)$/, "")}: min <b>{fmt(sc(m.summary[k]?.min), 1)}</b> · avg <b>{fmt(sc(m.summary[k]?.avg), 1)}</b> · max <b>{fmt(sc(m.summary[k]?.max), 1)}</b></span>)}</div>
         <Chart points={m.points} series={series} unit={unit} syncKey="cc" max={max} />
       </> : <div className="muted" style={{ padding: "40px 0" }}>Not available on this unit</div>}
     </div>
   );
+}
+function DiskIO({ m }: { m: Metrics }) {
+  const peak = Math.max(m.summary.disk_read_kbs?.max ?? 0, m.summary.disk_write_kbs?.max ?? 0);
+  const { scale, unit } = rateUnit(peak);
+  const series = S.diskIo.map(s => ({ ...s, scale }));
+  return <Block title="Disk IO" m={m} keys={["disk_read_kbs", "disk_write_kbs"]} series={series} unit={unit} labels={{ disk_read_kbs: "Read", disk_write_kbs: "Write" }} scale={scale} />;
 }
 export default function UnitDetail({ id }: { id: number }) {
   const [range, setRange] = useState<(typeof RANGES)[number]>("1h");
@@ -76,6 +89,15 @@ export default function UnitDetail({ id }: { id: number }) {
         <Block title="Memory (MB)" m={m} keys={["ram_used_mb", "ram_cached_mb", "swap_used_mb"]} series={S.mem} unit="" />
         <Block title="Power (W)" m={m} keys={["cpu_w", "gpu_w"]} series={S.pow} unit=" W" />
       </>}</div>
+      {(u.disks?.mounts.length || m) && <section aria-label="Disks" className="disks">
+        <h3 style={{ fontSize: 18, margin: "8px 0 12px" }}>Disks</h3>
+        {u.disks && u.disks.mounts.length > 0 && <div style={{ marginBottom: 16 }}><DiskList mounts={u.disks.mounts} /></div>}
+        {m && <div className="charts">
+          <DiskIO m={m} />
+          <Block title="Disk usage" m={m} keys={["disk_used_pct"]} series={S.diskUse} unit="%" max={100} labels={{ disk_used_pct: "Used" }} />
+          {hasSeries(m.points, "disk_temp_c") && <Block title="Disk temperature" m={m} keys={["disk_temp_c"]} series={S.diskTemp} unit=" °C" labels={{ disk_temp_c: "Temp" }} />}
+        </div>}
+      </section>}
       {u.online && <Services unitId={id} />}
       {confirm && <div className="modal" role="alertdialog" aria-modal="true" onClick={() => setConfirm(null)}><div className="card" onClick={e => e.stopPropagation()}>
         {confirm === "remove" ? <>

@@ -1,9 +1,17 @@
 import { Database } from "bun:sqlite";
 
-export const METRICS = ["cpu_pct","cpu_mhz","cpu_w","gpu_pct","gpu_mhz","gpu_w","vram_used_mb","ram_used_mb","ram_cached_mb","swap_used_mb"] as const;
+export const METRICS = ["cpu_pct","cpu_mhz","cpu_w","gpu_pct","gpu_mhz","gpu_w","vram_used_mb","ram_used_mb","ram_cached_mb","swap_used_mb","disk_read_kbs","disk_write_kbs","disk_temp_c","disk_used_pct"] as const;
 export type Metric = typeof METRICS[number];
 
 const tier = (name: string) => `CREATE TABLE IF NOT EXISTS ${name} (unit_id INTEGER NOT NULL, ts INTEGER NOT NULL, n INTEGER NOT NULL, ${METRICS.map(m => `${m}_avg REAL, ${m}_min REAL, ${m}_max REAL`).join(", ")}, PRIMARY KEY (unit_id, ts)) WITHOUT ROWID;`;
+
+/** Adds any METRICS column missing from an existing sample table (additive, nullable REAL). */
+function migrateSampleTable(db: Database, table: string, perMetric: (m: string) => string[]) {
+  const have = new Set((db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(c => c.name));
+  for (const m of METRICS) for (const col of perMetric(m)) {
+    if (!have.has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} REAL`);
+  }
+}
 
 export function openDb(path: string): Database {
   const db = new Database(path, { create: true });
@@ -22,7 +30,11 @@ export function openDb(path: string): Database {
   CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, unit_id INTEGER, detail TEXT, ip TEXT);
   CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS unit_services (unit_id INTEGER NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(unit_id,kind,name));
+  CREATE TABLE IF NOT EXISTS unit_disks (unit_id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, json TEXT NOT NULL);
   `);
+  migrateSampleTable(db, "samples_raw", m => [m]);
+  migrateSampleTable(db, "samples_1m", m => [`${m}_avg`, `${m}_min`, `${m}_max`]);
+  migrateSampleTable(db, "samples_15m", m => [`${m}_avg`, `${m}_min`, `${m}_max`]);
   return db;
 }
 

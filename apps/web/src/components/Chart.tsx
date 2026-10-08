@@ -39,7 +39,7 @@ export function Chart({ points, series, unit, syncKey, max }: { points: Sample[]
       scales: { x: { time: true }, y: { range: (_u, _min, mx) => [0, Math.max(latest.current.max ?? 0, mx * 1.15 || 1)] } },
       axes: [
         { stroke: mut, grid: { stroke: line, width: 1 }, ticks: { show: false, stroke: line, width: 1 } },
-        { stroke: mut, grid: { stroke: line, width: 1 }, ticks: { show: false, stroke: line, width: 1 }, size: 46, values: (_u, v) => v.map(x => (x >= 100 ? x.toFixed(0) : +x.toFixed(1)) + unit) },
+        { stroke: mut, grid: { stroke: line, width: 1 }, ticks: { show: false, stroke: line, width: 1 }, size: 46 + Math.max(0, unit.length - 2) * 7, values: (_u, v) => v.map(x => (x >= 100 ? x.toFixed(0) : +x.toFixed(1)) + unit) },
       ],
       series: [{}, ...resolved.map(s => ({
         label: s.label,

@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { METRICS } from "./db";
+import { storeDisks } from "./disks";
 
 export function computeEnergy(o: { dt: number; cpuW: number | null; gpuW: number | null; dCpuUj: number | null; dGpuUj: number | null; interval: number }): number {
   if (o.dt <= 0 || o.dt > o.interval * 3) return 0; // gap or clock jump: never interpolate
@@ -25,6 +26,7 @@ export function ingestLines(db: Database, unitId: number, lines: string[], inter
   let added = 0;
   db.transaction(() => {
     for (const o of parsed) {
+      if (Array.isArray(o.disks)) storeDisks(db, unitId, o.ts as number, o.disks);
       const ts = o.ts as number;
       const prev = prevQ.get(unitId, ts) as { ts: number; cpu_uj: number | null; gpu_uj: number | null } | null;
       const cpuUj = num(o.cpu_uj), gpuUj = num(o.gpu_uj);
