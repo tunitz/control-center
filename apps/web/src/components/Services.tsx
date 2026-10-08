@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type ServiceItem, type ServiceLogLine, type ServiceRef } from "../api";
-import { AGENT_HINT, KIND_LABEL, canStart, canStop, filterItems, groupByKind, hintFor, isAgentMissing, relativeTime, stateTone } from "../services";
+import { AGENT_HINT, KIND_LABEL, canStart, canStop, displayName, filterItems, groupByKind, hintFor, isAgentMissing, relativeTime, stateTone } from "../services";
 
 const keyOf = (r: ServiceRef) => JSON.stringify([r.kind, r.name]);
 const basePath = (unitId: number, r: ServiceRef) => `/units/${unitId}/services/${r.kind}/${encodeURIComponent(r.name)}`;
@@ -36,8 +36,8 @@ export default function Services({ unitId }: { unitId: number }) {
       {err && !isAgentMissing(err) && <div className="err" role="alert">{err}</div>}
       {loaded && !err && items.length === 0 && <div className="muted">No services allowed. Use Manage to choose.</div>}
       {groups.map(g => (
-        <div key={g.kind}>
-          <div className="svc-kind">{KIND_LABEL[g.kind]}</div>
+        <div key={g.label}>
+          <div className="svc-kind">{g.label ?? KIND_LABEL[g.kind]}</div>
           {g.items.map(it => <Row key={keyOf(it)} unitId={unitId} item={it} onChanged={load} />)}
         </div>
       ))}
@@ -61,7 +61,7 @@ function Row({ unitId, item, onChanged }: { unitId: number; item: ServiceItem; o
     <div className="svc-row">
       <button className="svc-head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className={"dot sm " + (tone === "ok" ? "on" : tone === "off" ? "off" : "")} />
-        <span className="svc-name">{item.name}</span>
+        <span className="svc-name" title={item.name}>{displayName(item)}</span>
         {item.detail && <span className="svc-detail muted">{item.detail}</span>}
         <span className="svc-state muted">{busy ? ACTION_LABEL[busy] : item.state}</span>
         <span className="chev" aria-hidden="true">{open ? "▾" : "▸"}</span>
@@ -170,12 +170,12 @@ function Picker({ unitId, onClose, onSaved }: { unitId: number; onClose: () => v
         <>
           <input aria-label="Filter services" placeholder="Filter" value={q} onChange={e => setQ(e.target.value)} autoCapitalize="none" />
           {groups.map(g => (
-            <div key={g.kind}>
-              <div className="svc-kind">{KIND_LABEL[g.kind]}</div>
+            <div key={g.label}>
+              <div className="svc-kind">{g.label ?? KIND_LABEL[g.kind]}</div>
               {g.items.map(o => (
                 <label key={keyOf(o)} className="chk">
                   <input type="checkbox" checked={sel.has(keyOf(o))} onChange={() => toggle(o)} />
-                  <span className="svc-name">{o.name}</span>
+                  <span className="svc-name" title={o.name}>{displayName(o)}</span>
                   {o.state && <span className="muted">{o.state}</span>}
                 </label>
               ))}

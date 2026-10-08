@@ -9,7 +9,7 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   if (!r.ok) throw new ApiError(r.status, j.error ?? r.statusText);
   return j as T;
 }
-export type ServiceKind = "systemd" | "docker" | "lxc";
+export type ServiceKind = "systemd" | "user" | "docker" | "lxc";
 export type ServiceItem = { kind: ServiceKind; name: string; state: string; detail?: string };
 export type ServiceRef = { kind: ServiceKind; name: string };
 export type ServiceLogLine = { ts: number; level: "error" | "warn" | "info" | "debug"; msg: string };

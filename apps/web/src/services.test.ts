@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { relativeTime, stateTone, canStart, canStop, groupByKind, filterItems, hintFor, isAgentMissing, AGENT_HINT } from "./services";
+import { relativeTime, stateTone, canStart, canStop, groupByKind, filterItems, hintFor, isAgentMissing, AGENT_HINT, displayName, KIND_ORDER, KIND_LABEL } from "./services";
 
 const AGENT_MISSING = "agent not reachable";
 
@@ -44,7 +44,7 @@ test("canStop is disabled only when already stopped", () => {
   expect(canStop("inactive")).toBe(false);
 });
 
-test("groupByKind: fixed order systemd, docker, lxc; empty kinds dropped; names sorted", () => {
+test("groupByKind: fixed order systemd, user, docker, lxc; empty kinds dropped; names sorted", () => {
   const items = [
     { kind: "lxc" as const, name: "101", state: "running", detail: "" },
     { kind: "docker" as const, name: "web", state: "running", detail: "" },
@@ -56,6 +56,49 @@ test("groupByKind: fixed order systemd, docker, lxc; empty kinds dropped; names 
   expect(g[0].items.map(i => i.name)).toEqual(["cron", "nginx"]);
   expect(groupByKind([])).toEqual([]);
   expect(groupByKind(items.filter(i => i.kind !== "docker")).map(x => x.kind)).toEqual(["systemd", "lxc"]);
+});
+
+test("KIND_ORDER is systemd, user, docker, lxc and every kind has a label", () => {
+  expect(KIND_ORDER).toEqual(["systemd", "user", "docker", "lxc"]);
+  expect(KIND_LABEL.user).toBe("User services");
+});
+
+test("groupByKind: user items form one group per username, sorted by username, labelled", () => {
+  const items = [
+    { kind: "user" as const, name: "tunitz:syncthing.service", state: "active" },
+    { kind: "user" as const, name: "bob:redis.service", state: "active" },
+    { kind: "user" as const, name: "tunitz:backup.timer", state: "active" },
+    { kind: "systemd" as const, name: "sshd.service", state: "active" },
+  ];
+  const g = groupByKind(items);
+  expect(g.map(x => x.kind)).toEqual(["systemd", "user", "user"]);
+  expect(g[1]).toMatchObject({ kind: "user", label: "User services (bob)" });
+  expect(g[1].items.map(i => i.name)).toEqual(["bob:redis.service"]);
+  expect(g[2]).toMatchObject({ kind: "user", label: "User services (tunitz)" });
+  expect(g[2].items.map(i => i.name)).toEqual(["tunitz:backup.timer", "tunitz:syncthing.service"]);
+});
+
+test("groupByKind: non-user groups carry the KIND_LABEL label", () => {
+  const g = groupByKind([{ kind: "docker" as const, name: "web", state: "running" }]);
+  expect(g[0]).toMatchObject({ kind: "docker", label: "Docker" });
+});
+
+test("displayName: unit part for user items, plain name otherwise", () => {
+  expect(displayName({ kind: "user", name: "tunitz:syncthing.service" })).toBe("syncthing.service");
+  expect(displayName({ kind: "user", name: "a:b:c" })).toBe("b:c");
+  expect(displayName({ kind: "systemd", name: "nginx.service" })).toBe("nginx.service");
+  expect(displayName({ kind: "docker", name: "web" })).toBe("web");
+});
+
+test("filterItems: matches the displayName of user items, and the full name too", () => {
+  const items = [
+    { kind: "user" as const, name: "tunitz:syncthing.service", state: "active" },
+    { kind: "systemd" as const, name: "nginx.service", state: "active" },
+  ];
+  expect(filterItems(items, "SYNC").map(i => i.name)).toEqual(["tunitz:syncthing.service"]);
+  expect(filterItems(items, "tunitz:sync").map(i => i.name)).toEqual(["tunitz:syncthing.service"]);
+  expect(filterItems(items, "tunitz").map(i => i.name)).toEqual(["tunitz:syncthing.service"]);
+  expect(filterItems(items, "nginx").map(i => i.name)).toEqual(["nginx.service"]);
 });
 
 test("filterItems: case-insensitive substring on name, empty query keeps all", () => {

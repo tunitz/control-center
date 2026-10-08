@@ -2,13 +2,22 @@ import type { Database } from "bun:sqlite";
 import { audit } from "./db";
 import { targetOf, type UnitRow } from "./poller";
 
-export type Kind = "systemd" | "docker" | "lxc";
+export type Kind = "systemd" | "user" | "docker" | "lxc";
 export type ServiceItem = { kind: Kind; name: string };
 export type ServiceDeps = { db: Database; pool: { exec(id: number, target: any, cmd: string, timeoutMs?: number, stdin?: string): Promise<string> }; master: string; now: number; pollInterval: number; authed: boolean };
 export const LIST_CMD = "svc-list", DISCOVER_CMD = "svc-discover", ALLOW_CMD = "svc-allow";
 const NAME = /^[A-Za-z0-9][A-Za-z0-9@._:-]{0,127}$/, VMID = /^[0-9]{1,9}$/;
-export function validKind(v: unknown): v is Kind { return v === "systemd" || v === "docker" || v === "lxc"; }
-export function validName(kind: Kind, name: unknown): name is string { return typeof name === "string" && (kind === "lxc" ? VMID.test(name) : NAME.test(name)); }
+const USER = /^[a-z_][a-z0-9_-]{0,31}$/, USER_NAME_MAX = 160;
+export function validKind(v: unknown): v is Kind { return v === "systemd" || v === "user" || v === "docker" || v === "lxc"; }
+export function validName(kind: Kind, name: unknown): name is string {
+  if (typeof name !== "string") return false;
+  if (kind === "lxc") return VMID.test(name);
+  if (kind === "user") {
+    const i = name.indexOf(":");
+    return name.length <= USER_NAME_MAX && i > 0 && USER.test(name.slice(0, i)) && NAME.test(name.slice(i + 1));
+  }
+  return NAME.test(name);
+}
 export function validateItems(body: any): { ok: true; items: ServiceItem[] } | { ok: false; error: string } {
   if (!body || typeof body !== "object" || !Array.isArray(body.items) || body.items.length > 200) return { ok: false, error: "invalid items" };
   const out: ServiceItem[] = [], seen = new Set<string>();

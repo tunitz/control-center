@@ -31,8 +31,8 @@ test("paste command is ONE short line that decodes back to the full installer", 
   const s = installScript({ pubkey: pub, interval: 5 });
   const p = pasteCommand(s);
   expect(p.trim().split("\n").length).toBe(1);          // one line, not a paragraph
-  // curl is the default install method; this paste is the offline fallback, so its bound is loose (was 5600 before the installer grew to ~9.8k).
-  expect(p.length).toBeLessThan(10500);
+  // curl is the default install method; this paste is the offline fallback, so its bound is loose (was 5600 before the installer grew to ~9.8k, ~11.3k with user-level service support).
+  expect(p.length).toBeLessThan(12000);
   const m = /^echo '([A-Za-z0-9+/=]+)' \| base64 -d \| gunzip \| sudo bash\n?$/.exec(p);
   expect(m).not.toBeNull();
   const back = gunzipSync(Buffer.from(m![1], "base64")).toString();

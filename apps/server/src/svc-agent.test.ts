@@ -1,5 +1,5 @@
 import { test, expect, beforeEach } from "bun:test";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, utimesSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, utimesSync, mkdirSync, readdirSync, statSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -36,6 +36,9 @@ const helperEnv = () => ({
   CCAGENT_DOCKER: join(bin, "docker"),
   CCAGENT_PCT: join(bin, "pct"),
   CCAGENT_JOURNALCTL: join(bin, "journalctl"),
+  CCAGENT_LOGINCTL: join(bin, "loginctl"),
+  CCAGENT_RUNUSER: join(bin, "runuser"),
+  CCAGENT_RUNDIR: join(dir, "run"),
 });
 const gateEnv = (cmd: string) => ({ PATH: PATHENV, CCAGENT_CONF: conf, CCAGENT_SVC_WAIT: "3", SSH_ORIGINAL_COMMAND: cmd });
 
@@ -98,7 +101,8 @@ beforeEach(() => {
   conf = join(dir, "conf"); req = join(dir, "svc.request");
   writeFileSync(conf, `DIR=${dir}\nSVC_UNIT=${unitFile}\n`);
   writeFileSync(unitFile, "");
-  fakeCmd("systemctl", `case "$1" in list-units) cat ${fixture("systemctl", SYSTEMCTL_LIST)};; esac`);
+  // `systemctl --user ...` (run through runuser) reads per-uid unit fixtures: user-units-<uid>.
+  fakeCmd("systemctl", `if [ "$1" = --user ]; then shift; case "$1" in list-units) cat "${dir}/user-units-$(basename "$XDG_RUNTIME_DIR")" 2>/dev/null;; esac; else case "$1" in list-units) cat ${fixture("systemctl", SYSTEMCTL_LIST)};; esac; fi`);
   fakeCmd("docker", `case "$1" in ps) cat ${fixture("ps", DOCKER_PS)};; logs) cat ${fixture("dlogs", DOCKER_LOGS)};; esac`);
   fakeCmd("pct", `case "$1" in list) cat ${fixture("pct", PCT_LIST)};; exec) cat ${fixture("journal", JOURNAL)};; esac`);
   fakeCmd("journalctl", `cat ${fixture("journal2", JOURNAL)}`);
@@ -569,4 +573,134 @@ test("a fresh svc.request from another actor with no helper => exit 3 'busy' aft
   expect(r.code).toBe(3);
   expect(r.err).toMatch(/busy/i);
   expect(readFileSync(req, "utf8")).toBe(before); // not ours: left alone
+});
+
+// ---------- user-level systemd services: kind "user", item name "<username>:<unit>" ----------
+
+const LOGINCTL = "1000 tunitz\n999 svc\n1001 nodir\n1002 broken\n1003 Tun\n";
+const USER_UNITS_1000 = "syncthing.service loaded active running Syncthing\nbroken.service loaded failed failed Oops\n";
+const RD = (uid: number) => join(dir, "run", String(uid));
+/** Fake loginctl (uid table), runuser (fails for user "broken") and per-uid user units. /run/user/1001 is absent. */
+function setupUsers() {
+  for (const u of ["1000", "999", "1002", "1003"]) mkdirSync(RD(Number(u)), { recursive: true });
+  writeFileSync(join(dir, "user-units-1000"), USER_UNITS_1000);
+  fakeCmd("loginctl", `case "$1" in list-users) cat ${fixture("lu", LOGINCTL)};; esac`);
+  fakeCmd("runuser", `u=""; while [ "$1" != "--" ]; do if [ "$1" = "-u" ]; then shift; u="$1"; fi; shift; done; shift; if [ "$u" = broken ]; then echo boom >&2; exit 1; fi; exec "$@"`);
+}
+
+test("gate accepts user items shaped <username>:<unit> and rejects malformed ones (exit 2, nothing queued)", async () => {
+  writeFileSync(allow, "[]");
+  const ok = await viaHelper("svc-act user tunitz:foo.service restart");
+  expect(ok.code).toBe(3); // reached the helper, which denies it: not allowlisted
+  expect(JSON.parse(ok.out)).toMatchObject({ ok: false, code: "denied" });
+  const cases = [
+    "svc-act user foo.service restart",                        // no username part
+    "svc-act user -x:foo restart",                             // username may not start with '-'
+    "svc-act user Tun:foo restart",                            // username is lowercase only
+    "svc-act user tunitz:-bad restart",                        // unit may not start with '-'
+    "svc-act user tunitz:foo.service reload",                  // bad action
+    "svc-act user " + "a".repeat(33) + ":foo.service restart", // username > 32 chars
+    "svc-logs user foo.service 10",
+    "svc-logs user tunitz:-bad 10",
+  ];
+  for (const c of cases) expect([c, gateSync(c).exitCode]).toEqual([c, 2]);
+  expect(callLog()).toBe("");
+});
+
+test("helper discover: user rows come from loginctl+runuser; system uids, missing runtime dirs, failing users and bad names are skipped", async () => {
+  setupUsers();
+  const r = await viaHelper("svc-discover");
+  expect(r.code).toBe(0);
+  const users = (JSON.parse(r.out).data.items as any[]).filter(i => i.kind === "user");
+  expect(users).toEqual([
+    { kind: "user", name: "tunitz:syncthing.service", state: "active", detail: "Syncthing" },
+    { kind: "user", name: "tunitz:broken.service", state: "failed", detail: "Oops" },
+  ]);
+  expect(callLog()).toContain("runuser -u tunitz -- env XDG_RUNTIME_DIR=" + RD(1000));
+  expect(callLog()).not.toContain("runuser -u svc");
+  expect(callLog()).not.toContain("runuser -u nodir");
+  expect(callLog()).not.toContain("runuser -u Tun");
+});
+
+test("helper discover: a missing loginctl yields no user rows and no error", async () => {
+  setupUsers();
+  Bun.spawnSync(["rm", "-f", join(bin, "loginctl")]);
+  const r = await viaHelper("svc-discover");
+  expect(r.code).toBe(0);
+  expect((JSON.parse(r.out).data.items as any[]).filter(i => i.kind === "user")).toEqual([]);
+});
+
+test("svc-list reports user items from discovery; allowlisted but absent ones are missing", async () => {
+  setupUsers();
+  writeFileSync(allow, JSON.stringify([{ kind: "user", name: "tunitz:syncthing.service" }, { kind: "user", name: "tunitz:gone.service" }]));
+  const r = await viaHelper("svc-list");
+  expect(r.code).toBe(0);
+  const items = JSON.parse(r.out).data.items as any[];
+  expect(items.find(i => i.name === "tunitz:syncthing.service")).toMatchObject({ kind: "user", state: "active", detail: "Syncthing" });
+  expect(items.find(i => i.name === "tunitz:gone.service")).toMatchObject({ kind: "user", state: "missing" });
+});
+
+test("helper act on a user item runs exactly: runuser -u <user> -- env XDG_RUNTIME_DIR=… DBUS_SESSION_BUS_ADDRESS=… systemctl --user <action> -- <unit>", async () => {
+  setupUsers();
+  writeFileSync(allow, JSON.stringify([{ kind: "user", name: "tunitz:syncthing.service" }]));
+  const r = await viaHelper("svc-act user tunitz:syncthing.service restart");
+  expect(r.code).toBe(0);
+  expect(JSON.parse(r.out)).toMatchObject({ ok: true });
+  const rd = RD(1000);
+  expect(callLog().trim().split("\n")).toEqual([
+    "loginctl list-users --no-legend",
+    `runuser -u tunitz -- env XDG_RUNTIME_DIR=${rd} DBUS_SESSION_BUS_ADDRESS=unix:path=${rd}/bus ${join(bin, "systemctl")} --user restart -- syncthing.service`,
+    "systemctl --user restart -- syncthing.service",
+  ]);
+});
+
+test("helper denies user acts that are not allowlisted, target system users, lack a session, or name protected units", async () => {
+  setupUsers();
+  writeFileSync(allow, JSON.stringify([
+    { kind: "user", name: "tunitz:syncthing.service" }, { kind: "user", name: "svc:foo.service" },
+    { kind: "user", name: "tunitz:sshd.service" },
+  ]));
+  const denied = async (name: string) => {
+    const r = await viaHelper(`svc-act user ${name} restart`);
+    return JSON.parse(r.out);
+  };
+  expect(await denied("tunitz:broken.service")).toMatchObject({ ok: false, code: "denied" }); // not allowlisted
+  expect(await denied("svc:foo.service")).toMatchObject({ ok: false, code: "denied" });        // uid 999 is a system user
+  expect(await denied("tunitz:sshd.service")).toMatchObject({ ok: false, code: "denied" });    // protected unit
+  expect(callLog()).not.toContain("runuser");
+  rmSync(RD(1000), { recursive: true, force: true });
+  expect(await denied("tunitz:syncthing.service")).toMatchObject({ ok: false, code: "failed", error: "user session not running" });
+  expect(callLog()).not.toContain("runuser");
+});
+
+test("helper re-validates user item parts itself (a compromised gate cannot inject)", () => {
+  setupUsers();
+  writeFileSync(allow, JSON.stringify([{ kind: "user", name: "tunitz:syncthing.service" }]));
+  for (const [id, name] of [["f1f1f1f1f1f1f1f1", "-x:foo.service"], ["f2f2f2f2f2f2f2f2", "Tun:foo.service"], ["f3f3f3f3f3f3f3f3", "tunitz:-bad"], ["f4f4f4f4f4f4f4f4", "tunitz"]]) {
+    helperRun({ id, verb: "act", kind: "user", name, action: "restart" });
+    expect([name, result(id)]).toEqual([name, expect.objectContaining({ ok: false, code: "bad_request" })]);
+  }
+  expect(callLog()).not.toContain("runuser");
+});
+
+test("helper logs for a user item use exactly: journalctl --user-unit <unit> _UID=<uid> -n N -o json --no-pager", async () => {
+  setupUsers();
+  writeFileSync(allow, JSON.stringify([{ kind: "user", name: "tunitz:syncthing.service" }]));
+  const r = await viaHelper("svc-logs user tunitz:syncthing.service 50");
+  expect(r.code).toBe(0);
+  expect(JSON.parse(r.out).data.lines.map((l: any) => l.msg.slice(0, 12))).toEqual(["xxxxxxxxxxxx", "no priority", "debug chatte", "disk nearly ", "café broke", "started ngin"]);
+  expect(callLog()).toContain("journalctl --user-unit syncthing.service _UID=1000 -n 50 -o json --no-pager\n");
+});
+
+test("svc-allow accepts user items and rejects protected user units and bad user names", async () => {
+  setupUsers();
+  const ok = await viaHelper("svc-allow", Buffer.from(JSON.stringify({ items: [{ kind: "user", name: "tunitz:syncthing.service" }, { kind: "user", name: "tunitz:syncthing.service" }] })));
+  expect(ok.code).toBe(0);
+  expect(JSON.parse(readFileSync(allow, "utf8"))).toEqual([{ kind: "user", name: "tunitz:syncthing.service" }]);
+  for (const name of ["tunitz:ccagent.service", "tunitz:ssh.service", "Tun:foo.service", "tunitz:-x"]) {
+    const r = await viaHelper("svc-allow", Buffer.from(JSON.stringify({ items: [{ kind: "user", name }] })));
+    expect([name, r.code]).toEqual([name, 3]);
+    expect(JSON.parse(r.out)).toMatchObject({ ok: false, code: "bad_request" });
+  }
+  expect(JSON.parse(readFileSync(allow, "utf8"))).toEqual([{ kind: "user", name: "tunitz:syncthing.service" }]);
 });

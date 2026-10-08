@@ -13,8 +13,36 @@ export function hintFor(o: { listErr: string; pickerOpen: boolean; discoverCount
   return isAgentMissing(o.listErr) ? "list" : null;
 }
 
-export const KIND_ORDER: ServiceKind[] = ["systemd", "docker", "lxc"];
-export const KIND_LABEL: Record<ServiceKind, string> = { systemd: "systemd", docker: "Docker", lxc: "LXC" };
+export const KIND_ORDER: ServiceKind[] = ["systemd", "user", "docker", "lxc"];
+export const KIND_LABEL: Record<ServiceKind, string> = { systemd: "systemd", user: "User services", docker: "Docker", lxc: "LXC" };
+
+/** Visible name: the unit part for user items ("user:unit" -> "unit"), the plain name otherwise. */
+export function displayName(item: { kind: ServiceKind; name: string }): string {
+  if (item.kind !== "user") return item.name;
+  const i = item.name.indexOf(":");
+  return i >= 0 ? item.name.slice(i + 1) : item.name;
+}
+
+const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
+
+/**
+ * Groups by kind in fixed order (systemd, user, docker, lxc), drops empty groups, sorts names.
+ * User services get one group per username (sorted), labelled "User services (<username>)".
+ */
+export function groupByKind<T extends { kind: ServiceKind; name: string }>(items: T[]): { kind: ServiceKind; label: string; items: T[] }[] {
+  return KIND_ORDER.flatMap((kind): { kind: ServiceKind; label: string; items: T[] }[] => {
+    const mine = items.filter(i => i.kind === kind).sort(byName);
+    if (kind !== "user") return mine.length ? [{ kind, label: KIND_LABEL[kind], items: mine }] : [];
+    const users = [...new Set(mine.map(i => i.name.split(":")[0]))].sort((a, b) => a.localeCompare(b));
+    return users.map(u => ({ kind, label: `${KIND_LABEL.user} (${u})`, items: mine.filter(i => i.name.split(":")[0] === u) }));
+  });
+}
+
+/** Case-insensitive substring filter on the display name or the full name. Blank query keeps everything. */
+export function filterItems<T extends { kind: ServiceKind; name: string }>(items: T[], query: string): T[] {
+  const q = query.trim().toLowerCase();
+  return q ? items.filter(i => displayName(i).toLowerCase().includes(q) || i.name.toLowerCase().includes(q)) : items;
+}
 
 /** Human relative time, e.g. "12s ago", "3m ago". Future timestamps (clock skew) read as "0s ago". */
 export function relativeTime(ms: number, now: number): string {
@@ -40,16 +68,3 @@ export const canStart = (state: string) => stateTone(state) !== "ok";
 /** Stop is useless only when the service is already down (stopped, inactive, exited). */
 export const canStop = (state: string) => stateTone(state) === "ok" || stateTone(state) === "bad";
 
-/** Groups by kind in fixed order (systemd, docker, lxc), drops empty kinds, sorts names. */
-export function groupByKind<T extends { kind: ServiceKind; name: string }>(items: T[]): { kind: ServiceKind; items: T[] }[] {
-  return KIND_ORDER.map(kind => ({
-    kind,
-    items: items.filter(i => i.kind === kind).sort((a, b) => a.name.localeCompare(b.name)),
-  })).filter(g => g.items.length > 0);
-}
-
-/** Case-insensitive substring filter on the name. Blank query keeps everything. */
-export function filterItems<T extends { name: string }>(items: T[], query: string): T[] {
-  const q = query.trim().toLowerCase();
-  return q ? items.filter(i => i.name.toLowerCase().includes(q)) : items;
-}

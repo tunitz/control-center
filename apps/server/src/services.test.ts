@@ -42,8 +42,8 @@ beforeEach(() => {
 
 // ---------- pure validators and builders ----------
 
-test("kind is exactly systemd|docker|lxc", () => {
-  for (const k of ["systemd", "docker", "lxc"]) expect(validKind(k)).toBe(true);
+test("kind is exactly systemd|user|docker|lxc", () => {
+  for (const k of ["systemd", "user", "docker", "lxc"]) expect(validKind(k)).toBe(true);
   for (const k of ["SYSTEMD", "tmux", "", "systemd ", "docker;x", undefined, 1]) expect(validKind(k as any)).toBe(false);
 });
 
@@ -52,6 +52,31 @@ test("name rules: general pattern for systemd/docker, vmid digits for lxc", () =
   const bad: [string, string][] = [["systemd", ""], ["systemd", "a".repeat(129)], ["systemd", "a b"], ["systemd", "a;b"], ["systemd", "a\nb"], ["systemd", "../x"], ["systemd", "*"], ["systemd", "a/b"], ["systemd", "a$b"], ["lxc", "1x"], ["lxc", "1234567890"], ["lxc", "-1"], ["lxc", ""], ["lxc", "nginx.service"]];
   for (const [k, n] of ok) expect([k, n, validName(k as any, n)]).toEqual([k, n, true]);
   for (const [k, n] of bad) expect([k, n, validName(k as any, n)]).toEqual([k, n, false]);
+});
+
+test("user kind: name is <username>:<unit>, split at the first ':'", () => {
+  for (const n of ["tunitz:foo.service", "a_b-1:sshd@2.service", "x:syncthing.service", "u:a:b"]) expect([n, validName("user", n)]).toEqual([n, true]);
+  for (const n of ["foo.service", ":foo", "Tun:foo", "tunitz:-x", "tunitz:", "tunitz:a b", "tunitz:a;b", "-u:foo", "1u:foo", "a".repeat(33) + ":foo"]) {
+    expect([n, validName("user", n)]).toEqual([n, false]);
+  }
+  expect(validName("user", "a" + ":" + "b".repeat(127))).toBe(true);
+  expect(validName("user", "a".repeat(32) + ":" + "b".repeat(127))).toBe(true);
+  expect(validName("user", "a".repeat(32) + ":" + "b".repeat(128))).toBe(false);
+  expect(validName("user", "a" + ":" + "b".repeat(128))).toBe(true);
+  expect(validName("user", "a" + ":" + "b".repeat(129))).toBe(false);
+});
+
+test("user kind: validateItems accepts user items", () => {
+  expect(validateItems({ items: [{ kind: "user", name: "tunitz:syncthing.service" }] }))
+    .toEqual({ ok: true, items: [{ kind: "user", name: "tunitz:syncthing.service" }] });
+  expect(validateItems({ items: [{ kind: "user", name: "syncthing.service" }] }).ok).toBe(false);
+});
+
+test("user kind: command builders emit svc-act/svc-logs with the user:unit name", () => {
+  expect(buildActCmd("user", "tunitz:syncthing.service", "restart")).toBe("svc-act user tunitz:syncthing.service restart");
+  expect(buildLogsCmd("user", "tunitz:sshd@2.service", 100)).toBe("svc-logs user tunitz:sshd@2.service 100");
+  expect(() => buildActCmd("user", "bad name:x.service", "start")).toThrow();
+  expect(() => buildLogsCmd("user", "syncthing.service", 5)).toThrow();
 });
 
 test("name must start with an alphanumeric (no leading '-' that tools would read as an option)", () => {
