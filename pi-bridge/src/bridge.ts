@@ -6,7 +6,7 @@ import { type BridgeConfig } from "./config";
 import { Chat, HttpError, rpcError, type Frame } from "./chat";
 import { listModelsOnce, listSessions } from "./sessions";
 import { chosenCwd, listDirs, makeDir } from "./pi-dirs";
-import { listSkills, parseDisabled, skillLaunch, writeSkillsConfig } from "./skills";
+import { listSkills, parseDisabled, skillLaunch, skillsSignature, writeSkillsConfig } from "./skills";
 import { resolveAgentBrowser, resolveChromium } from "./browser";
 import { AuthManager, makeDeviceIdLoader, makeRuntimeLoader, type AuthType, type LoadRuntime } from "./login";
 
@@ -219,7 +219,8 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
     const tools = namesTools ? settings!.tools ?? readConfig(cfg.agentDir).defaultTools
       : running && liveChat ? liveChat.launchTools : readConfig(cfg.agentDir).defaultTools;
     // Skills are read at startup too, so the disabled set is part of the launch key: a toggle restarts.
-    const skills = skillLaunch(cfg, cwd ?? join(cfg.workspaceRoot, id));
+    const skillsCwd = cwd ?? join(cfg.workspaceRoot, id);
+    const skills = skillLaunch(cfg, skillsCwd);
     // Claude Code bridge: load the extension and keep ANTHROPIC_* out of Pi's env. Only when the
     // extension is actually present, so a half-configured toggle never strands a chat without auth.
     const cc = readConfig(cfg.agentDir);
@@ -228,7 +229,7 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
     const extensions: string[] = [];
     if (useClaudeBridge) extensions.push(cfg.claudeBridgeExtension);
     if (useBrowser) extensions.push(cfg.browserExtension);
-    const key = JSON.stringify([tools, fingerprint(cfg.agentDir), skills, useClaudeBridge, useBrowser]);
+    const key = JSON.stringify([tools, fingerprint(cfg.agentDir), skills, skillsSignature(cfg, skillsCwd), useClaudeBridge, useBrowser]);
 
     let resumeFrom = sessionPath;
     if (existing) {

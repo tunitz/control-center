@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { api, harness, type Harness } from "./helpers";
 import { parseFrontmatter } from "../src/skills";
@@ -98,5 +98,35 @@ describe("skills", () => {
       expect((await api(h, "PUT", "/skills", { disabled: bad })).status).toBe(400);
     }
     expect((await api(h, "PUT", "/skills", {})).status).toBe(400);
+  });
+
+  test("a skill added or edited while a chat is live restarts it on the next message; an untouched one does not", async () => {
+    const pidOf = async (id: string) => (await api(h, "POST", `/chats/${id}/start`, {})).json.state.pid;
+    const first = await pidOf("sk-live");
+    // Nothing changed: the same process keeps running.
+    expect(await pidOf("sk-live")).toBe(first);
+
+    // A new skill appears on disk (nothing is disabled, so only the signature can notice it).
+    skill(join(h.cfg.agentDir, "skills/brand-new"), "brand-new", "Added while the chat was open.");
+    const afterAdd = await pidOf("sk-live");
+    expect(afterAdd).not.toBe(first);
+    expect(await pidOf("sk-live")).toBe(afterAdd);
+
+    // Editing its description (a newer mtime) restarts it again.
+    const file = join(h.cfg.agentDir, "skills/brand-new/SKILL.md");
+    skill(join(h.cfg.agentDir, "skills/brand-new"), "brand-new", "A new description.");
+    const later = new Date(Date.now() + 5_000);
+    utimesSync(file, later, later);
+    expect(await pidOf("sk-live")).not.toBe(afterAdd);
+  });
+
+  test("a busy chat is not restarted by a new skill: the start is refused and the run keeps going", async () => {
+    const a = await api(h, "POST", "/chats/sk-busy/start", {});
+    await api(h, "POST", "/chats/sk-busy/prompt", { message: "SLOW please" });
+    for (let i = 0; i < 100 && !(await api(h, "POST", "/chats/sk-busy/command", { name: "get_state" })).json.data.isStreaming; i++) await Bun.sleep(10);
+    skill(join(h.cfg.agentDir, "skills/while-busy"), "while-busy", "Created mid-run.");
+    expect((await api(h, "POST", "/chats/sk-busy/start", {})).status).toBe(409);
+    expect((await api(h, "POST", "/chats/sk-busy/command", { name: "get_state" })).json.data.pid).toBe(a.json.state.pid);
+    await api(h, "POST", "/chats/sk-busy/abort", {});
   });
 });

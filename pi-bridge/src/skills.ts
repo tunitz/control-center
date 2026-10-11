@@ -186,6 +186,26 @@ export function skillLaunch(cfg: BridgeConfig, cwd: string): SkillLaunch {
   return { suppress: true, enabled };
 }
 
+/**
+ * A fingerprint of the skills Pi would load for this folder: every SKILL.md with its modified time. A new skill, a
+ * deleted one or an edited description changes it. Part of the launch key, so a chat's Pi process (which reads skills
+ * only at startup) is restarted on its next message and sees the change, with no command needed.
+ */
+export function skillsSignature(cfg: BridgeConfig, cwd: string): string {
+  return listSkills(cfg, [cwd])
+    .map((sk) => {
+      let mtime = 0;
+      try {
+        mtime = Math.round(statSync(sk.path).mtimeMs);
+      } catch {
+        /* vanished between scan and stat */
+      }
+      return `${sk.path}@${mtime}`;
+    })
+    .sort()
+    .join("\n");
+}
+
 /** Disabled skill paths, keyed by their absolute SKILL.md path. */
 export function readSkillsConfig(agentDir: string): Set<string> {
   try {
