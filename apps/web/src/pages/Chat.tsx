@@ -8,7 +8,7 @@ import { useThread } from "../chat/useThread";
 import { useSessions } from "../chat/useSessions";
 import { useVisualViewportHeight } from "../chat/viewport";
 import { openChatRunEvents, type GlobalRun } from "../chat/sse";
-import { lastInputTokens } from "../chat/context";
+import { estimateContextTokens } from "../chat/context";
 import { forgetChat, rememberChat } from "../chat/last";
 import { Composer } from "../components/chat/Composer";
 import { AssistantMessage, UserMessage } from "../components/chat/Message";
@@ -100,7 +100,7 @@ export default function Chat({ hash }: { hash: string }) {
   const modelId = liveModel ?? active?.model ?? config?.defaultModel ?? models[0]?.id ?? "";
   const effort = liveEffort ?? active?.effort ?? config?.defaultEffort ?? null;
   const modelRec = models.find(m => m.id === modelId);
-  const ctxInput = lastInputTokens(thread.messages);
+  const ctxInput = estimateContextTokens(thread.messages);
   const ctxWindow = config?.contextWindow[modelId];
 
   // Scroll anchoring: follow the bottom unless the user scrolled up.

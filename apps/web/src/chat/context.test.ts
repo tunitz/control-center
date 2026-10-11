@@ -21,3 +21,14 @@ test("last input tokens come from the newest assistant usage", () => {
   expect(lastInputTokens([m("assistant", { input: 100, output: 1 }), m("user", null), m("assistant", { input: 900, output: 5 }), m("assistant", null)])).toBe(900);
   expect(lastInputTokens([])).toBeNull();
 });
+
+import { estimateContextTokens, BASE_CONTEXT_TOKENS } from "./context";
+test("estimateContextTokens: base + chars/4, capped by last reported input, never the cumulative sum", () => {
+  const mk = (role: "user" | "assistant", text: string, usage: { input: number; output: number } | null = null) =>
+    ({ id: "x", seq: 1, role, text, reasoning: null, tools: [], usage, status: "complete", runId: null, model: null, attachments: [], createdAt: 0, error: null }) as any;
+  expect(estimateContextTokens([])).toBeNull();
+  expect(estimateContextTokens([mk("user", "x".repeat(4000)), mk("assistant", "y".repeat(400))])).toBe(BASE_CONTEXT_TOKENS + 1100);
+  // 3.1M cumulative input must not read as context
+  expect(estimateContextTokens([mk("user", "hi"), mk("assistant", "ok", { input: 3_184_043, output: 5 })])).toBe(BASE_CONTEXT_TOKENS + 1);
+  expect(estimateContextTokens([mk("user", "x".repeat(400000)), mk("assistant", "ok", { input: 30_000, output: 5 })])).toBe(30_000);
+});
