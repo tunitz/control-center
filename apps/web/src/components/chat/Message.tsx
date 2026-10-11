@@ -4,6 +4,7 @@ import { Markdown } from "./Markdown";
 import { copyText } from "../../clipboard";
 import { fmtTokens } from "../../chat/context";
 import { isAbnormal, showReasoning } from "../../chat/reduce";
+import { toolStatus, toolTarget } from "../../chat/tool";
 import type { Approval, Attachment, ChatMessage, ToolRow } from "../../chat/types";
 
 const fmtSize = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -37,7 +38,8 @@ function ToolRows({ tools }: { tools: ToolRow[] }) {
     <>
       {tools.map(t => {
         const isOpen = open === t.id;
-        const target = t.args ? Object.values(t.args).map(v => String(v)).join(" ") : "";
+        const target = toolTarget(t.args);
+        const st = toolStatus(t);
         const icon = t.name.includes("file") ? "file" : t.name.includes("search") ? "search" : "term";
         return (
           <div className="fold-wrap" key={t.id}>
@@ -47,7 +49,7 @@ function ToolRows({ tools }: { tools: ToolRow[] }) {
               <span className="tname">{t.name}</span>
               {target && <span className="targ">{target}</span>}
               {t.durationMs != null && <span className="tdur">{fmtDur(t.durationMs)}</span>}
-              {t.status === "running" ? <span className="stat-run">running</span> : t.status === "ok" ? <span className="stat-ok">ok</span> : <span className="stat-err">failed</span>}
+              <span className={st.cls}>{st.label}</span>
             </button>
             {isOpen && (
               <pre className="out" id={`tool-${t.id}`}>

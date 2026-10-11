@@ -72,7 +72,17 @@ export default function Chat({ hash }: { hash: string }) {
   // One chat.run feed for the whole page; sidebar badges come from it. The ref keeps the feed open across list changes.
   const onRunRef = useRef(sessions.onRun);
   onRunRef.current = sessions.onRun;
-  useEffect(() => openChatRunEvents((r: GlobalRun) => onRunRef.current(r)), []);
+  const reloadRef = useRef<() => void>(() => {});
+  reloadRef.current = () => { void thread.reload(); };
+  const activeRef = useRef(activeId);
+  activeRef.current = activeId;
+  const attachedRef = useRef<string | null>(null);
+  attachedRef.current = thread.runId;
+  useEffect(() => openChatRunEvents((r: GlobalRun) => {
+    onRunRef.current(r);
+    // A turn the server started on its own (reporting a finished subagent): attach to it.
+    if (r.state === "running" && r.sessionId === activeRef.current && r.runId && r.runId !== attachedRef.current) reloadRef.current();
+  }), []);
 
   useEffect(() => { setLiveModel(null); setLiveEffort(null); setMenu(false); setDrawer(false); }, [activeId]);
 
@@ -266,6 +276,13 @@ export default function Chat({ hash }: { hash: string }) {
                 ) : (
                   <AssistantMessage key={m.id} m={m} pending={approvalsFor(m.id)} />
                 ),
+              )}
+
+              {!thread.runId && (active?.awaiting ?? 0) > 0 && (
+                <div className="fold static" role="status" aria-live="polite">
+                  <span className="spin" aria-hidden="true" />
+                  <span className="lbl">{active!.awaiting === 1 ? "1 subagent working" : `${active!.awaiting} subagents working`}. The result will be reported here.</span>
+                </div>
               )}
             </div>
           </div>

@@ -28,7 +28,7 @@ export function useSessions(q: string, archived: boolean) {
 
   /** Fed by the page's single chat.run subscription (one /api/events stream for the whole chat view). */
   const onRun = useCallback((r: GlobalRun) => {
-    setList(prev => prev.map(s => (s.id === r.sessionId ? { ...s, runState: r.state, runId: r.state === "idle" ? null : r.runId, unread: r.state === "idle" ? true : s.unread } : s)));
+    setList(prev => prev.map(s => (s.id === r.sessionId ? { ...s, runState: r.state, runId: r.state === "idle" ? null : r.runId, awaiting: r.awaiting ?? s.awaiting, unread: r.state === "idle" ? true : s.unread } : s)));
     if (r.state === "idle") void refresh();
   }, [refresh]);
 

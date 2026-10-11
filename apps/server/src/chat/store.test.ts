@@ -12,7 +12,7 @@ test("createSession returns the contract shape with ms timestamps and idle run s
   const s = mk("s1", 1000);
   expect(s).toEqual({
     id: "s1", title: "New chat", titleAuto: true, model: "claude-sonnet-5-5", provider: "anthropic", effort: null,
-    pinned: false, archived: false, createdAt: 1000, updatedAt: 1000, runState: "idle", runId: null, unread: false, preview: "",
+    pinned: false, archived: false, createdAt: 1000, updatedAt: 1000, runState: "idle", runId: null, unread: false, preview: "", awaiting: 0,
   });
 });
 

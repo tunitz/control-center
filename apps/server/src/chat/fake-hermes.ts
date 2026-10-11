@@ -3,6 +3,7 @@
  * Run behaviour is scripted from the user message text:
  *   "run tool"      -> tool.started / tool.completed frames
  *   "think"         -> reasoning frame
+ *   "run delegate" -> a delegate_task tool call (dispatch only, like background subagents)
  *   "please fail"   -> done{status:failed}
  *   "interrupt me" -> done{status:interrupted}
  *   anything else   -> deltas "Hello" + " world", usage, done{complete}
@@ -33,6 +34,8 @@ export class FakeHermes implements HermesClient {
   deleted: string[] = [];
   steered: { runId: string; message: string }[] = [];
   lockFails = false;
+  rows = new Map<string, { id: number; ts: number }[]>();
+  private rowSeq = 0;
 
   private seq = 0;
   private runSeq = 0;
@@ -63,6 +66,17 @@ export class FakeHermes implements HermesClient {
   async modelOptions(): Promise<ModelOptions> {
     if (this.opts.modelOptionsError) throw new Error(this.opts.modelOptionsError);
     return this.opts.modelOptions ?? DEFAULT_OPTIONS;
+  }
+
+  /** Test hook: a background subagent finished in `sessionId` (ts in seconds). */
+  addCompletion(sessionId: string, ts: number): void {
+    const l = this.rows.get(sessionId) ?? [];
+    l.push({ id: ++this.rowSeq, ts });
+    this.rows.set(sessionId, l);
+  }
+
+  async completions(sessionId: string): Promise<{ id: number; ts: number }[]> {
+    return this.rows.get(sessionId) ?? [];
   }
 
   async startRun(args: StartRunArgs): Promise<{ runId: string; frames: AsyncIterable<HermesFrame> }> {
@@ -102,6 +116,10 @@ export class FakeHermes implements HermesClient {
     if (text.includes("run tool")) {
       body.push({ type: "tool.started", id: "t1", name: "terminal", args: { cmd: "ls" }, preview: "ls" });
       body.push({ type: "tool.completed", id: "t1", ok: true, durationMs: 12, preview: "ok" });
+    }
+    if (text.includes("run delegate")) {
+      body.push({ type: "tool.started", id: "d1", name: "delegate_task", args: { tasks: [{ goal: "check things" }] }, preview: null });
+      body.push({ type: "tool.completed", id: "d1", ok: true, durationMs: 48, preview: null });
     }
     if (text.includes("please fail")) { terminal = "failed"; error = "scripted failure"; }
     if (text.includes("interrupt me")) terminal = "interrupted";

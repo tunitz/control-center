@@ -76,6 +76,7 @@ function sess(id: string, title: string, o: Partial<ChatSession> & { ago: number
     createdAt: NOW - ago,
     updatedAt: NOW - ago,
     runState: "idle",
+    awaiting: 0,
     runId: null,
     unread: false,
     preview: "",

@@ -13,6 +13,8 @@ import type { NewAttachment, ToolRow, Effort, ChatMessage } from "./store";
 import { autoTitle } from "./title";
 
 export const MAX_ACTIVE_RUNS = 3;
+/** How long a session waits for a background subagent before the indicator is dropped. */
+export const AWAIT_TIMEOUT_MS = 30 * 60_000;
 const RING_SIZE = 500;
 const KEEPALIVE_MS = 15_000;
 const KEEP_FINISHED = 50;
@@ -23,6 +25,8 @@ export type RunInput = {
   attachments: NewAttachment[];
   model: string;
   effort: Effort | null;
+  /** Server-initiated turn (reporting a finished subagent): no user message is stored in the chat. */
+  internal?: boolean;
 };
 
 export type RunEvent = { n: number; type: string; data: string };
@@ -33,6 +37,7 @@ type RunRec = {
   assistantId: string;
   model: string;
   userText: string;
+  startedAt: number;
   firstTurn: boolean;
   text: string;
   reasoning: string | null;
@@ -104,7 +109,7 @@ export class RunManager {
   }
 
   /** Persists the user turn and the running assistant placeholder, then starts the Hermes stream. Caller holds the reservation. */
-  begin(sessionId: string, input: RunInput): { runId: string; userMessage: ChatMessage; assistantMessage: ChatMessage } {
+  begin(sessionId: string, input: RunInput): { runId: string; userMessage: ChatMessage | null; assistantMessage: ChatMessage } {
     const now = this.now();
     const runId = randomUUID();
     const userId = randomUUID();
@@ -112,12 +117,14 @@ export class RunManager {
     const firstTurn = (this.db.query("SELECT COUNT(*) AS c FROM chat_messages WHERE session_id = ? AND role = 'user'")
       .get(sessionId) as { c: number }).c === 0;
     const seq = S.nextSeq(this.db, sessionId);
+    if (!input.internal) {
+      S.insertMessage(this.db, {
+        id: userId, sessionId, seq, role: "user", text: input.text, status: "complete",
+        createdAt: now, attachments: input.attachments,
+      });
+    }
     S.insertMessage(this.db, {
-      id: userId, sessionId, seq, role: "user", text: input.text, status: "complete",
-      createdAt: now, attachments: input.attachments,
-    });
-    S.insertMessage(this.db, {
-      id: assistantId, sessionId, seq: seq + 1, role: "assistant", text: "", status: "running",
+      id: assistantId, sessionId, seq: input.internal ? seq : seq + 1, role: "assistant", text: "", status: "running",
       runId, model: input.model, createdAt: now, attachments: [],
     });
     S.setRunState(this.db, sessionId, "running", runId, now);
@@ -125,7 +132,7 @@ export class RunManager {
     let resolveStarted!: () => void;
     let resolveDone!: () => void;
     const rec: RunRec = {
-      runId, sessionId, assistantId, model: input.model, userText: input.text, firstTurn,
+      runId, sessionId, assistantId, model: input.model, userText: input.text, startedAt: now, firstTurn,
       text: "", reasoning: null, tools: [], usage: null, hermesRunId: null, stopRequested: false,
       finished: false, needsApproval: false, seq: 0, events: [], listeners: new Set(),
       started: new Promise<void>(r => (resolveStarted = r)), resolveStarted,
@@ -133,10 +140,10 @@ export class RunManager {
     };
     this.runs.set(runId, rec);
 
-    const userMessage = S.getMessage(this.db, userId)!;
+    const userMessage = input.internal ? null : S.getMessage(this.db, userId)!;
     const assistantMessage = S.getMessage(this.db, assistantId)!;
     this.addEvent(rec, "run.started", { runId, sessionId, assistantMessageId: assistantId, model: input.model });
-    this.emit("chat.run", { sessionId, runId, state: "running" });
+    this.emitRun(sessionId, runId, "running");
 
     void this.pump(rec, input);
     return { runId, userMessage, assistantMessage };
@@ -263,7 +270,7 @@ export class RunManager {
     if (f.type !== "approval" && rec.needsApproval) {
       rec.needsApproval = false;
       S.setRunState(this.db, rec.sessionId, "running", rec.runId, this.now());
-      this.emit("chat.run", { sessionId: rec.sessionId, runId: rec.runId, state: "running" });
+      this.emitRun(rec.sessionId, rec.runId, "running");
     }
     switch (f.type) {
       case "run.started":
@@ -298,7 +305,7 @@ export class RunManager {
         rec.needsApproval = true;
         S.setRunState(this.db, rec.sessionId, "needs_approval", rec.runId, this.now());
         this.addEvent(rec, "approval", { command: f.command, note: f.note });
-        this.emit("chat.run", { sessionId: rec.sessionId, runId: rec.runId, state: "needs_approval" });
+        this.emitRun(rec.sessionId, rec.runId, "needs_approval");
         return;
       case "usage":
         rec.usage = { input: f.input, output: f.output };
@@ -328,12 +335,21 @@ export class RunManager {
     if (rec.firstTurn && S.getSession(this.db, rec.sessionId)?.titleAuto) {
       S.setAutoTitle(this.db, rec.sessionId, autoTitle(rec.userText));
     }
+    // Background subagents run on after the turn ends; remember them so the watcher can report back.
+    const dispatched = rec.tools.filter(t => t.name === "delegate_task" && t.status === "ok").length;
+    if (dispatched > 0) S.addAwaiting(this.db, rec.sessionId, dispatched, rec.startedAt, this.now() + AWAIT_TIMEOUT_MS);
     S.setRunState(this.db, rec.sessionId, "idle", null, this.now());
     this.release(rec.sessionId);
     this.addEvent(rec, "done", { status: final, error: err, model: finalModel });
-    this.emit("chat.run", { sessionId: rec.sessionId, runId: rec.runId, state: "idle" });
+    this.emitRun(rec.sessionId, rec.runId, "idle");
     rec.resolveDone();
     this.prune();
+  }
+
+  /** Global chat.run feed. `awaiting` = background subagents still to report in this session. */
+  emitRun(sessionId: string, runId: string | null, state: "running" | "idle" | "needs_approval"): void {
+    const awaiting = S.getSession(this.db, sessionId)?.awaiting ?? 0;
+    this.emit("chat.run", { sessionId, runId, state, awaiting });
   }
 
   private persist(rec: RunRec): void {

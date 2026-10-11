@@ -17,6 +17,8 @@ export type ChatSession = {
   createdAt: number;
   updatedAt: number;
   runState: RunState;
+  /** Background subagents dispatched in this session whose result has not arrived yet. */
+  awaiting: number;
   runId: string | null;
   unread: boolean;
   preview: string;
@@ -72,12 +74,13 @@ export type NewAttachment = {
 
 const PREVIEW_SQL = "(SELECT substr(m.text, 1, 140) FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.seq DESC LIMIT 1)";
 const SESSION_COLS = `s.id, s.title, s.title_auto, s.model, s.provider, s.effort, s.pinned, s.archived,
-  s.created_at, s.updated_at, s.run_state, s.run_id, s.unread, ${PREVIEW_SQL} AS preview`;
+  s.created_at, s.updated_at, s.run_state, s.run_id, s.unread, ${PREVIEW_SQL} AS preview,
+  COALESCE((SELECT a.expected FROM chat_await a WHERE a.session_id = s.id), 0) AS awaiting`;
 
 type SessionRow = {
   id: string; title: string; title_auto: number; model: string; provider: string; effort: string | null;
   pinned: number; archived: number; created_at: number; updated_at: number; run_state: string;
-  run_id: string | null; unread: number; preview: string | null;
+  run_id: string | null; unread: number; preview: string | null; awaiting: number;
 };
 
 function toSession(r: SessionRow): ChatSession {
@@ -96,6 +99,7 @@ function toSession(r: SessionRow): ChatSession {
     runId: r.run_id,
     unread: r.unread === 1,
     preview: (r.preview ?? "").slice(0, 140),
+    awaiting: r.awaiting,
   };
 }
 
@@ -368,4 +372,40 @@ export function setAutoTitle(db: Database, id: string, title: string): void {
 /** Records the model Hermes has locked for this session. */
 export function setLockedModel(db: Database, id: string, model: string): void {
   db.query("UPDATE chat_sessions SET model_locked = ? WHERE id = ?").run(model, id);
+}
+
+/* ---------- background subagents (awaiting results) ---------- */
+
+export type AwaitRow = { sessionId: string; expected: number; sinceMs: number; deadlineMs: number };
+
+/** Adds `n` dispatched subagents to the session's awaiting count. since_ms keeps the earliest start. */
+export function addAwaiting(db: Database, sessionId: string, n: number, sinceMs: number, deadlineMs: number): void {
+  db.query(
+    `INSERT INTO chat_await (session_id, expected, since_ms, deadline_ms) VALUES (?, ?, ?, ?)
+     ON CONFLICT(session_id) DO UPDATE SET expected = expected + excluded.expected,
+       since_ms = MIN(since_ms, excluded.since_ms), deadline_ms = excluded.deadline_ms`,
+  ).run(sessionId, n, sinceMs, deadlineMs);
+}
+
+export function listAwaiting(db: Database): AwaitRow[] {
+  return (db.query("SELECT session_id, expected, since_ms, deadline_ms FROM chat_await").all() as
+    { session_id: string; expected: number; since_ms: number; deadline_ms: number }[])
+    .map(r => ({ sessionId: r.session_id, expected: r.expected, sinceMs: r.since_ms, deadlineMs: r.deadline_ms }));
+}
+
+export function clearAwaiting(db: Database, sessionId: string): void {
+  db.query("DELETE FROM chat_await WHERE session_id = ?").run(sessionId);
+}
+
+export function seenIds(db: Database, sessionId: string): Set<number> {
+  return new Set((db.query("SELECT hermes_msg_id AS id FROM chat_seen WHERE session_id = ?").all(sessionId) as { id: number }[]).map(r => r.id));
+}
+
+/** Marks `ids` as reported and lowers the awaiting count; the row is removed at zero. */
+export function consumeAwaiting(db: Database, sessionId: string, ids: number[]): void {
+  db.transaction(() => {
+    for (const id of ids) db.query("INSERT OR IGNORE INTO chat_seen (session_id, hermes_msg_id) VALUES (?, ?)").run(sessionId, id);
+    db.query("UPDATE chat_await SET expected = MAX(0, expected - ?) WHERE session_id = ?").run(ids.length, sessionId);
+    db.query("DELETE FROM chat_await WHERE session_id = ? AND expected <= 0").run(sessionId);
+  })();
 }

@@ -88,10 +88,10 @@ test("begin persists user message with attachments and a running assistant place
   const att: S.NewAttachment = { id: "a1", kind: "file", name: "n.txt", mime: "text/plain", size: 2, sha256: "h", path: "/x/a1.txt", w: null, h: null };
   const r = begin("s1", "hi", [att]);
   expect(r.userMessage).toMatchObject({ role: "user", text: "hi", status: "complete", seq: 1 });
-  expect(r.userMessage.attachments[0]).toMatchObject({ id: "a1", name: "n.txt" });
+  expect(r.userMessage!.attachments[0]).toMatchObject({ id: "a1", name: "n.txt" });
   expect(r.assistantMessage).toMatchObject({ role: "assistant", text: "", status: "running", runId: r.runId, seq: 2 });
   expect(S.getSession(db, "s1")).toMatchObject({ runState: "running", runId: r.runId });
-  expect(emitted).toContainEqual(["chat.run", { sessionId: "s1", runId: r.runId, state: "running" }]);
+  expect(emitted).toContainEqual(["chat.run", { sessionId: "s1", runId: r.runId, state: "running", awaiting: 0 }]);
   await tick();
   hermes.last.push(done("complete")); hermes.last.end();
   await mgr.waitDone(r.runId);
@@ -114,7 +114,7 @@ test("deltas persist as they arrive; done finalises message, session and emits i
   expect(S.getSession(db, "s1")).toMatchObject({ runState: "idle", runId: null, title: "please write a long poem about the sea", titleAuto: true });
   expect(dbEvents(r.runId).map(e => [e.n, e.type])).toEqual([[1, "run.started"], [2, "delta"], [3, "delta"], [4, "reasoning"], [5, "usage"], [6, "done"]]);
   expect(JSON.parse(dbEvents(r.runId).at(-1)!.data)).toEqual({ status: "complete", error: null, model: "claude-sonnet-5-5" });
-  expect(emitted.at(-1)).toEqual(["chat.run", { sessionId: "s1", runId: r.runId, state: "idle" }]);
+  expect(emitted.at(-1)).toEqual(["chat.run", { sessionId: "s1", runId: r.runId, state: "idle", awaiting: 0 }]);
 });
 
 test("tool.started and tool.completed update the tool row in the message", async () => {
@@ -141,7 +141,7 @@ test("approval frame sets needs_approval, does not hang, returns to running on t
   s.push({ type: "approval", command: "rm -rf x", note: "needs approval in Hermes" });
   await tick();
   expect(S.getSession(db, "s1")!.runState).toBe("needs_approval");
-  expect(emitted).toContainEqual(["chat.run", { sessionId: "s1", runId: r.runId, state: "needs_approval" }]);
+  expect(emitted).toContainEqual(["chat.run", { sessionId: "s1", runId: r.runId, state: "needs_approval", awaiting: 0 }]);
   expect(dbEvents(r.runId).some(e => e.type === "approval")).toBe(true);
   s.push(delta("ok")); await tick();
   expect(S.getSession(db, "s1")!.runState).toBe("running");

@@ -29,6 +29,10 @@ export const CHAT_SCHEMA = `
     size INTEGER NOT NULL, sha256 TEXT NOT NULL, path TEXT NOT NULL, w INTEGER, h INTEGER);
   CREATE TABLE IF NOT EXISTS chat_run_events (run_id TEXT NOT NULL, n INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL,
     PRIMARY KEY (run_id, n)) WITHOUT ROWID;
+  CREATE TABLE IF NOT EXISTS chat_await (session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    expected INTEGER NOT NULL, since_ms INTEGER NOT NULL, deadline_ms INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS chat_seen (session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    hermes_msg_id INTEGER NOT NULL, PRIMARY KEY (session_id, hermes_msg_id)) WITHOUT ROWID;
   CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_fts USING fts5(message_id UNINDEXED, text);
   CREATE TRIGGER IF NOT EXISTS chat_messages_ai AFTER INSERT ON chat_messages BEGIN
     INSERT INTO chat_messages_fts(message_id, text) VALUES (new.id, new.text); END;

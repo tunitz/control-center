@@ -9,7 +9,7 @@ type Effort = "off" | "low" | "medium" | "high";
 type ChatModel = { id: string; provider: string; label: string; reasoning: boolean; canDisableReasoning: boolean; vision: boolean; local: boolean; online: boolean };
 type ChatSession = { id: string; title: string; titleAuto: boolean; model: string; provider: string; effort: Effort | null;
   pinned: boolean; archived: boolean; createdAt: number; updatedAt: number;
-  runState: "idle" | "running" | "needs_approval"; runId: string | null; unread: boolean; preview: string };
+  runState: "idle" | "running" | "needs_approval"; runId: string | null; unread: boolean; preview: string; awaiting: number };
 type Attachment = { id: string; kind: "image" | "file"; name: string; mime: string; size: number; w: number | null; h: number | null; url: string /* /api/chat/files/<id> */ };
 type ToolRow = { id: string; name: string; args: Record<string, unknown> | null; preview: string | null; status: "running" | "ok" | "failed"; durationMs: number | null };
 type ChatMessage = { id: string; seq: number; role: "user" | "assistant"; text: string; reasoning: string | null;
@@ -39,7 +39,8 @@ type ChatMessage = { id: string; seq: number; role: "user" | "assistant"; text: 
 - `POST /runs/:runId/steer` `{ message }` -> `{ ok: true }` or 409 `{ error: "run finished" }`
 - `GET /files/:id` -> bytes. Headers: correct content-type for images, `application/octet-stream` + `Content-Disposition: attachment` otherwise, `X-Content-Type-Options: nosniff`, `Cache-Control: private, max-age=3600`.
 - `GET /sessions/:id/export` -> `text/markdown` attachment.
-- Global `GET /api/events` (existing SSE) additionally emits `chat.run` `{ sessionId, runId, state: "running" | "idle" | "needs_approval" }`.
+- Global `GET /api/events` (existing SSE) additionally emits `chat.run` `{ sessionId, runId, state: "running" | "idle" | "needs_approval", awaiting }`.
+- `awaiting` = background subagents (Hermes `delegate_task`) dispatched in the session whose result has not arrived. Hermes never pushes them: it writes an `async_delegation_complete` row into the session transcript. While `awaiting > 0` the server polls `GET /api/sessions/{id}/messages?order=latest` every 5s (HTTP only, no tokens). When a new row appears and the session is idle, it starts one internal turn (no user message stored in CC) so the agent reports the result; the browser sees a `chat.run` running event and attaches. The wait is dropped after 30 min. State lives in `chat_await` / `chat_seen`.
 
 ## Rules the UI relies on
 - One active run per session; the sidebar shows `runState`.

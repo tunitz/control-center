@@ -32,6 +32,9 @@ export type StartRunArgs = {
   effort?: "off" | "low" | "medium" | "high" | null;
 };
 
+/** A finished background subagent batch: Hermes writes it into the session transcript (no push). */
+export type Completion = { id: number; ts: number };
+
 export interface HermesClient {
   createSession(): Promise<string>;
   deleteSession(id: string): Promise<void>;
@@ -40,6 +43,8 @@ export interface HermesClient {
   startRun(args: StartRunArgs): Promise<{ runId: string; frames: AsyncIterable<HermesFrame> }>;
   stopRun(runId: string): Promise<void>;
   steerRun(runId: string, message: string): Promise<void>;
+  /** Recent background-subagent completion rows of a session (cheap HTTP read, no model call). */
+  completions?(sessionId: string): Promise<Completion[]>;
 }
 
 /** Used when no transport is configured. Every call fails with 503. */
@@ -191,6 +196,19 @@ export async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerat
   }
 }
 
+/** Picks async_delegation_complete rows out of a Hermes message list. */
+export function parseCompletions(rows: unknown[]): Completion[] {
+  const out: Completion[] = [];
+  for (const r of rows) {
+    const o = (r ?? {}) as Obj;
+    if (o.display_kind !== "async_delegation_complete") continue;
+    const id = Number(o.id);
+    const ts = num(o.timestamp) ?? Number(o.timestamp);
+    if (Number.isFinite(id) && Number.isFinite(ts)) out.push({ id, ts });
+  }
+  return out;
+}
+
 /* ---------- Real client ---------- */
 
 export type HttpHermesOptions = { baseUrl: string; apiKey: string; timeoutMs?: number };
@@ -313,6 +331,13 @@ export class HttpHermes implements HermesClient {
     const res = await this.call("POST", `/v1/runs/${encodeURIComponent(runId)}/stop`);
     if (res.status === 404) throw new ChatError(404, "run not found");
     if (!res.ok) throw new ChatError(502, `hermes stop failed (${res.status})`);
+  }
+
+  async completions(sessionId: string): Promise<Completion[]> {
+    const res = await this.call("GET", `/api/sessions/${encodeURIComponent(sessionId)}/messages?order=latest&limit=40`);
+    if (!res.ok) throw new ChatError(502, `hermes messages failed (${res.status})`);
+    const data = (await this.json(res)).data;
+    return parseCompletions(Array.isArray(data) ? data : []);
   }
 
   async steerRun(runId: string, message: string): Promise<void> {

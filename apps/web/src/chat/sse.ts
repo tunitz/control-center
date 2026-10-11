@@ -31,7 +31,7 @@ export function openRunStream(
   return { close };
 }
 
-export type GlobalRun = { sessionId: string; runId: string; state: "running" | "idle" | "needs_approval" };
+export type GlobalRun = { sessionId: string; runId: string | null; state: "running" | "idle" | "needs_approval"; awaiting?: number };
 
 /** Global /api/events, chat.run only. Separate from hooks.ts's shared sample stream (that module is not ours to edit). */
 export function openChatRunEvents(onRun: (r: GlobalRun) => void): () => void {

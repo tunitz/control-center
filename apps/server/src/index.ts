@@ -21,6 +21,7 @@ mkdirSync(DATA, { recursive: true });
 const master = process.env.CC_MASTER_KEY ?? (() => { console.warn("CC_MASTER_KEY not set: using a dev key"); return "dev-master-key-change-me"; })();
 const db = openDb(join(DATA, "cc.db"));
 const chatCtx = createChatContext(db, { emit: (event, data) => push(event, data) });
+chatCtx.watcher?.start();
 const initialPw = await ensureAdmin(db, process.env.CC_ADMIN_PASSWORD);
 if (initialPw) console.log(`\n== Initial admin password: ${initialPw}  (change it in Settings) ==\n`);
 

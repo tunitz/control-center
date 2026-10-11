@@ -15,12 +15,15 @@ import { toMarkdown, exportFilename } from "./export";
 import { buildSessionDir, fileHeaders, inspectFile, MAX_FILES, MAX_BODY_BYTES, sanitizeAsciiFilename, saveUpload, uploadLimits, uploadRoot, type SavedUpload } from "./uploads";
 import { assertImageSize, buildPrompt, type PromptAttachment } from "./prompt";
 import { RunManager, recoverRuns } from "./runs";
+import { DelegationWatcher } from "./watcher";
 
 export type ChatContext = {
   db: Database;
   hermes: HermesClient;
   uploadRoot: string;
   now: () => number;
+  /** Reports finished background subagents. Started by index.ts. */
+  watcher?: DelegationWatcher;
 };
 
 const managers = new WeakMap<ChatContext, RunManager>();
@@ -47,7 +50,9 @@ export function createChatContext(
   } else hermes = new UnconfiguredHermes();
   const ctx: ChatContext = { db, hermes, uploadRoot: uploadRoot(env), now: () => Date.now() };
   recoverRuns(db, ctx.now());
-  managers.set(ctx, new RunManager({ db, hermes, now: () => ctx.now(), emit: opts.emit }));
+  const runs = new RunManager({ db, hermes, now: () => ctx.now(), emit: opts.emit });
+  managers.set(ctx, runs);
+  ctx.watcher = new DelegationWatcher({ db, hermes, runs, now: () => ctx.now() });
   return ctx;
 }
 
