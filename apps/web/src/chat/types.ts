@@ -29,7 +29,7 @@ export type ChatMessage = {
 };
 /** A persistent local slash-command row. `afterSeq` anchors it after that message seq. */
 export type CommandNote = { id: number; name: string; body: string; afterSeq: number; createdAt: number };
-export type ChatConfig = { defaultModel: string; defaultEffort: Effort | null; maxUploadMb: number; contextWindow: Record<string, number> };
+export type ChatConfig = { defaultModel: string; newChatModel?: string | null; defaultEffort: Effort | null; maxUploadMb: number; contextWindow: Record<string, number> };
 export type RunEvent = { id: number; type: string; data: any };
 export type PiSettings = { tools: string[] | null; steeringMode: "all" | "one-at-a-time"; followUpMode: "all" | "one-at-a-time"; autoCompaction: boolean; autoRetry: boolean };
 export type PiConfig = { appendSystemPrompt: string; agentsMd: string; defaultTools: string[] | null; gate: { extraProtectedPaths: string[]; extraRisky: string[] }; knownTools: string[]; claudeBridge: boolean; claudeCode: { found: boolean; path: string | null; extension: boolean }; browser: boolean; browserStatus: { extension: boolean; agent: boolean; chromium: boolean } };

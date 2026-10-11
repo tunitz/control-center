@@ -97,14 +97,21 @@ export function isEffort(v: unknown): v is Effort {
 
 export function getConfig(db: Database): {
   defaultModel: string;
+  /** Model the web preselects for a new chat. A Pi model is `pi:<id>`. null = use `defaultModel`. */
+  newChatModel: string | null;
   defaultEffort: Effort | null;
   maxUploadMb: number;
   contextWindow: Record<string, number>;
 } {
   const dm = getSettingRaw(db, "chat.defaultModel");
+  const nm = getSettingRaw(db, "chat.newChatModel");
   const de = getSettingRaw(db, "chat.defaultEffort");
+  // Pi models are listed live by the bridge, so a `pi:` key is accepted as written; the web falls back
+  // to the default when the list does not have it.
+  const newChat = nm && (/^pi:.+/.test(nm) || getModelDef(db, nm)) ? nm : null;
   return {
     defaultModel: dm && getModelDef(db, dm) ? dm : DEFAULT_MODEL,
+    newChatModel: newChat,
     defaultEffort: isEffort(de) ? de : null,
     maxUploadMb: uploadLimits(db).maxMb,
     contextWindow: CONTEXT_WINDOW,

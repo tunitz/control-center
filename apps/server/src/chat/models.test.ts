@@ -63,11 +63,23 @@ test("settings chat.models overrides the list; invalid JSON or bad entries fall 
 
 test("getConfig: defaults and overrides", () => {
   const db = openDb(":memory:");
-  expect(getConfig(db)).toEqual({ defaultModel: "claude-sonnet-5-5", defaultEffort: null, maxUploadMb: 20, contextWindow: CONTEXT_WINDOW });
+  expect(getConfig(db)).toEqual({ defaultModel: "claude-sonnet-5-5", newChatModel: null, defaultEffort: null, maxUploadMb: 20, contextWindow: CONTEXT_WINDOW });
   set(db, "chat.defaultModel", "deepseek-flash");
   set(db, "chat.defaultEffort", "high");
   set(db, "chat.maxUploadMb", "5");
   expect(getConfig(db)).toMatchObject({ defaultModel: "deepseek-flash", defaultEffort: "high", maxUploadMb: 5 });
   set(db, "chat.defaultEffort", "bogus");
   expect(getConfig(db).defaultEffort).toBeNull();
+});
+
+test("getConfig: newChatModel accepts a Pi key or a known Hermes model, ignores junk, and leaves defaultModel alone", () => {
+  const db = openDb(":memory:");
+  set(db, "chat.newChatModel", "pi:claude-sonnet-5-5");
+  expect(getConfig(db)).toMatchObject({ newChatModel: "pi:claude-sonnet-5-5", defaultModel: "claude-sonnet-5-5" });
+  set(db, "chat.newChatModel", "deepseek-flash");
+  expect(getConfig(db).newChatModel).toBe("deepseek-flash");
+  for (const bad of ["nope", "pi:", ""]) {
+    set(db, "chat.newChatModel", bad);
+    expect(getConfig(db).newChatModel).toBeNull();
+  }
 });

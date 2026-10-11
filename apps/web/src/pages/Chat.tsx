@@ -112,7 +112,10 @@ export default function Chat({ hash }: { hash: string }) {
   }, [activeId, thread.missing]);
 
   const chatBackend: Backend | null = active ? (active.backend ?? "hermes") : null;
-  const modelId = liveModel ?? (active ? keyOf(active.backend, active.model) : config?.defaultModel ?? models[0]?.id ?? "");
+  // A new chat starts on the configured new-chat model when the picker has it (a Pi model needs its bridge up),
+  // else on the default model.
+  const startModel = config?.newChatModel && models.some(m => m.id === config.newChatModel) ? config.newChatModel : config?.defaultModel;
+  const modelId = liveModel ?? (active ? keyOf(active.backend, active.model) : startModel ?? models[0]?.id ?? "");
   const effort = liveEffort ?? active?.effort ?? config?.defaultEffort ?? null;
   const modelRec = models.find(m => m.id === modelId);
   const ctxInput = estimateContextTokens(thread.messages);
@@ -397,7 +400,7 @@ export default function Chat({ hash }: { hash: string }) {
                     {activeId && <a className="menu-item" role="menuitem" href={chat.exportUrl(activeId)}><Icon name="export" className="i sm" />Export (Markdown)</a>}
                     <div className="menu-sep" />
                     <p className="meta" style={{ padding: "6px 10px" }}>
-                      Default model: {config?.defaultModel ?? "…"}
+                      Default model: {startModel ?? "…"}
                       <br />Default thinking: {config?.defaultEffort ?? "off"}
                       <br />Set on the server. Changes here apply to this chat only.
                     </p>
