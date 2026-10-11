@@ -22,3 +22,8 @@ test("isBackSwipe: rejects short, mostly vertical, or slow drags", () => {
 test("isBackSwipe: rejects leftward drags", () => {
   expect(isBackSwipe({ x0: 5, y0: 300, x1: -50, y1: 300, ms: 200 })).toBe(false);
 });
+
+test("parentHash: chat session goes to the chat list, chat list to the dashboard", () => {
+  expect(parentHash("#/chat/s-abc")).toBe("#/chat");
+  expect(parentHash("#/chat")).toBe("#/");
+});

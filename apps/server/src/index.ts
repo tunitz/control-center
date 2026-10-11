@@ -1,3 +1,4 @@
+import { handleChat, createChatContext } from "./chat/routes";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { openDb, getSetting, setSetting, audit } from "./db";
@@ -19,6 +20,7 @@ const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
 const master = process.env.CC_MASTER_KEY ?? (() => { console.warn("CC_MASTER_KEY not set: using a dev key"); return "dev-master-key-change-me"; })();
 const db = openDb(join(DATA, "cc.db"));
+const chatCtx = createChatContext(db, { emit: (event, data) => push(event, data) });
 const initialPw = await ensureAdmin(db, process.env.CC_ADMIN_PASSWORD);
 if (initialPw) console.log(`\n== Initial admin password: ${initialPw}  (change it in Settings) ==\n`);
 
@@ -66,6 +68,7 @@ const server = Bun.serve({
       if (path.startsWith("/api/")) {
         if (!validSession(db, cookieOf(req), now())) return json({ error: "unauthorized" }, 401);
         if (req.method !== "GET" && req.headers.get("x-cc") !== "1") return json({ error: "csrf" }, 403);
+        if (path.startsWith("/api/chat/")) return await handleChat(req, url, chatCtx);
         return await api(req, url, path, ip);
       }
       if (path.includes("..")) return new Response("bad path", { status: 400 });

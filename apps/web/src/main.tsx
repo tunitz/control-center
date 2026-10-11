@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState } from "react";
+import { lazy, StrictMode, Suspense, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "uplot/dist/uPlot.min.css";
 import "./styles.css";
@@ -9,6 +9,8 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import UnitDetail from "./pages/UnitDetail";
 import Settings from "./pages/Settings";
+// Chat is its own lazy chunk (markdown, highlighting, chat CSS load only when opened).
+const Chat = lazy(() => import("./pages/Chat"));
 import { initTheme } from "./theme";
 import { initSwipeBack } from "./swipe";
 
@@ -39,16 +41,17 @@ function App() {
   if (authed === null) return null;
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
   const unit = /^#\/unit\/(\d+)/.exec(hash), settings = hash.startsWith("#/settings");
+  const chatOn = hash === "#/chat" || hash.startsWith("#/chat/");
   return (
     <div className="app">
       <header className="top">
         <div className="brand"><img className="logo" src="/favicon.svg" alt="" width="26" height="26" />Control Center</div>
-        <nav className="tabs"><a href="#/" className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
+        <nav className="tabs"><a href="#/" className={!settings && !chatOn ? "on" : ""}>Dashboard</a><a href="#/chat" className={chatOn ? "on" : ""}>Chat</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
         <div className="spacer" />
         <button className="btn" onClick={async () => { await api("/auth/logout", { method: "POST" }); clearCache(); writeAuthed(false); setAuthed(false); }}>Sign out</button>
       </header>
-      <main>{unit ? <UnitDetail id={Number(unit[1])} /> : settings ? <Settings /> : <Dashboard />}</main>
-      <nav className="tabbar"><a href="#/" className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
+      <main>{unit ? <UnitDetail id={Number(unit[1])} /> : settings ? <Settings /> : chatOn ? <Suspense fallback={null}><Chat hash={hash} /></Suspense> : <Dashboard />}</main>
+      <nav className="tabbar"><a href="#/" className={!settings && !chatOn ? "on" : ""}>Dashboard</a><a href="#/chat" className={chatOn ? "on" : ""}>Chat</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
     </div>
   );
 }

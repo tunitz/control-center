@@ -2,6 +2,8 @@ import { navigate } from "./route";
 
 /** Route one level up, or null at the top. */
 export function parentHash(hash: string): string | null {
+  if (/^#\/chat\/./.test(hash)) return "#/chat";
+  if (hash === "#/chat") return "#/";
   return /^#\/(unit\/|settings)/.test(hash) ? "#/" : null;
 }
 

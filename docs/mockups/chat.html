@@ -1,0 +1,1106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Control Center · Chat (mockup)</title>
+<style>
+/* ---- Tokens: copied from apps/web/src/styles.css. Only place colours are defined. ---- */
+:root{
+  --bg:#f5f6f8;--surface:#ffffff;--surface2:#f0f2f5;--line:#e3e6eb;--text:#14161b;--mut:#4f5766;
+  --accent:#4f5bf0;--accent-fg:#fff;--accent-soft:rgba(79,91,240,.12);--accent-ink:#3a46d6;
+  --ok:#0b7f57;--ok-bg:rgba(11,127,87,.12);
+  --warn:#9a5f00;--warn-bg:rgba(154,95,0,.12);
+  --err:#c42b2b;--err-bg:rgba(196,43,43,.10);--err-line:rgba(196,43,43,.35);
+  --track:#e3e6eb;
+  --s1:#0aa5d6;--s2:#10a56f;--s3:#7c4ff0;--s4:#db2f84;--s5:#e08a00;
+  --shadow:0 12px 32px rgba(20,22,27,.12);--scrim:rgba(20,22,27,.35);
+  color-scheme:light;
+}
+:root[data-theme=dark]{
+  --bg:#0d0e11;--surface:#15171c;--surface2:#1c1f26;--line:#262a33;--text:#eceef2;--mut:#a7afbd;
+  --accent:#5866ee;--accent-fg:#fff;--accent-soft:rgba(88,102,238,.16);--accent-ink:#a3adff;
+  --ok:#34d399;--ok-bg:rgba(52,211,153,.12);
+  --warn:#fbbf24;--warn-bg:rgba(251,191,36,.12);
+  --err:#f87171;--err-bg:rgba(248,113,113,.12);--err-line:rgba(248,113,113,.35);
+  --track:#262a33;
+  --s1:#38e1ff;--s2:#34d399;--s3:#a78bfa;--s4:#f472b6;--s5:#fbbf24;
+  --shadow:0 12px 32px rgba(0,0,0,.45);--scrim:rgba(0,0,0,.6);
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme=light]):not([data-theme=dark]){
+    --bg:#0d0e11;--surface:#15171c;--surface2:#1c1f26;--line:#262a33;--text:#eceef2;--mut:#a7afbd;
+    --accent:#5866ee;--accent-fg:#fff;--accent-soft:rgba(88,102,238,.16);--accent-ink:#a3adff;
+    --ok:#34d399;--ok-bg:rgba(52,211,153,.12);
+    --warn:#fbbf24;--warn-bg:rgba(251,191,36,.12);
+    --err:#f87171;--err-bg:rgba(248,113,113,.12);--err-line:rgba(248,113,113,.35);
+    --track:#262a33;
+    --s1:#38e1ff;--s2:#34d399;--s3:#a78bfa;--s4:#f472b6;--s5:#fbbf24;
+    --shadow:0 12px 32px rgba(0,0,0,.45);--scrim:rgba(0,0,0,.6);
+    color-scheme:dark;
+  }
+}
+
+/* ---- Base ---- */
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-button{display:none}
+html,body{margin:0;height:100%;overflow:hidden}
+body{display:flex;flex-direction:column}
+body{font:15px/1.6 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{text-decoration:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+[hidden]{display:none!important}
+h1,h2,h3{font-weight:600;letter-spacing:-.01em;line-height:1.3;margin:0}
+p{margin:0}
+.mono,pre,code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.muted{color:var(--mut)}
+.meta{font-size:13px;color:var(--mut)}
+.spacer{flex:1}
+.i{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.i.sm{width:14px;height:14px}
+
+/* ---- Mock-only control bar (not part of the app; own fixed colours, monospace) ---- */
+.mockbar{position:relative;flex:none;z-index:100;display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;min-height:44px;padding:8px 14px;background:#111317;color:#aab2c0;border-bottom:1px dashed #3b414d;font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.mb-label{font-weight:700;letter-spacing:.08em;color:#6d7686;font-size:12px;flex:none}
+.mb-group{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.mb-group span{color:#6d7686;margin-right:4px}
+.mb-btn{min-height:28px;padding:0 10px;border-radius:6px;border:1px dashed #3b414d;background:transparent;color:#aab2c0;font:inherit}
+.mb-btn:hover{color:#ffffff}
+.mb-btn[aria-pressed=true]{background:#2a2f3a;border-color:#7d86a0;color:#ffffff}
+
+/* ---- Stage + frame ---- */
+.stage{flex:1;min-height:0;display:flex;justify-content:center}
+.frame{--gut:24px;width:100%;height:100%;container-type:inline-size;display:flex;flex-direction:column;background:var(--bg);color:var(--text);min-width:0}
+.frame.mock{width:390px;height:100%;margin:0 auto;border:0;border-left:1px solid var(--line);border-right:1px solid var(--line);border-radius:0;overflow:hidden;flex:none;position:relative}
+
+/* Header (app row: brand + top tabs; desktop only) */
+.hdr{display:flex;align-items:center;gap:12px;height:48px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--line);flex:none}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;letter-spacing:-.01em;white-space:nowrap}
+.logo{width:24px;height:24px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--s3));display:block;flex:none}
+nav.tabs{display:flex;gap:4px}
+nav.tabs a{padding:6px 12px;border-radius:999px;color:var(--mut);min-height:34px;display:inline-flex;align-items:center;font-size:14px;text-decoration:none}
+nav.tabs a:hover{color:var(--text)}
+nav.tabs a[aria-current=page]{background:var(--surface2);color:var(--text)}
+
+/* Bottom tabbar: phone / narrow only */
+.tabbar{display:none;flex:none;min-height:64px;background:var(--surface);border-top:1px solid var(--line);grid-template-columns:repeat(3,1fr);padding:0 0 calc(4px + env(safe-area-inset-bottom,0px))}
+.tabbar a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:13px;color:var(--mut);text-decoration:none;min-height:48px}
+.tabbar a[aria-current=page]{color:var(--accent-ink)}
+.tabbar .i{width:20px;height:20px}
+
+/* Shell */
+.shell{flex:1;min-height:0;display:grid;grid-template-columns:280px minmax(0,1fr);grid-template-rows:minmax(0,1fr);position:relative}
+
+/* Sessions panel */
+.side{background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0}
+.side-top{padding:16px 14px 10px;display:flex;flex-direction:column;gap:10px}
+.btn{min-height:36px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text);display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:500;white-space:nowrap;font-size:14px}
+.btn:hover{background:var(--surface2)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn.primary:hover{background:var(--accent-ink);border-color:var(--accent-ink)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--mut)}
+.btn.ghost:hover{color:var(--text);background:var(--surface2)}
+.btn.danger-o{background:transparent;color:var(--err);border-color:var(--err-line)}
+.btn.danger-o:hover{background:var(--err-bg)}
+.search{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--mut)}
+.search:focus-within{border-color:var(--accent)}
+.search input{flex:1;min-width:0;border:0;background:transparent;outline:none;height:100%;color:var(--text);font-size:14px}
+.search input::placeholder{color:var(--mut)}
+.side-list{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
+.side-list::after{content:"";position:absolute;left:0;right:0;bottom:0;height:28px;background:linear-gradient(to bottom,transparent,var(--surface));pointer-events:none}
+.side-scroll{flex:1;min-height:0;overflow-y:auto;padding:4px 8px 16px}
+.sec{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);padding:14px 10px 6px}
+.row-wrap{position:relative}
+.row{display:flex;align-items:center;gap:10px;padding:8px 40px 8px 10px;border-radius:10px;min-height:44px;color:var(--text);text-decoration:none;min-width:0}
+.row:hover{background:var(--surface2)}
+.row[aria-current=true]{background:var(--surface2);box-shadow:inset 2px 0 0 var(--accent)}
+.row-txt{display:flex;flex-direction:column;min-width:0;flex:1}
+.row-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px;font-weight:500}
+.row-meta{font-size:13px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pulse-wrap{width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none;animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+.more{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:32px;height:32px;border:0;background:transparent;color:var(--mut);border-radius:8px;display:grid;place-items:center;padding:0;opacity:0}
+.more:hover{background:var(--surface);color:var(--text)}
+.row-wrap:hover .more,.row-wrap:focus-within .more{opacity:1}
+.row-wrap .pop{top:calc(100% - 8px);right:8px}
+.rename{padding:6px 8px 6px 34px;display:flex;flex-direction:column;gap:6px;background:var(--accent-soft);border-radius:10px;margin:2px 0}
+.rename input{height:34px;border:1px solid var(--accent);border-radius:8px;padding:0 10px;background:var(--surface);outline:none;width:100%;font-size:14px}
+.rename .acts{display:flex;gap:6px;justify-content:flex-end}
+.rename .btn{min-height:32px;padding:0 12px;font-size:13px}
+.side-foot{position:relative;z-index:1;background:var(--surface);padding:10px 14px 14px;border-top:1px solid var(--line)}
+.link-btn{background:none;border:0;padding:6px 8px;color:var(--mut);display:inline-flex;gap:8px;align-items:center;border-radius:8px;min-height:36px;font-size:14px}
+.link-btn:hover{color:var(--text);background:var(--surface2)}
+.scrim{position:absolute;inset:0;background:var(--scrim);z-index:35;border:0;padding:0;cursor:default}
+
+/* Main thread */
+.main{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
+.thread-head{display:flex;align-items:center;gap:8px;height:52px;padding:0 16px;border-bottom:1px solid var(--line);flex:none;background:var(--bg)}
+.ib.sess-toggle{display:none}
+.ttl{flex:1;min-width:0;font-size:15px;font-weight:600}
+.ttl-text{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:8px;padding:4px 6px;margin:-4px -6px;cursor:text}
+.ttl-text:hover{background:var(--surface2)}
+.ttl-text[contenteditable=true]{outline:1px solid var(--accent);background:var(--surface);text-overflow:clip}
+.head-right{display:flex;align-items:center;gap:6px;flex:none}
+.pop-wrap{position:relative;display:inline-flex}
+.pill{height:34px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;white-space:nowrap}
+.pill:hover{background:var(--surface2)}
+.pill[aria-expanded=true]{border-color:var(--accent)}
+.prov{font-size:13px;color:var(--mut);font-weight:400}
+.prov::after{content:"·";margin-left:8px}
+.pshort{display:none}
+.pill .i{width:14px;height:14px;color:var(--mut)}
+.ib{width:36px;height:36px;border:0;background:transparent;color:var(--mut);border-radius:10px;display:inline-grid;place-items:center;padding:0;flex:none}
+.ib:hover{background:var(--surface2);color:var(--text)}
+.ib[aria-expanded=true]{background:var(--surface2);color:var(--text)}
+
+/* Scroll + shared column (thread and composer share the same 760px column and gutters) */
+.thread-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable both-edges}
+.col{max-width:760px;width:100%;margin:0 auto;padding:28px var(--gut) 32px;min-height:100%;display:flex;flex-direction:column;gap:28px}
+.empty{margin:auto 0;text-align:center;display:flex;flex-direction:column;align-items:center;gap:28px;padding:24px 0}
+.empty h2{font-size:26px}
+.sugg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:560px;text-align:left}
+.sugg{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:14px 16px;color:var(--text);min-height:64px;display:flex;flex-direction:column;gap:2px;font-size:14px}
+.sugg:hover{border-color:var(--accent)}
+.sugg small{font-size:13px;color:var(--mut)}
+
+/* Messages */
+.msg{position:relative;display:flex;flex-direction:column;gap:8px;min-width:0}
+.msg.user{align-items:flex-end}
+.bubble{background:var(--surface2);border:1px solid var(--line);border-radius:14px;padding:12px 16px;max-width:82%;display:flex;flex-direction:column;gap:10px;min-width:0}
+.atts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.thumb-sm{width:72px;height:72px;border-radius:12px;overflow:hidden;border:1px solid var(--line);display:block;flex:none}
+.thumb-sm svg{width:100%;height:100%;display:block}
+.file-chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:6px 10px;font-size:13px;min-width:0;max-width:100%}
+.file-chip .i{color:var(--mut)}
+.file-chip .fn{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+.file-chip .fs{color:var(--mut);font-size:13px;white-space:nowrap}
+.msg-actions{display:flex;gap:0;opacity:0;transition:opacity .15s}
+.msg.user .msg-actions{justify-content:flex-end}
+.msg-actions .ib{width:36px;height:36px}
+.msg:hover .msg-actions,.msg:focus-within .msg-actions{opacity:1}
+.ahead{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mut);flex-wrap:wrap}
+.ahead .who{font-weight:600}
+.asst{display:flex;flex-direction:column;gap:12px;min-width:0}
+.asst .body{display:flex;flex-direction:column;gap:12px;font-size:15px;line-height:1.7}
+.body ul{margin:0;padding-left:20px}
+.body li+li{margin-top:4px}
+.body code{background:var(--surface2);border-radius:6px;padding:1px 6px;font-size:13px}
+.usage{font-size:13px;color:var(--mut);font-variant-numeric:tabular-nums;display:flex;gap:4px;flex-wrap:wrap}
+.usage span+span::before{content:"·";margin-right:8px}
+.asst .msg-actions{margin-left:-8px;margin-top:-4px}
+.caret{display:inline-block;width:2px;height:1.05em;background:var(--text);vertical-align:-2px;margin-left:2px;animation:blink 1s steps(2,start) infinite}
+@keyframes blink{to{visibility:hidden}}
+.spin{width:13px;height:13px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Tool + thought rows: one compact group, hairline-separated rows, whole row is the tap target */
+.fgroup{border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0;display:flex;flex-direction:column}
+.fold-wrap{display:flex;flex-direction:column;min-width:0}
+.fold-wrap+.fold-wrap{border-top:1px solid var(--line)}
+.fold{width:100%;min-height:44px;display:flex;align-items:center;gap:8px;padding:0 12px;border:0;border-radius:0;background:transparent;color:var(--text);text-align:left;font-size:14px;min-width:0}
+.fold:hover{background:var(--surface2)}
+.fold.static{cursor:default}
+.fold.static:hover{background:transparent}
+.fold .chev{width:14px;height:14px;color:var(--mut);transition:transform .15s;flex:none}
+.fold[aria-expanded=true] .chev{transform:rotate(90deg)}
+.fold .lbl{color:var(--mut);white-space:nowrap}
+.fold .tname{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:500;white-space:nowrap;flex:none}
+.fold .targ{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto;font-size:13px}
+.fold .tdur{color:var(--mut);font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}
+.stat-ok{color:var(--ok);font-size:13px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;flex:none}
+.stat-ok::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.stat-run{color:var(--accent-ink);font-size:13px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;flex:none}
+.out{margin:0;background:var(--surface2);border:0;border-top:1px solid var(--line);border-radius:0;padding:10px 12px 12px;font-size:13px;line-height:1.6;overflow:auto;max-height:200px;white-space:pre;color:var(--text)}
+.thought{font-size:14px;color:var(--mut);padding:10px 12px 12px 34px;border-top:1px solid var(--line);line-height:1.6}
+
+/* Markdown */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;max-width:100%}
+table{border-collapse:collapse;width:100%;min-width:460px;font-size:14px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--mut);font-weight:500;background:var(--surface2)}
+tr:last-child td{border-bottom:0}
+.codeblk{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--surface2);min-width:0}
+.codeblk-h{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 14px;border-bottom:1px solid var(--line);font-size:13px;color:var(--mut)}
+.codeblk-h .copy{margin-left:auto;min-height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);font-size:13px;display:inline-flex;align-items:center;gap:6px}
+.codeblk-h .copy:hover{border-color:var(--accent)}
+.codeblk pre{margin:0;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.65;white-space:pre}
+.k{color:var(--accent-ink)}
+.s{color:var(--ok)}
+.c{color:var(--mut);font-style:italic}
+.n{color:var(--warn)}
+.v{color:var(--s1)}
+
+/* Approval */
+.appr{background:var(--surface);border:1px solid var(--warn);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.appr-h{display:flex;align-items:center;gap:10px;color:var(--warn);font-weight:600}
+.appr-h h3{color:var(--text);font-size:15px}
+.appr .i{color:var(--warn)}
+.cmdblk{margin:0;background:var(--surface2);border-radius:10px;padding:12px 14px;font-size:13px;overflow-x:auto;white-space:pre;border:1px solid var(--line)}
+.appr-btns{display:flex;gap:8px;flex-wrap:wrap}
+
+/* Composer (same column + gutters as .col) */
+.composer-wrap{flex:none;position:relative;background:var(--bg)}
+.composer-wrap::before{content:"";position:absolute;left:0;right:0;top:-28px;height:28px;background:linear-gradient(to bottom,transparent,var(--bg));pointer-events:none}
+.comp-inner{max-width:760px;margin:0 auto;position:relative;padding:8px var(--gut) 12px}
+.jump{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:20;height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.jump:hover{background:var(--surface2)}
+.composer{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 10px 8px;display:flex;flex-direction:column;gap:6px;transition:border-color .15s}
+.composer:focus-within{border-color:var(--accent)}
+.attach-row{display:flex;flex-wrap:wrap;gap:8px;padding:2px 2px 4px}
+.achip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface2);border-radius:10px;padding:4px 6px 4px 4px;font-size:13px;max-width:100%;min-width:0}
+.achip .x{width:24px;height:24px;border:0;background:transparent;color:var(--mut);border-radius:6px;display:grid;place-items:center;padding:0;flex:none}
+.achip .x:hover{background:var(--surface);color:var(--text)}
+.achip .ameta{display:flex;flex-direction:column;min-width:0}
+.achip .aname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;font-weight:500}
+.achip .asub{color:var(--mut);font-size:13px;white-space:nowrap}
+.achip.img{padding-right:4px}
+.athumb{width:40px;height:40px;border-radius:8px;position:relative;overflow:hidden;background:linear-gradient(135deg,var(--accent-soft),var(--surface));flex:none;display:grid;place-items:center}
+.athumb svg.art{width:100%;height:100%;position:absolute;inset:0}
+.ring{width:26px;height:26px;position:absolute;inset:0;margin:auto;transform:rotate(-90deg)}
+.ring circle{fill:none;stroke-width:3}
+.ring .trk{stroke:var(--line)}
+.ring .prg{stroke:var(--accent);stroke-linecap:round}
+.achip .i{color:var(--mut)}
+#ta{width:100%;border:0;outline:none;background:transparent;resize:none;padding:6px 6px 2px;font-size:15px;line-height:1.5;min-height:28px;max-height:200px;color:var(--text);display:block}
+#ta::placeholder{color:var(--mut)}
+.comp-bottom{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-height:40px;position:relative}
+.effort{display:flex;align-items:center;gap:8px}
+.effort-lbl{font-size:13px;color:var(--mut);font-weight:500;white-space:nowrap}
+.seg{display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:2px;gap:2px}
+.seg button{min-height:28px;padding:0 10px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--mut);font-size:13px;font-weight:500}
+.seg button:hover{color:var(--text)}
+.seg button[aria-pressed=true]{background:var(--surface);color:var(--text);border-color:var(--line)}
+.think-pw{display:none}
+.send,.stop{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;padding:0;flex:none;border:1px solid transparent}
+.send{background:transparent;color:var(--mut);border-color:var(--line)}
+.send:not(:disabled){background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.send:not(:disabled):hover{background:var(--accent-ink);border-color:var(--accent-ink)}
+.send:disabled{cursor:default}
+.stop{background:var(--surface2);color:var(--err);border-color:var(--line)}
+.stop:hover{background:var(--err-bg)}
+.comp-foot{display:flex;align-items:center;gap:12px;padding:8px 6px 0;font-size:13px;color:var(--mut);min-width:0}
+.comp-foot .hint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.steer{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.steer .pulse{width:6px;height:6px;flex:none}
+.meter{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;font-variant-numeric:tabular-nums;font-size:13px;color:var(--mut);flex:none}
+.bar{width:96px;height:6px;border-radius:999px;background:var(--track);overflow:hidden;display:inline-block}
+.bar>span{display:block;height:100%;min-width:6px;background:var(--accent);border-radius:999px}
+
+/* Popovers */
+.pop{position:absolute;z-index:30;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:6px;min-width:200px}
+.pop.menu{top:calc(100% + 6px);right:0}
+.pop.menu.up{top:auto;bottom:calc(100% + 8px);left:0;right:auto}
+.pop.model{top:calc(100% + 6px);right:0;width:336px;max-height:70vh;overflow-y:auto;padding:8px}
+#cmd{bottom:calc(100% + 8px);left:0;width:340px;padding:6px}
+.pop .grp{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);padding:10px 10px 4px}
+.opt{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:8px 10px;border:0;background:transparent;border-radius:10px;text-align:left;color:var(--text)}
+.opt:hover{background:var(--surface2)}
+.opt[aria-selected=true]{background:var(--surface2)}
+.opt-main{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}
+.opt-name{font-size:14px;font-weight:500}
+.opt .chips{display:flex;gap:4px;flex-wrap:wrap}
+.opt .chip{height:22px;font-size:13px;padding:0 8px}
+.opt .chk{width:16px;height:16px;color:var(--accent);opacity:0}
+.opt[aria-selected=true] .chk{opacity:1}
+.chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:1px 9px;font-size:13px;border:1px solid var(--line);color:var(--mut);white-space:nowrap;height:22px}
+.note-warn{margin:8px 10px 6px;font-size:13px;color:var(--warn);display:flex;gap:8px;align-items:flex-start;line-height:1.45}
+.note-warn::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--warn);margin-top:7px;flex:none}
+.menu-item{display:flex;align-items:center;gap:10px;width:100%;min-height:40px;padding:0 10px;border:0;background:transparent;border-radius:8px;text-align:left;color:var(--text);font-size:14px}
+.menu-item:hover{background:var(--surface2)}
+.menu-item[aria-checked=true]{background:var(--surface2)}
+.menu-item .i{color:var(--mut)}
+.menu-item.danger{color:var(--err)}
+.menu-item.danger .i{color:var(--err)}
+.menu-item.danger:hover{background:var(--err-bg)}
+.menu-sep{height:1px;background:var(--line);margin:6px 4px}
+.cmd-item{display:flex;align-items:center;gap:12px;width:100%;min-height:40px;padding:6px 10px;border:0;background:transparent;border-radius:8px;text-align:left;color:var(--text)}
+.cmd-item:hover{background:var(--surface2)}
+.cmd-item code{font-size:13px;color:var(--accent-ink);background:none;padding:0;min-width:84px}
+.cmd-item span.d{font-size:13px;color:var(--mut)}
+
+/* Drop overlay */
+.dropzone{position:absolute;inset:12px;z-index:15;border:1.5px dashed var(--accent);border-radius:14px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;pointer-events:none}
+.dz-in{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--accent-ink);font-weight:600;background:var(--surface);padding:18px 22px;border-radius:14px;border:1px solid var(--line)}
+.dz-in .i{width:28px;height:28px}
+
+/* ---- Phone layout (auto at <=760px viewport, or the mock Phone 390 control) ---- */
+.frame.phone{--gut:16px}
+.frame.phone .hdr{display:none}
+.frame.phone .tabbar{display:grid}
+.frame.phone .sess-toggle{display:inline-grid;width:44px;height:44px}
+.frame.phone .shell{grid-template-columns:minmax(0,1fr)}
+.frame.phone .side{position:absolute;top:0;bottom:0;left:0;width:min(300px,84%);transform:translateX(-102%);transition:transform .2s ease;z-index:40;box-shadow:none}
+.frame.phone .side.open{transform:none;box-shadow:var(--shadow)}
+.frame.phone .more{opacity:1;width:44px;height:44px;right:0}
+.frame.phone .row{min-height:48px;padding-right:48px}
+.frame.phone .row-wrap .pop{right:8px}
+.frame.phone .msg-actions{opacity:1}
+.frame.phone .msg-actions .ib{width:44px;height:44px}
+.frame.phone .prov{display:none}
+.frame.phone .ib{width:44px;height:44px}
+.frame.phone .thread-head{padding:0 8px;gap:4px;height:56px}
+.frame.phone .head-right{gap:4px}
+.frame.phone .pill{height:40px}
+.frame.phone .pname{display:none}
+.frame.phone .pshort{display:inline}
+.frame.phone .think-pw{display:inline-flex}
+.frame.phone .effort-lbl,.frame.phone .seg{display:none}
+.frame.phone .col{padding:20px var(--gut) 28px;gap:22px}
+.frame.phone .bubble{max-width:90%}
+.frame.phone .sugg-grid{grid-template-columns:1fr}
+.frame.phone .comp-inner{padding:8px var(--gut) 10px}
+.frame.phone .comp-bottom{flex-wrap:nowrap;gap:4px;min-height:40px}
+.frame.phone .composer{padding:8px 8px 8px}
+.frame.phone #modelWrap,.frame.phone .think-pw{position:static}
+.frame.phone #modelWrap .pill,.frame.phone #thinkBtn{height:40px;padding:0 8px;gap:4px;min-width:0}
+.frame.phone .attach-pw .ib{width:40px;height:40px}
+.frame.phone .tk-word,.frame.phone .mlab{display:none}
+.frame.phone .meter{gap:6px}
+.frame.phone .bar{width:28px}
+@container (max-width:389px){.frame.phone .pill .chev{display:none}}
+@container (max-width:359px){.frame.phone .mpct{display:none}}
+.frame.phone .send,.frame.phone .stop{width:44px;height:44px}
+.frame.phone .achip .x{width:44px;height:44px}
+.frame.phone .comp-foot .hint{display:none}
+.frame.phone .comp-foot{padding:8px 2px 0}
+.frame.phone .pop.model{top:auto;bottom:calc(100% + 8px);left:0;right:0;width:auto;max-height:min(46vh,340px);overflow-y:auto}
+.frame.phone .opt,.frame.phone .menu-item,.frame.phone .cmd-item{min-height:44px}
+.frame.phone .jump{bottom:calc(100% + 6px)}
+</style>
+</head>
+<body>
+
+<!-- Inline SVG icon sprite (thin 1.6px line icons) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-chevr" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3H7l3-3-1-5zM12 12v8"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6L20 9M20 4v5h-5"/></symbol>
+  <symbol id="i-fork" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9c0 4-6 3-12 8"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 9"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v12h14V8M10 12h4"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13.5" r="3.5"/><path d="M8 7l1.5-3h5L16 7"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.01"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5zM4 19a2 2 0 0 1 2-2h13"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></symbol>
+</svg>
+
+<!-- Mock-only control bar. Not part of the app. -->
+<div class="mockbar" role="toolbar" aria-label="Mockup controls">
+  <span class="mb-label">MOCKUP CONTROLS</span>
+  <div class="mb-group" role="group" aria-label="State">
+    <span>State</span>
+    <button class="mb-btn" type="button" data-set-state="empty" aria-pressed="false">Empty</button>
+    <button class="mb-btn" type="button" data-set-state="conv" aria-pressed="true">Conversation</button>
+    <button class="mb-btn" type="button" data-set-state="stream" aria-pressed="false">Streaming</button>
+    <button class="mb-btn" type="button" data-set-state="appr" aria-pressed="false">Approval</button>
+    <button class="mb-btn" type="button" data-set-state="attach" aria-pressed="false">Attachments</button>
+  </div>
+  <div class="mb-group" role="group" aria-label="Theme">
+    <span>Theme</span>
+    <button class="mb-btn" type="button" data-theme-set="system" aria-pressed="true">System</button>
+    <button class="mb-btn" type="button" data-theme-set="light" aria-pressed="false">Light</button>
+    <button class="mb-btn" type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+  </div>
+  <div class="mb-group" role="group" aria-label="Width">
+    <span>Width</span>
+    <button class="mb-btn" type="button" data-width="desktop" aria-pressed="true">Desktop</button>
+    <button class="mb-btn" type="button" data-width="phone" aria-pressed="false">Phone 390</button>
+  </div>
+</div>
+
+<div class="stage">
+<div class="frame" id="frame" data-state="conv">
+
+  <!-- App header (desktop only: brand + top tabs) -->
+  <header class="hdr">
+    <div class="brand"><span class="logo" aria-hidden="true"></span>Control Center</div>
+    <nav class="tabs" aria-label="Primary">
+      <a href="#">Dashboard</a>
+      <a href="#" aria-current="page">Chat</a>
+      <a href="#">Settings</a>
+    </nav>
+    <span class="spacer"></span>
+  </header>
+
+  <div class="shell">
+
+    <!-- Sessions panel (desktop sidebar; phone drawer) -->
+    <aside class="side" id="side" aria-label="Chat sessions">
+      <div class="side-top">
+        <button class="btn primary" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-plus"/></svg>New chat</button>
+        <label class="search">
+          <svg class="i sm" aria-hidden="true"><use href="#i-search"/></svg>
+          <input type="search" placeholder="Search all chats" aria-label="Search all chats">
+        </label>
+      </div>
+
+      <div class="side-list">
+      <div class="side-scroll">
+        <div class="sec">Pinned</div>
+        <div class="row-wrap">
+          <a class="row" href="#" title="Homelab DNS audit"><span class="pulse-wrap"></span><span class="row-txt"><span class="row-title">Homelab DNS audit</span><span class="row-meta">Opus 5 · 3d</span></span></a>
+          <button class="more" type="button" data-pop="m-pin" aria-haspopup="true" aria-expanded="false" aria-label="Chat actions for Homelab DNS audit"><svg class="i sm" aria-hidden="true"><use href="#i-dots"/></svg></button>
+          <div class="pop menu" id="m-pin" role="menu" hidden>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-edit"/></svg>Rename</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-pin"/></svg>Unpin</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export (Markdown)</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item danger" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+          </div>
+        </div>
+
+        <div class="sec">Today</div>
+
+        <!-- Inline rename example: Conversation state only -->
+        <div class="rename" data-in="conv">
+          <input type="text" value="Nightly backup check" aria-label="Rename chat">
+          <div class="acts">
+            <button class="btn ghost" type="button">Cancel</button>
+            <button class="btn" type="button">Save</button>
+          </div>
+        </div>
+
+        <!-- Active chat: highlighted in every state except Conversation (which shows rename row) -->
+        <div class="row-wrap" data-in="stream appr attach">
+          <a class="row" href="#" aria-current="true" title="Nightly backup check"><span class="pulse-wrap"><span class="pulse" data-in="stream appr" hidden></span></span><span class="row-txt"><span class="row-title">Nightly backup check</span><span class="row-meta">Sonnet 5.5 · now</span></span></a>
+          <button class="more" type="button" data-pop="m-act" aria-haspopup="true" aria-expanded="false" aria-label="Chat actions for Nightly backup check"><svg class="i sm" aria-hidden="true"><use href="#i-dots"/></svg></button>
+          <div class="pop menu" id="m-act" role="menu" hidden>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-edit"/></svg>Rename</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-pin"/></svg>Pin</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export (Markdown)</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item danger" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+          </div>
+        </div>
+
+        <div class="row-wrap">
+          <a class="row" href="#" title="Disk usage on tun-sfx"><span class="pulse-wrap"><span class="pulse"></span></span><span class="row-txt"><span class="row-title">Disk usage on tun-sfx</span><span class="row-meta">Qwen3.6-35B-A3B · running</span></span></a>
+          <button class="more" type="button" data-pop="m-disk" aria-haspopup="true" aria-expanded="false" aria-label="Chat actions for Disk usage on tun-sfx"><svg class="i sm" aria-hidden="true"><use href="#i-dots"/></svg></button>
+          <div class="pop menu" id="m-disk" role="menu" hidden>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-edit"/></svg>Rename</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-pin"/></svg>Pin</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export (Markdown)</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item danger" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+          </div>
+        </div>
+
+        <div class="row-wrap">
+          <a class="row" href="#" title="Explain caddy 502 logs"><span class="pulse-wrap"></span><span class="row-txt"><span class="row-title">Explain caddy 502 logs</span><span class="row-meta">DeepSeek V4 · 4h</span></span></a>
+          <button class="more" type="button" data-pop="m-caddy" aria-haspopup="true" aria-expanded="false" aria-label="Chat actions for Explain caddy 502 logs"><svg class="i sm" aria-hidden="true"><use href="#i-dots"/></svg></button>
+          <div class="pop menu" id="m-caddy" role="menu" hidden>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-edit"/></svg>Rename</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-pin"/></svg>Pin</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export (Markdown)</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item danger" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+          </div>
+        </div>
+
+        <div class="sec">Yesterday</div>
+        <div class="row-wrap">
+          <a class="row" href="#" title="Sonarr queue stuck on import"><span class="pulse-wrap"></span><span class="row-txt"><span class="row-title">Sonarr queue stuck on import</span><span class="row-meta">Sonnet 5.5 · 1d</span></span></a>
+          <button class="more" type="button" data-pop="m-sonarr" aria-haspopup="true" aria-expanded="false" aria-label="Chat actions for Sonarr queue stuck on import"><svg class="i sm" aria-hidden="true"><use href="#i-dots"/></svg></button>
+          <div class="pop menu" id="m-sonarr" role="menu" hidden>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-edit"/></svg>Rename</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-pin"/></svg>Pin</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export (Markdown)</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item danger" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+          </div>
+        </div>
+        <div class="row-wrap">
+          <a class="row" href="#" title="Pangolin tunnel rotation"><span class="pulse-wrap"></span><span class="row-txt"><span class="row-title">Pangolin tunnel rotation</span><span class="row-meta">Opus 5 · 1d</span></span></a>
+          <button class="more" type="button" data-pop="m-pang" aria-haspopup="true" aria-expanded="false" aria-label="Chat actions for Pangolin tunnel rotation"><svg class="i sm" aria-hidden="true"><use href="#i-dots"/></svg></button>
+          <div class="pop menu" id="m-pang" role="menu" hidden>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-edit"/></svg>Rename</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-pin"/></svg>Pin</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export (Markdown)</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item danger" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+          </div>
+        </div>
+
+        <div class="sec">Previous 7 days</div>
+        <div class="row-wrap">
+          <a class="row" href="#" title="Jellyfin transcode settings"><span class="pulse-wrap"></span><span class="row-txt"><span class="row-title">Jellyfin transcode settings</span><span class="row-meta">Qwen3.5-4B · 3d</span></span></a>
+          <button class="more" type="button" data-pop="m-jf" aria-haspopup="true" aria-expanded="false" aria-label="Chat actions for Jellyfin transcode settings"><svg class="i sm" aria-hidden="true"><use href="#i-dots"/></svg></button>
+          <div class="pop menu" id="m-jf" role="menu" hidden>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-edit"/></svg>Rename</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-pin"/></svg>Pin</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export (Markdown)</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item danger" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+          </div>
+        </div>
+        <div class="row-wrap">
+          <a class="row" href="#" title="Weekly patch summary"><span class="pulse-wrap"></span><span class="row-txt"><span class="row-title">Weekly patch summary</span><span class="row-meta">GPT-5.x · 6d</span></span></a>
+          <button class="more" type="button" data-pop="m-patch" aria-haspopup="true" aria-expanded="false" aria-label="Chat actions for Weekly patch summary"><svg class="i sm" aria-hidden="true"><use href="#i-dots"/></svg></button>
+          <div class="pop menu" id="m-patch" role="menu" hidden>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-edit"/></svg>Rename</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-pin"/></svg>Pin</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export (Markdown)</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item danger" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+          </div>
+        </div>
+        <div class="row-wrap">
+          <a class="row" href="#" title="Gmail sorter rules"><span class="pulse-wrap"></span><span class="row-txt"><span class="row-title">Gmail sorter rules</span><span class="row-meta">Opus 5 · 5d</span></span></a>
+          <button class="more" type="button" data-pop="m-gmail" aria-haspopup="true" aria-expanded="false" aria-label="Chat actions for Gmail sorter rules"><svg class="i sm" aria-hidden="true"><use href="#i-dots"/></svg></button>
+          <div class="pop menu" id="m-gmail" role="menu" hidden>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-edit"/></svg>Rename</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-pin"/></svg>Pin</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+            <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export (Markdown)</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item danger" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+          </div>
+        </div>
+      </div>
+      </div>
+
+      <div class="side-foot">
+        <button class="link-btn" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-archive"/></svg>Archived (3)</button>
+      </div>
+    </aside>
+    <button class="scrim" id="scrim" type="button" aria-label="Close sessions" hidden></button>
+
+    <!-- Thread -->
+    <section class="main" aria-label="Chat thread">
+
+      <div class="thread-head">
+        <button class="ib sess-toggle" id="sessToggle" type="button" aria-label="Chats" aria-controls="side" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg></button>
+        <h1 class="ttl">
+          <span class="ttl-text" id="ttl" role="button" tabindex="0" title="Click to rename" data-in="conv stream appr attach">Nightly backup check</span>
+        </h1>
+        <div class="head-right" id="headRight">
+          <div class="pop-wrap" id="modelWrap">
+            <button class="pill" type="button" id="pillBtn" data-pop="modelpop" aria-haspopup="true" aria-expanded="false" aria-controls="modelpop">
+              <span class="prov" id="pillProv">Anthropic</span>
+              <span class="pname" id="pillName">Claude Sonnet 5.5</span>
+              <span class="pshort" id="pillShort">Sonnet 5.5</span>
+              <svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg>
+            </button>
+            <div class="pop model" id="modelpop" role="listbox" aria-label="Model" hidden>
+              <div class="grp">Anthropic</div>
+              <button class="opt" type="button" role="option" aria-selected="true" data-model="Claude Sonnet 5.5" data-short="Sonnet 5.5" data-prov="Anthropic" data-reason="1">
+                <span class="opt-main"><span class="opt-name">Claude Sonnet 5.5</span>
+                  <span class="chips"><span class="chip">vision</span><span class="chip">tools</span><span class="chip">reasoning</span></span></span>
+                <svg class="i chk" aria-hidden="true"><use href="#i-check"/></svg>
+              </button>
+              <button class="opt" type="button" role="option" aria-selected="false" data-model="Claude Opus 5" data-short="Opus 5" data-prov="Anthropic" data-reason="1">
+                <span class="opt-main"><span class="opt-name">Claude Opus 5</span>
+                  <span class="chips"><span class="chip">vision</span><span class="chip">tools</span><span class="chip">reasoning</span></span></span>
+                <svg class="i chk" aria-hidden="true"><use href="#i-check"/></svg>
+              </button>
+              <div class="grp">OpenAI</div>
+              <button class="opt" type="button" role="option" aria-selected="false" data-model="GPT-5.x" data-short="GPT-5.x" data-prov="OpenAI" data-reason="1">
+                <span class="opt-main"><span class="opt-name">GPT-5.x</span>
+                  <span class="chips"><span class="chip">vision</span><span class="chip">tools</span><span class="chip">reasoning</span></span></span>
+                <svg class="i chk" aria-hidden="true"><use href="#i-check"/></svg>
+              </button>
+              <div class="grp">DeepSeek</div>
+              <button class="opt" type="button" role="option" aria-selected="false" data-model="DeepSeek V4" data-short="DeepSeek V4" data-prov="DeepSeek" data-reason="1">
+                <span class="opt-main"><span class="opt-name">DeepSeek V4</span>
+                  <span class="chips"><span class="chip">tools</span><span class="chip">reasoning</span></span></span>
+                <svg class="i chk" aria-hidden="true"><use href="#i-check"/></svg>
+              </button>
+              <div class="grp">Local / tun-sfx</div>
+              <button class="opt" type="button" role="option" aria-selected="false" data-model="Qwen3.6-35B-A3B" data-short="Qwen3.6-35B-A3B" data-prov="tun-sfx" data-reason="1">
+                <span class="opt-main"><span class="opt-name">Qwen3.6-35B-A3B</span>
+                  <span class="chips"><span class="chip">tools</span><span class="chip">reasoning</span></span></span>
+                <svg class="i chk" aria-hidden="true"><use href="#i-check"/></svg>
+              </button>
+              <button class="opt" type="button" role="option" aria-selected="false" data-model="Qwen3.5-4B" data-short="Qwen3.5-4B" data-prov="tun-sfx" data-reason="0">
+                <span class="opt-main"><span class="opt-name">Qwen3.5-4B</span>
+                  <span class="chips"><span class="chip">tools</span></span></span>
+                <svg class="i chk" aria-hidden="true"><use href="#i-check"/></svg>
+              </button>
+              <p class="note-warn">Local models: offline if tun-sfx is asleep</p>
+            </div>
+          </div>
+
+          <div class="pop-wrap">
+            <button class="ib" type="button" data-pop="ovf" aria-haspopup="true" aria-expanded="false" aria-label="More thread options"><svg class="i" aria-hidden="true"><use href="#i-dots"/></svg></button>
+            <div class="pop menu" id="ovf" role="menu" hidden>
+              <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-file"/></svg>System prompt</button>
+              <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-info"/></svg>Session info</button>
+              <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export</button>
+              <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-refresh"/></svg>Clear context</button>
+              <div class="menu-sep"></div>
+              <button class="menu-item danger" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="thread-scroll" id="scroll">
+        <div class="col">
+
+          <!-- Empty state -->
+          <div class="empty" data-in="empty">
+            <h2>What can I help with?</h2>
+            <div class="sugg-grid">
+              <button class="sugg" type="button"><span>Check unit health</span><small>systemd services on tun-minipc</small></button>
+              <button class="sugg" type="button"><span>Summarise today's alerts</span><small>Alerts from the last 24 hours</small></button>
+              <button class="sugg" type="button"><span>Restart a service</span><small>Asks before running anything</small></button>
+              <button class="sugg" type="button"><span>Explain this log</span><small>Attach a file or paste output</small></button>
+            </div>
+          </div>
+
+          <!-- User message 1 (Conversation, Attachments) -->
+          <div class="msg user" data-in="conv attach">
+            <div class="bubble">
+              <div class="atts">
+                <span class="thumb-sm" role="img" aria-label="Attached image: screenshot-2026-10-10.png">
+                  <svg viewBox="0 0 72 72" aria-hidden="true">
+                    <defs><linearGradient id="gImg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--accent-soft)"/><stop offset="1" style="stop-color:var(--surface)"/></linearGradient></defs>
+                    <rect width="72" height="72" style="fill:url(#gImg)"/>
+                    <rect x="8" y="10" width="40" height="6" rx="3" style="fill:var(--accent-soft)"/>
+                    <rect x="8" y="22" width="56" height="5" rx="2.5" style="fill:var(--line)"/>
+                    <rect x="8" y="32" width="46" height="5" rx="2.5" style="fill:var(--line)"/>
+                    <rect x="8" y="42" width="30" height="5" rx="2.5" style="fill:var(--line)"/>
+                    <circle cx="54" cy="54" r="8" style="fill:var(--accent);opacity:.7"/>
+                  </svg>
+                </span>
+                <span class="file-chip"><svg class="i sm" aria-hidden="true"><use href="#i-file"/></svg><span class="fn">backup-job.log</span><span class="fs">12 KB · text</span></span>
+              </div>
+              <p>Did the nightly backup run? Compare the log with the compose file.</p>
+            </div>
+            <div class="msg-actions">
+              <button class="ib" type="button" aria-label="Copy message" title="Copy"><svg class="i sm" aria-hidden="true"><use href="#i-copy"/></svg></button>
+            </div>
+          </div>
+
+          <!-- Assistant message 1 (Conversation) -->
+          <div class="asst" data-in="conv">
+            <div class="ahead"><span class="who">Hermes</span><span>·</span><span>Sonnet 5.5</span><span>·</span><time>09:41</time></div>
+
+            <div class="fgroup">
+              <div class="fold-wrap">
+                <button class="fold" type="button" aria-expanded="false" aria-controls="thought-1" data-toggle="thought-1">
+                  <svg class="chev" aria-hidden="true"><use href="#i-chevr"/></svg>
+                  <svg class="i sm" aria-hidden="true" style="color:var(--mut)"><use href="#i-bulb"/></svg>
+                  <span class="lbl">Thought for 6s</span>
+                </button>
+                <div class="thought" id="thought-1" hidden>The backup log has a timestamp at 02:00 and a success line at 02:14. Worker restart at 03:12 is in the same log. I need to check the compose restart policy before answering.</div>
+              </div>
+
+              <div class="fold-wrap">
+                <button class="fold" type="button" aria-expanded="false" aria-controls="tool-1" data-toggle="tool-1">
+                  <svg class="chev" aria-hidden="true"><use href="#i-chevr"/></svg>
+                  <svg class="i sm" aria-hidden="true" style="color:var(--mut)"><use href="#i-term"/></svg>
+                  <span class="tname">terminal</span>
+                  <span class="targ">docker ps</span>
+                  <span class="tdur">0.8s</span>
+                  <span class="stat-ok">ok</span>
+                </button>
+                <pre class="out" id="tool-1" hidden>CONTAINER ID   IMAGE                    STATUS                  NAMES
+4f2a91c0be11   restic/restic:0.17       Up 6 days (healthy)     backup
+b7d03e8a1c42   hermes/worker:2.4.1      Up 2 hours (healthy)    hermes-worker
+9c1e7f25a0d8   caddy:2.8-alpine         Up 19 days              caddy</pre>
+              </div>
+
+              <div class="fold-wrap">
+                <button class="fold" type="button" aria-expanded="false" aria-controls="tool-2" data-toggle="tool-2">
+                  <svg class="chev" aria-hidden="true"><use href="#i-chevr"/></svg>
+                  <svg class="i sm" aria-hidden="true" style="color:var(--mut)"><use href="#i-file"/></svg>
+                  <span class="tname">read_file</span>
+                  <span class="targ">docker-compose.yml</span>
+                  <span class="tdur">0.1s</span>
+                  <span class="stat-ok">ok</span>
+                </button>
+                <pre class="out" id="tool-2" hidden>services:
+  backup:
+    image: restic/restic:0.17
+    restart: unless-stopped
+    volumes:
+      - ./data:/data:ro
+  hermes-worker:
+    image: hermes/worker:2.4.1
+    restart: unless-stopped</pre>
+              </div>
+            </div>
+
+            <div class="body">
+              <p>The nightly backup ran at 02:00 and finished in 14 minutes with no restic errors. The worker restarted once at 03:12 after a failed health probe. Three things stand out:</p>
+              <ul>
+                <li>Retention keeps 7 daily and 4 weekly snapshots.</li>
+                <li>The repository grew by 2.3 GB since Monday.</li>
+                <li><code>hermes-worker</code> uses <code>restart: unless-stopped</code>, so the restart was automatic.</li>
+              </ul>
+              <div class="tbl-wrap">
+                <table>
+                  <thead><tr><th>Service</th><th>Status</th><th>Restarts</th><th>Uptime</th></tr></thead>
+                  <tbody>
+                    <tr><td>backup</td><td>healthy</td><td>0</td><td>6d 4h</td></tr>
+                    <tr><td>hermes-worker</td><td>healthy</td><td>1</td><td>2h 11m</td></tr>
+                    <tr><td>caddy</td><td>healthy</td><td>0</td><td>19d</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>The backup entry needs no change:</p>
+              <div class="codeblk">
+                <div class="codeblk-h"><span>yaml</span><button class="copy" type="button" data-copy aria-label="Copy code"><svg class="i sm" aria-hidden="true"><use href="#i-copy"/></svg>Copy</button></div>
+<pre><span class="k">services</span>:
+  <span class="k">backup</span>:
+    <span class="k">image</span>: <span class="s">restic/restic:0.17</span>
+    <span class="k">env_file</span>: <span class="s">.env</span>
+    <span class="k">command</span>: [<span class="s">"backup"</span>, <span class="s">"/data"</span>]  <span class="c"># 02:00 nightly via cron</span>
+    <span class="k">restart</span>: <span class="v">unless-stopped</span></pre>
+              </div>
+            </div>
+
+            <div class="msg-actions">
+              <button class="ib" type="button" aria-label="Copy response" title="Copy"><svg class="i sm" aria-hidden="true"><use href="#i-copy"/></svg></button>
+            </div>
+            <div class="usage"><span>ctx 14.2k / 200k</span><span>1.1k out</span><span>$0.012</span></div>
+          </div>
+
+          <!-- User message (Streaming) -->
+          <div class="msg user" data-in="stream">
+            <div class="bubble"><p>Look up restic retention flags and apply the best one.</p></div>
+          </div>
+
+          <!-- Streaming assistant message -->
+          <div class="asst" data-in="stream">
+            <div class="ahead"><span class="who">Hermes</span><span>·</span><span>Sonnet 5.5</span><span>·</span><time>09:58</time></div>
+            <div class="fgroup">
+              <div class="fold-wrap">
+                <div class="fold static" role="status" aria-live="polite">
+                  <span class="spin" aria-hidden="true"></span>
+                  <svg class="i sm" aria-hidden="true" style="color:var(--mut)"><use href="#i-search"/></svg>
+                  <span class="tname">web_search</span>
+                  <span class="targ">restic retention flags</span>
+                  <span class="stat-run">running 2.1s</span>
+                </div>
+              </div>
+            </div>
+            <div class="body">
+              <p>Searching the restic docs for retention flags, then I will compare them against your backup job...<span class="caret" aria-hidden="true"></span></p>
+            </div>
+          </div>
+
+          <!-- User message (Approval) -->
+          <div class="msg user" data-in="appr">
+            <div class="bubble"><p>Restart the worker and tail its logs.</p></div>
+          </div>
+
+          <!-- Approval card -->
+          <div class="appr" data-in="appr" role="group" aria-labelledby="appr-title">
+            <div class="appr-h"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><h3 id="appr-title">Hermes wants to run a command</h3></div>
+            <p class="meta">terminal · tun-minipc · working dir ~/stack</p>
+            <pre class="cmdblk">docker compose restart hermes-worker &amp;&amp; docker compose logs --tail 50 hermes-worker</pre>
+            <div class="appr-btns">
+              <button class="btn primary" type="button">Approve once</button>
+              <button class="btn" type="button">Always allow</button>
+              <button class="btn danger-o" type="button">Deny</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Composer -->
+      <div class="composer-wrap">
+        <button class="jump" type="button" hidden>Jump to latest</button>
+        <div class="comp-inner">
+
+          <div class="pop" id="cmd" role="listbox" aria-label="Commands" hidden>
+            <button class="cmd-item" type="button" role="option" data-cmd="/new"><code>/new</code><span class="d">Start a new chat</span></button>
+            <button class="cmd-item" type="button" role="option" data-cmd="/model"><code>/model</code><span class="d">Switch model</span></button>
+            <button class="cmd-item" type="button" role="option" data-cmd="/reasoning"><code>/reasoning</code><span class="d">Set reasoning effort</span></button>
+            <button class="cmd-item" type="button" role="option" data-cmd="/compact"><code>/compact</code><span class="d">Summarise and shorten context</span></button>
+            <button class="cmd-item" type="button" role="option" data-cmd="/stop"><code>/stop</code><span class="d">Stop the running task</span></button>
+            <button class="cmd-item" type="button" role="option" data-cmd="/skills"><code>/skills</code><span class="d">Browse and run skills</span></button>
+          </div>
+
+          <div class="composer" id="composer">
+            <div class="attach-row" data-in="attach">
+              <span class="achip img">
+                <span class="athumb" aria-hidden="true">
+                  <svg class="art" viewBox="0 0 40 40" preserveAspectRatio="xMidYMid slice"><rect x="0" y="0" width="40" height="40" style="fill:var(--surface)" opacity=".5"/><circle cx="28" cy="13" r="4" style="fill:var(--accent);opacity:.7"/><path d="M0 34 L14 20 L24 30 L30 24 L40 34 Z" style="fill:var(--accent);opacity:.35"/></svg>
+                  <svg class="ring" viewBox="0 0 26 26" aria-hidden="true"><circle class="trk" cx="13" cy="13" r="10"/><circle class="prg" cx="13" cy="13" r="10" stroke-dasharray="62.8" stroke-dashoffset="22.6"/></svg>
+                </span>
+                <span class="ameta"><span class="aname">screenshot-2026-10-10.png</span><span class="asub">uploading 64%</span></span>
+                <button class="x" type="button" aria-label="Remove screenshot-2026-10-10.png"><svg class="i sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+              </span>
+              <span class="achip">
+                <svg class="i sm" aria-hidden="true"><use href="#i-file"/></svg>
+                <span class="ameta"><span class="aname">design-notes.pdf</span><span class="asub">248 KB · PDF · ready</span></span>
+                <button class="x" type="button" aria-label="Remove design-notes.pdf"><svg class="i sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+              </span>
+              <span class="achip">
+                <svg class="i sm" aria-hidden="true"><use href="#i-code"/></svg>
+                <span class="ameta"><span class="aname">deploy.sh</span><span class="asub">1.1 KB · shell · ready</span></span>
+                <button class="x" type="button" aria-label="Remove deploy.sh"><svg class="i sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+              </span>
+            </div>
+
+            <textarea id="ta" rows="1" placeholder="Message Hermes…" aria-label="Message Hermes"></textarea>
+
+            <div class="comp-bottom" id="compBottom">
+              <div class="pop-wrap attach-pw">
+                <button class="ib" type="button" data-pop="attachmenu" aria-haspopup="true" aria-expanded="false" aria-label="Attach"><svg class="i" aria-hidden="true"><use href="#i-clip"/></svg></button>
+                <div class="pop menu up" id="attachmenu" role="menu" hidden>
+                  <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-upload"/></svg>Upload file</button>
+                  <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-image"/></svg>Upload image</button>
+                  <button class="menu-item" role="menuitem" type="button"><svg class="i sm" aria-hidden="true"><use href="#i-camera"/></svg>Take photo</button>
+                </div>
+              </div>
+              <div class="effort" id="effort" role="group" aria-label="Reasoning effort">
+                <span class="effort-lbl">Thinking</span>
+                <div class="seg">
+                  <button type="button" aria-pressed="false">Off</button>
+                  <button type="button" aria-pressed="false">Low</button>
+                  <button type="button" aria-pressed="true">Med</button>
+                  <button type="button" aria-pressed="false">High</button>
+                </div>
+                <div class="pop-wrap think-pw" id="thinkWrap">
+                  <button class="pill" type="button" id="thinkBtn" data-pop="thinkpop" aria-haspopup="true" aria-expanded="false" aria-controls="thinkpop"><span id="thinkLbl"><span class="tk-word">Thinking: </span>Med</span><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+                  <div class="pop menu up" id="thinkpop" role="menu" hidden>
+                    <button class="menu-item" type="button" role="menuitemradio" aria-checked="false" data-think="Off">Off</button>
+                    <button class="menu-item" type="button" role="menuitemradio" aria-checked="false" data-think="Low">Low</button>
+                    <button class="menu-item" type="button" role="menuitemradio" aria-checked="true" data-think="Med">Med</button>
+                    <button class="menu-item" type="button" role="menuitemradio" aria-checked="false" data-think="High">High</button>
+                  </div>
+                </div>
+              </div>
+              <span class="spacer"></span>
+              <span class="meter" title="Context window used: 14k of 200k tokens" aria-label="Context window used: 14k of 200k tokens"><span class="bar"><span style="width:7%"></span></span><span class="mlab">14k/200k</span><span class="mpct">7%</span></span>
+              <button class="send" id="send" type="button" data-in="conv appr attach empty" aria-label="Send message" disabled><svg class="i" aria-hidden="true"><use href="#i-up"/></svg></button>
+              <button class="stop" type="button" data-in="stream" aria-label="Stop running task"><svg class="i" aria-hidden="true"><use href="#i-stop"/></svg></button>
+            </div>
+          </div>
+
+          <div class="comp-foot">
+            <span class="steer" data-in="stream"><span class="pulse" aria-hidden="true"></span>Type to steer the running task</span>
+            <span class="hint" data-in="conv appr attach empty">Enter to send, Shift+Enter for newline, / for commands</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Full-thread drag and drop overlay (Attachments state) -->
+      <div class="dropzone" data-in="attach" aria-hidden="true">
+        <div class="dz-in"><svg class="i" aria-hidden="true"><use href="#i-upload"/></svg>Drop files to attach</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Bottom tabbar (phone / narrow only) -->
+  <nav class="tabbar" aria-label="Primary">
+    <a href="#"><svg class="i" aria-hidden="true"><use href="#i-grid"/></svg>Dashboard</a>
+    <a href="#" aria-current="page"><svg class="i" aria-hidden="true"><use href="#i-chat"/></svg>Chat</a>
+    <a href="#"><svg class="i" aria-hidden="true"><use href="#i-gear"/></svg>Settings</a>
+  </nav>
+
+</div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const frame = $('#frame'), side = $('#side'), scrim = $('#scrim'), sessT = $('#sessToggle');
+  const ta = $('#ta'), send = $('#send'), cmd = $('#cmd'), effort = $('#effort'), ttl = $('#ttl');
+  const mq = window.matchMedia('(max-width:760px)');
+
+  /* Popovers */
+  function closeAll(){
+    $$('.pop.menu, #modelpop, #cmd, #thinkpop').forEach(p => p.hidden = true);
+    $$('[data-pop]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  }
+
+  /* Drawer (phone) */
+  function openDrawer(open){
+    side.classList.toggle('open', open);
+    scrim.hidden = !open;
+    sessT.setAttribute('aria-expanded', String(open));
+  }
+
+  /* States */
+  function setState(s){
+    frame.dataset.state = s;
+    $$('[data-in]').forEach(el => { el.hidden = !el.dataset.in.split(/\s+/).includes(s); });
+    $$('[data-set-state]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.setState === s)));
+    closeAll(); openDrawer(false); updateSend(); updateEffort();
+  }
+
+  /* Width: phone layout when the viewport is narrow or the Phone 390 control is chosen.
+     The model picker lives in the header on desktop and moves to the composer footer on phone. */
+  function setWidth(w){
+    const phone = w === 'phone';
+    frame.classList.toggle('phone', phone);
+    frame.classList.toggle('mock', phone && !mq.matches);
+    const mw = $('#modelWrap');
+    if (phone) $('.attach-pw').after(mw); else $('#headRight').prepend(mw);
+    $$('[data-width]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.width === w)));
+    closeAll(); openDrawer(false);
+  }
+  mq.addEventListener('change', e => setWidth(e.matches ? 'phone' : 'desktop'));
+
+  /* Theme */
+  function setTheme(t){
+    if (t === 'system') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', t);
+    $$('[data-theme-set]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeSet === t)));
+  }
+
+  /* Model picker */
+  function selectModel(opt){
+    $$('.opt[data-model]').forEach(o => o.setAttribute('aria-selected', String(o === opt)));
+    $('#pillName').textContent = opt.dataset.model;
+    $('#pillShort').textContent = opt.dataset.short;
+    $('#pillProv').textContent = opt.dataset.prov;
+    updateEffort();
+  }
+  function updateEffort(){
+    const sel = $('.opt[aria-selected=true]');
+    effort.hidden = !sel || sel.dataset.reason !== '1';
+  }
+
+  /* Reasoning: one state drives the desktop segmented control and the phone "Thinking: X" popover */
+  function setEffort(label){
+    $$('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x.textContent.trim() === label)));
+    $$('#thinkpop [data-think]').forEach(o => o.setAttribute('aria-checked', String(o.dataset.think === label)));
+    const tl = $('#thinkLbl'); tl.textContent = '';
+    const w = document.createElement('span'); w.className = 'tk-word'; w.textContent = 'Thinking: ';
+    tl.append(w, label);
+    $('#thinkBtn').setAttribute('aria-label', 'Thinking: ' + label);
+  }
+
+  /* Composer */
+  function grow(){
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+  }
+  function updateSend(){
+    send.disabled = !(ta.value.trim() || frame.dataset.state === 'attach');
+  }
+  function updateCmd(){
+    const v = ta.value;
+    if (!v.startsWith('/')) { cmd.hidden = true; return; }
+    const q = v.slice(1).toLowerCase();
+    let any = false;
+    $$('#cmd [data-cmd]').forEach(o => {
+      const show = o.dataset.cmd.slice(1).startsWith(q);
+      o.hidden = !show; if (show) any = true;
+    });
+    cmd.hidden = !any;
+  }
+  ta.addEventListener('input', () => { grow(); updateSend(); updateCmd(); });
+  ta.addEventListener('click', updateCmd);
+  ta.addEventListener('keyup', e => { if (e.key !== 'Escape') updateCmd(); });
+
+  /* Title rename (click to edit) */
+  function startRename(){
+    ttl.setAttribute('contenteditable', 'true');
+    ttl.focus();
+    const r = document.createRange(); r.selectNodeContents(ttl);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  }
+  ttl.addEventListener('click', startRename);
+  ttl.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); ttl.blur(); }
+    if (e.key === 'Escape') { ttl.blur(); }
+    if (e.key === ' ' && ttl.getAttribute('contenteditable') !== 'true') { e.preventDefault(); startRename(); }
+  });
+  ttl.addEventListener('blur', () => { ttl.removeAttribute('contenteditable'); });
+
+  /* Global clicks */
+  document.addEventListener('click', e => {
+    const t = e.target, el = t.closest.bind(t);
+    let b;
+    if ((b = el('[data-set-state]'))) return setState(b.dataset.setState);
+    if ((b = el('[data-theme-set]'))) return setTheme(b.dataset.themeSet);
+    if ((b = el('[data-width]'))) return setWidth(b.dataset.width);
+    if (el('#sessToggle')) return openDrawer(!side.classList.contains('open'));
+    if (el('#scrim')) return openDrawer(false);
+    if ((b = el('[data-toggle]'))) {
+      const target = document.getElementById(b.dataset.toggle);
+      const open = target.hidden;
+      target.hidden = !open;
+      b.setAttribute('aria-expanded', String(open));
+      return;
+    }
+    if ((b = el('[data-pop]'))) {
+      const target = document.getElementById(b.dataset.pop);
+      const open = target.hidden;
+      closeAll();
+      target.hidden = !open;
+      b.setAttribute('aria-expanded', String(open));
+      return;
+    }
+    if ((b = el('.opt[data-model]'))) { selectModel(b); closeAll(); return; }
+    if ((b = el('[data-think]'))) { setEffort(b.dataset.think); closeAll(); return; }
+    if ((b = el('[data-cmd]'))) {
+      ta.value = b.dataset.cmd + ' ';
+      grow(); updateSend(); cmd.hidden = true; ta.focus();
+      return;
+    }
+    if ((b = el('.menu-item'))) { closeAll(); return; }
+    if ((b = el('.seg button'))) { setEffort(b.textContent.trim()); return; }
+    if ((b = el('[data-copy]'))) {
+      const old = b.innerHTML;
+      b.textContent = 'Copied';
+      setTimeout(() => { b.innerHTML = old; }, 1200);
+      return;
+    }
+    if (!el('.pop, .pop-wrap, .composer-wrap, .row-wrap')) closeAll();
+  });
+
+  /* Escape closes popovers and drawer */
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { closeAll(); openDrawer(false); }
+  });
+
+  /* Initial sync: width follows the viewport, then state, theme, composer */
+  setWidth(mq.matches ? 'phone' : 'desktop');
+  setTheme('system');
+  setEffort('Med');
+  setState('conv');
+  grow();
+})();
+</script>
+</body>
+</html>

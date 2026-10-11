@@ -8,7 +8,11 @@ services:
       PORT: "3030"
       CC_MASTER_KEY: ${CC_MASTER_KEY:?set CC_MASTER_KEY in .env}
       CC_ADMIN_PASSWORD: ${CC_ADMIN_PASSWORD:-}
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
+      CHAT_UPLOAD_DIR: /home/tunitz/.hermes/cache/chat-uploads
     volumes:
       - cc-data:/data
+      - /home/tunitz/.hermes/cache/chat-uploads:/home/tunitz/.hermes/cache/chat-uploads
+    # HERMES_API_KEY and CHAT_UPLOAD_DIR are passed through; never printed or logged.
 volumes:
   cc-data:
