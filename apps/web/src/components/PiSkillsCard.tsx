@@ -52,7 +52,7 @@ export default function PiSkillsCard({ onMsg }: { onMsg: (m: string) => void }) 
   const projects = group("project");
 
   return (
-    <div className="card" id="pi-skills"><h3 style={{ marginTop: 0 }}>Skills</h3>
+    <div className="acc-sub" id="pi-skills"><h3 className="acc-subtitle">Skills</h3>
       {state === "loading" && <p className="muted" role="status">Loading</p>}
       {state === "off" && <p className="muted">Pi is not set up on this server.</p>}
       {state === "down" && <p className="muted" role="alert">Pi is not reachable. Start the pi-bridge service, then reload this page.</p>}

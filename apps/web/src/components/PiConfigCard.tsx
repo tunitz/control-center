@@ -54,7 +54,7 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
   const addRisky = () => { const v = newRisky.trim(); if (v && !risky.includes(v)) setRisky([...risky, v]); setNewRisky(""); };
 
   return (
-    <div className="card" id="pi-agent"><h3 style={{ marginTop: 0 }}>Pi agent</h3>
+    <div className="acc-sub" id="pi-agent"><h3 className="acc-subtitle">Agent settings</h3>
       {state === "loading" && <p className="muted" role="status">Loading</p>}
       {state === "off" && <p className="muted">Pi is not set up on this server.</p>}
       {state === "down" && <p className="muted" role="alert">Pi is not reachable. Start the pi-bridge service, then reload this page.</p>}
