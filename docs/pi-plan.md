@@ -1,0 +1,211 @@
+# Pi agent as a second chat backend in Control Center — plan (v1, 2026-10-11)
+
+Status: PLAN ONLY. No Control Center code written. Evidence marked VERIFIED comes from the Pi spike in `~/projects/pi-spike` (Pi 1.1.0, real runs, DeepSeek flash). SOURCE = read in Pi docs/source, not run. Anything unmarked is a decision.
+
+## 1. Goal
+
+Chat tab gets a backend switch per chat: **Hermes** (today) or **Pi**. A Pi chat must support:
+- Streaming text, reasoning, tool rows, stop, steer, queued follow-up, history, reopen, search, export (same as Hermes chats).
+- A **live todo checklist** in the thread (like DeepSeek / Copilot chat), updated as the agent works.
+- **Every Pi setting controllable from the UI** (see section 6 coverage table). Where Pi has no live API, the UI writes the setting and Control Center restarts that chat's Pi process.
+- Approval cards for risky actions (bash outside the workspace, deletes), with Approve / Deny in the UI.
+- Pi runs **isolated** from Control Center secrets.
+
+Success criteria (all measurable):
+1. A new Pi chat answers, streams, and survives a browser reload mid-run.
+2. A prompt "plan 3 steps, track them, do them" shows a checklist that ticks live; reload restores it.
+3. Changing model, thinking level, tool set, system prompt from the UI changes the next turn (verified by `get_state` / behaviour).
+4. `rm` of a file in the workspace shows an approval card; Deny leaves the file.
+5. From inside the Pi container, `env`, `/data`, and `curl 127.0.0.1:3030` expose nothing of Control Center.
+6. Hermes chats are unchanged: full existing suite green.
+
+Out of scope: replacing Hermes, Pi packages/marketplace UI, themes/TUI settings, voice, multi-user, Pi `/login` OAuth flows, image input (DeepSeek is text-only; revisit with a vision model).
+
+## 2. Current context and assumptions
+
+Codebase facts (read at HEAD d915347):
+- Server chat code: `apps/server/src/chat/{hermes,runs,watcher,routes,store,models,fake-hermes}.ts`. `HermesClient` is the only backend interface; `RunManager` owns streams, ring buffer, `chat_run_events`, stop/steer, `chat.run` feed (now with `awaiting`).
+- Web: `apps/web/src/pages/Chat.tsx`, `components/chat/*`, `chat/{useThread,useSessions,reduce,tool,sse,types}.ts`.
+- Contract: `docs/chat-contract.md`. Gate: `bun run typecheck` + `bun test apps/server apps/web/src`, plus a 390px browser check for UI tasks.
+- CC runs in Docker, `network_mode: host`, env has `CC_MASTER_KEY`, `HERMES_API_KEY`; volumes `cc-data:/data` and the chat-uploads bind mount.
+- Hermes pushes nothing; backend-neutral events are our own run events (`delta`, `reasoning`, `tool.*`, `approval`, `usage`, `done`).
+
+Pi facts:
+| Fact | Evidence |
+|---|---|
+| Package `@earendil-works/pi-coding-agent` 1.1.0 (the `@mariozechner` name is deprecated), MIT, needs Node >=22.19 | SOURCE npm; VERIFIED installed, Node 26.7 on host |
+| `pi --mode rpc`: JSONL on stdin/stdout, split on LF only | VERIFIED |
+| RPC verified: get_state, get_available_models, set_model, get_available_thinking_levels (`off,low,high,max`), set_thinking_level, prompt (streams), abort (`agent_settled {aborted:true}`), steer (queued), get_messages, get_entries, new_session, switch_session | VERIFIED |
+| Tool events: `tool_execution_start {toolName,args}` / `tool_execution_end {result.content, isError, durationMs}` | VERIFIED |
+| Todo: extension tool `todo_write` returns full list in `result.details.todos`; `ctx.ui.setWidget` arrives as `extension_ui_request` (fire-and-forget) | VERIFIED |
+| Approval: `pi.on("tool_call")` + `ctx.ui.confirm` -> `extension_ui_request {method:"confirm"}`; reply `extension_ui_response {id, confirmed}`; declined -> tool result `isError:true` | VERIFIED |
+| Sessions can be listed with SDK `SessionManager.list(cwd, dir)` / `listAll(dir)`; no RPC list command | VERIFIED |
+| `settings.json` is read at process start; editing while running is NOT picked up; no RPC reload (`/reload` as a prompt just starts a model turn) | VERIFIED |
+| Two Pi processes with separate session dirs run concurrently | VERIFIED |
+| Images over RPC | SKIPPED (text-only model) |
+| Local llama at `http://192.168.31.15:8080/v1` (from Hermes `custom_providers`); `llama.tunitz.com` is NOT an API | SOURCE `~/.hermes/config.yaml`; the spike probed the wrong host |
+
+Assumptions:
+| # | Question | Assumed | Why | Resolved at |
+|---|---|---|---|---|
+| A1 | Where does Pi run? | Separate container `pi-agent`, no CC secrets, one workspace volume, own provider keys | Pi runs bash with no approval by default; CC container holds `CC_MASTER_KEY` and the data DB | T1 |
+| A2 | One Pi process per chat or shared? | One `pi --mode rpc` per active chat, cap 3 (same as `MAX_ACTIVE_RUNS`), idle exit after 10 min, resume via `switch_session` | Matches one-run-per-chat; RPC is single-session | T3 |
+| A3 | How does CC talk to the container? | A tiny Bun "pi-bridge" server inside the container: WebSocket/HTTP in, spawns Pi processes, relays JSONL. CC never mounts Docker socket | Avoids `docker exec` privileges; keeps one narrow, authenticated port | T1, T2 |
+| A4 | Effort mapping | UI Off/Low/Med/High -> Pi `off/low/low/high`; "Max" appears only when Pi reports it for the model | Pi levels are per-model (`get_available_thinking_levels`) | T6 |
+| A5 | Keys | Copy DeepSeek and Anthropic keys into the Pi container env once, by tun, via `.env` of the pi stack | CC must not hold them; Pi cannot read Hermes config | T1 VERIFY |
+| A6 | Chat id | CC chat id = random UUID; Pi session file path stored in `chat_sessions.backend_ref` | Hermes id was the chat id; Pi has no create-by-id | T3 |
+| A7 | Todo source of truth | `result.details.todos` of the last `todo_write` on the branch; widget lines only as a fallback render | Details survive reload and fork; widget is TUI text | T5 |
+| A8 | Default Pi tool set | `read, bash, edit, write, grep, find, ls` + `todo_write`; Hermes-style approval for bash/write outside the workspace | Safe default; changeable in UI | T4 |
+
+## 3. Architecture
+
+```
+Browser ──HTTPS──> Control Center (bun, :3030)
+                     │  HermesClient  ──> Hermes :8642        (existing)
+                     │  PiClient      ──> pi-bridge :3050     (new, bearer token, LAN-only)
+                     ▼
+              RunManager  (unchanged: ring buffer, chat_run_events, chat.run feed, watcher)
+
+pi-agent container  (no CC env, no /data, own network policy)
+  pi-bridge (bun)  ── spawns ──>  node pi --mode rpc  (1 per active chat, cwd=/workspace/<chat>)
+                                   ├─ ext cc-todo   (todo_write, details + widget)
+                                   ├─ ext cc-gate   (approval: confirm via extension_ui_request)
+                                   └─ ext cc-bridge (get/set tools, system prompt, settings snapshot)
+  volumes: /workspace (rw), /pi-agent (agent dir: settings.json, models.json, sessions/, extensions/)
+```
+
+Event mapping (Pi -> existing run events): `agent_start` -> `run.started`; `message_update.text_delta` -> `delta`; `thinking_delta` -> `reasoning`; `tool_execution_start/end` -> `tool.started/completed`; `message_end.usage` -> `usage`; `agent_settled` -> `done` (`aborted:true` -> `interrupted`, error -> `failed`); `extension_ui_request confirm` -> `approval` (now actionable); `setWidget cc-todo` -> new `todo` event.
+
+New run event `todo` `{ items: [{id, content, status}] }` (full replace). Additive: old clients ignore unknown events (memory rule: ship additive).
+
+## 4. DECISIONS LOCKED (section 4 overrides anything below)
+
+| # | Decision |
+|---|---|
+| D1 | Pi is a **second backend**, not a replacement. Hermes stays default. Backend chosen at chat creation, immutable for that chat. |
+| D2 | Pi runs in its **own container**; a host-user fallback is rejected unless the container route fails at T1. |
+| D3 | Approval for Pi is real (Approve/Deny), unlike Hermes (read-only notice). Default-deny when no browser answers within 120 s. |
+| D4 | Settings changes that Pi cannot apply live restart only that chat's Pi process, **between turns** (never mid-run). The UI says "applies next message". |
+| D5 | Todo tool is a CC-owned extension `cc-todo`, not the upstream example (the example is TUI-oriented and uses add/toggle semantics; we want full-list replace like Copilot). |
+
+## 5. Workstreams and tasks
+
+Every task ends: `bun run typecheck` + `bun test apps/server apps/web/src` green -> "Look at it" step -> break test -> commit (on tun's go). Failing test first.
+
+### Workstream A — isolation and bridge
+
+**T1 Pi container.** Skill: `control-center` (compose and deploy conventions).
+- Build `pi-agent/` in the repo: Dockerfile (Node >=22.19 base + bun for the bridge, `bun add @earendil-works/pi-coding-agent` pinned), compose service on its own network, ports `127.0.0.1:3050` only, bearer `PI_BRIDGE_TOKEN`, volumes `/workspace` and `/pi-agent`, provider keys in its own env file, no `CC_*`, no host mounts.
+- Egress: allow DNS + HTTPS + `192.168.31.15:8080` (llama); block `192.168.31.206:3030` and other LAN ports. Verify with `curl` from inside.
+- Test: container `env` has no CC variables; `curl http://192.168.31.206:3030` from inside fails; `/data` absent.
+- Look at it: `docker exec pi-agent pi --version`; break test: try to read `/proc/1/environ` of CC (must fail, different container).
+
+**T2 pi-bridge.** Protocol (CC -> bridge): `POST /chats/:id/start {sessionPath?, model, thinking, settings}`, `POST /chats/:id/prompt {message}`, `.../steer`, `.../follow_up`, `.../abort`, `.../ui_response {id, confirmed|value}`, `.../command {name,args}` (passes RPC commands through an allowlist), `GET /chats/:id/events?after=<n>` SSE with an event counter, `GET /sessions` (SDK `SessionManager.listAll`), `DELETE /chats/:id`.
+- Bridge keeps a per-chat ring of Pi events, so CC can reconnect (Pi itself has no replay besides `get_entries`).
+- JSONL framing: LF-only splitter (a unit test with `\u2028` inside a string, which breaks readline).
+- Tests: framing, allowlist rejects `bash`/unknown commands, auth required, process cap 3 -> 429, idle reaper.
+
+### Workstream B — server adapter
+
+**T3 Backend interface.** Skill: none needed.
+- Extract the common surface from `HermesClient` into `ChatBackend` (createSession, deleteSession, setModel, listModels, startRun, stopRun, steerRun, completions optional). `HermesClient` becomes one implementation; `PiClient` the second. No behaviour change for Hermes (existing tests are the proof).
+- Migration (additive): `chat_sessions.backend TEXT NOT NULL DEFAULT 'hermes'`, `backend_ref TEXT`, `pi_settings_json TEXT`.
+- `POST /sessions {backend:"pi"}` -> bridge `start`; model list for Pi from `get_available_models` (cached 60 s), merged into `GET /models` with `backend` field.
+- Tests: fake bridge server (like `fake-hermes.ts`) scripted from the real events recorded in the spike; Hermes suite unchanged.
+
+**T4 PiClient frame mapping + approval.**
+- Map events per section 3 into `HermesFrame`-shaped frames (rename type to `Frame` later; do not rename now).
+- Approval: `approval` event gets `id` and `options`; new route `POST /runs/:id/approval {id, choice}` -> bridge `ui_response`. Run state `needs_approval` already exists. Timeout 120 s -> deny.
+- `cc-gate` policy (v1): confirm for `bash` matching `rm|sudo|chmod|chown|curl|wget|ssh|dd|mkfs|>` outside an allowlist and for `write/edit` outside `/workspace/<chat>`; everything else runs. Policy is data in `pi_settings_json`, editable in the UI.
+- Tests: confirm false -> tool result isError, file survives (the spike case, as an automated test against the real Pi in T9); frame mapping table test; timeout -> deny.
+
+**T5 Todo.**
+- `cc-todo` extension (spike version is the base): tool `todo_write` full replace, details `{todos}`, rebuild on `session_start` / `session_tree`.
+- Bridge emits `todo` run event from `tool_execution_end` where `toolName==="todo_write"` (details), not from the widget (A7).
+- Persist last list on the assistant message (`todo_json` column, additive) so reload and history show it; `GET /sessions/:id/messages` returns `todos`.
+- Tests: reducer handles `todo` replace; message round-trip; reload restores; fork keeps branch list.
+
+### Workstream C — settings
+
+**T6 Settings model and apply path.** Coverage table (UI must expose each row):
+
+| Setting | Live over RPC? | UI control | Apply |
+|---|---|---|---|
+| Model / provider | yes `set_model` | existing picker | immediate |
+| Thinking level | yes `set_thinking_level` | existing effort control, levels from `get_available_thinking_levels` | immediate |
+| Steering mode, follow-up mode | yes | toggle (one-at-a-time / all) | immediate |
+| Auto compaction on/off, manual compact | yes | toggle + "Compact now" | immediate |
+| Auto retry on/off | yes | toggle | immediate |
+| Session name | yes `set_session_name` | rename (already exists) | immediate |
+| Active tools | no (via cc-bridge `setActiveTools`) | checklist | next message |
+| System prompt (APPEND_SYSTEM.md / SYSTEM.md) | no | text area, append vs replace | next message (restart) |
+| AGENTS.md | no (file) | editor | next message |
+| Compaction thresholds, branch summary, retry limits, image resize/block, shell path/prefix, http proxy, transport, thinking budgets | no (settings.json) | one "Advanced" form generated from a typed schema | restart |
+| models.json (custom endpoints incl. llama `192.168.31.15:8080/v1`) | no (file) | provider list: add/edit/remove, test button | restart |
+| API keys | no (auth.json / env) | write-only field per provider, stored only in the Pi container | restart |
+| Skills, prompt templates, extensions enabled | no (files/settings) | enable/disable list | restart |
+| Approval policy (cc-gate) | via bridge | rule list | next message |
+
+- Settings are stored per chat (`pi_settings_json`) over a global default (`settings` table). Server validates against a TS schema built from Pi's documented keys (T0 below checks the live schema), rejects unknown keys.
+- Restart path: bridge `start` again with new files; `switch_session` to the same session file; no history loss. Never while a run is active (409, UI says "wait for the run").
+- Keys are write-only: never returned by any API; audit log records the change without value.
+- Tests: schema accept/reject; apply order; 409 mid-run; keys never in responses or logs (grep test over server logs in the live gate).
+
+**T0 (first, 1 hour): re-spike the gaps** in `~/projects/pi-spike`, before T1: (a) image over RPC with a vision model (Anthropic) and what MIME/size limits apply; (b) `--session`/`--session-dir` attach at spawn; (c) llama at `192.168.31.15:8080/v1` as a `models.json` provider (needs tun-sfx online; WoL if not); (d) `setActiveTools` from an extension command and whether `set_*` effect appears in `get_state`; (e) SYSTEM.md / APPEND_SYSTEM.md really change the next process; (f) Pi stop reason for error vs abort. Exit: all six answered with real output, else the affected row in the coverage table is downgraded.
+
+### Workstream D — web
+
+**T7 UI.** Skill: `frontend-design`, `ui-copy-rules`. Client value first, minimal surface:
+- New-chat control: backend choice (Hermes / Pi), defaulting to last used.
+- Todo panel: a collapsible checklist pinned above the composer while the run is active and after it ends if any item is not completed; `[x]/[~]/[ ]` icons; count "2/5". No new page.
+- Approval card: command, Approve / Deny, countdown. Replaces "Approve this in Hermes" for Pi chats only.
+- Settings: per-chat sheet opened from the chat header (phone: full-screen), sections Model, Thinking, Tools, Prompt, Advanced, Providers/keys; each row shows "applies now" or "applies next message".
+- Queue: while running, composer offers Steer (now) and Follow-up (after the run), matching Pi.
+- Wording per `ui-copy-rules`; no sentence-case violations; every control has a label for screen readers.
+- Tests: reducer, todo panel render (props), settings form validation, approval timeout display.
+- Gate: 390px screenshots of empty chat, running with todos, approval card, settings sheet; read aloud each for overlap/truncation.
+
+### Workstream E — testing and release
+
+**T8 Live gate against real Pi** (costs a few cents of DeepSeek flash): scripted scenarios from section 1 criteria 1–5, run through the real UI path (CC test instance on a spare port, as done for the watcher), including reload mid-run, two chats concurrently, Deny, settings change then next message, and a Pi container restart mid-idle.
+
+**T9 Release.** Deploy order: pi-agent container first (idle), then CC API, then web (memory rule: API before web). Back up `cc-data` volume before the migration. Update `docs/chat-contract.md`, `docs/chat-plan.md` pointer, the `control-center` skill (new backend, ports, env), and memory. Push, verify on `:3030`.
+
+Milestones:
+| M | Contains | Done when |
+|---|---|---|
+| M0 | T0 re-spike | six questions answered |
+| M1 | T1 T2 T3 T4 | a Pi chat streams, stops, approves, with Hermes untouched |
+| M2 | T5 T6 | todos + all coverage rows work |
+| M3 | T7 T8 T9 | deployed, 390px verified |
+Excluded from M1: settings UI, todo panel, image input.
+
+## 6. Risks, tradeoffs, open questions
+
+| # | Risk / tradeoff | Mitigation |
+|---|---|---|
+| R1 | Pi is YOLO by default; a prompt-injected page could run commands in the container | Own container, no CC secrets, egress rules, cc-gate default policy, workspace-only writes, no Docker socket |
+| R2 | No RPC reload: settings changes cost a process restart (~1–2 s, resume via `switch_session`) | Apply only between turns; show "applies next message" |
+| R3 | "Everything controllable" is false for TUI-only things (themes, custom components) | Out of scope list; coverage table is the contract |
+| R4 | Pi package rename/deprecation (`@mariozechner` -> `@earendil-works`) | Pin exact version, bump deliberately, T8 as upgrade gate |
+| R5 | Extensions run in-process with Pi's permissions | Only CC-authored extensions loaded; `extensions` setting is read-only in the UI; skills/prompts from the UI are data, not code |
+| R6 | Effort scales differ (Pi `off,low,high,max` vs CC four) | A4 mapping; levels come from Pi per model |
+| R7 | Bridge is a new network service | Bearer token, bound to 127.0.0.1, single caller, rate limit, allowlisted commands |
+| R8 | Second backend doubles the test matrix | Shared contract tests run against both fakes; Hermes suite is the regression guard |
+| R9 | Pi event ring in the bridge is lost on container restart | CC marks the run `interrupted` (existing `recoverRuns` logic) and the session file keeps history |
+| R10 | Rejected: host-user Pi without a container | Weaker isolation; only if T1 fails |
+| R11 | Rejected: porting Hermes's todo into this | Hermes has its own tool; this plan is Pi-only |
+
+Open questions:
+| # | Question | Default | Decided at |
+|---|---|---|---|
+| OQ1 | Which provider/model is Pi's default? | **LOCKED (tun, 2026-10-11): default `anthropic/claude-sonnet-5-5`, fallback `deepseek/deepseek-flash`** | done |
+| OQ2 | Should Pi chats see the same uploads dir as Hermes? | No; uploads copied into `/workspace/<chat>/uploads` by the bridge | T3 |
+| OQ3 | Should Pi chats appear in the same sidebar? | Yes, with a small backend tag | T7 |
+| OQ4 | Does the watcher/await logic apply to Pi? | No: Pi has no background subagents | T3 |
+| OQ5 | Anthropic key in the Pi container? | **LOCKED: yes** (tun adds it to the pi stack env file; also needed for the vision test) | done |
+| OQ6 | tun-sfx llama online for tests? | WoL then test | T0 |
+
+Build status: tun builds this in a separate session; nothing is started from the planning session.
+
+Final step: push to GitHub `tunitz/control-center`, deploy in the order above, verify live, update skill + memory.
