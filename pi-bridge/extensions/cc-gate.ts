@@ -39,7 +39,7 @@ export const DEFAULT_POLICY: GatePolicy = {
   ],
   bashAllow: [],
   bashRisky: "(^|[\\s;&|(`])(rm|sudo|chmod|chown|curl|wget|ssh|dd|mkfs[.\\w]*)(\\s|$)|>",
-  timeoutMs: 120_000,
+  timeoutMs: 300_000,
 };
 
 export interface GateDecision {

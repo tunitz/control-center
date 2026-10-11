@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
 import { ApprovalCard } from "./Approval";
@@ -7,7 +7,7 @@ import { copyText } from "../../clipboard";
 import { fmtTokens } from "../../chat/context";
 import { isAbnormal, showReasoning } from "../../chat/reduce";
 import { toolDetail, toolStatus, toolTarget } from "../../chat/tool";
-import type { Approval, Attachment, ChatMessage, ToolRow } from "../../chat/types";
+import type { Approval, Attachment, ChatMessage, MessageBlock, ToolRow } from "../../chat/types";
 
 const fmtSize = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
 const fmtTime = (t: number) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -34,35 +34,75 @@ export function Attachments({ items, onOpen }: { items: Attachment[]; onOpen: (a
   );
 }
 
-function ToolRows({ tools }: { tools: ToolRow[] }) {
-  const [open, setOpen] = useState<string | null>(null);
+function ToolFold({ t }: { t: ToolRow }) {
+  const [open, setOpen] = useState(false);
+  const target = toolTarget(t.args);
+  const st = toolStatus(t);
+  const icon = t.name.includes("file") ? "file" : t.name.includes("search") ? "search" : "term";
   return (
-    <>
-      {tools.map(t => {
-        const isOpen = open === t.id;
-        const target = toolTarget(t.args);
-        const st = toolStatus(t);
-        const icon = t.name.includes("file") ? "file" : t.name.includes("search") ? "search" : "term";
-        return (
-          <div className="fold-wrap" key={t.id}>
-            <button type="button" className="fold" aria-expanded={isOpen} aria-controls={`tool-${t.id}`} onClick={() => setOpen(isOpen ? null : t.id)}>
-              <Icon name="chevr" className="chev" />
-              <Icon name={icon} className="i sm" />
-              <span className="tname">{t.name}</span>
-              {target && <span className="targ">{target}</span>}
-              {t.durationMs != null && <span className="tdur">{fmtDur(t.durationMs)}</span>}
-              <span className={st.cls}>{st.label}</span>
-            </button>
-            {isOpen && (
-              <pre className="out" id={`tool-${t.id}`}>
-                {[toolDetail(t.args), t.preview && t.preview !== toolDetail(t.args) ? `— preview —\n${t.preview}` : ""].filter(Boolean).join("\n\n") || "No details."}
-              </pre>
-            )}
-          </div>
-        );
-      })}
-    </>
+    <div className="fold-wrap">
+      <button type="button" className="fold" aria-expanded={open} aria-controls={`tool-${t.id}`} onClick={() => setOpen(o => !o)}>
+        <Icon name="chevr" className="chev" />
+        <Icon name={icon} className="i sm" />
+        <span className="tname">{t.name}</span>
+        {target && <span className="targ">{target}</span>}
+        {t.durationMs != null && <span className="tdur">{fmtDur(t.durationMs)}</span>}
+        <span className={st.cls}>{st.label}</span>
+      </button>
+      {open && (
+        <pre className="out" id={`tool-${t.id}`}>
+          {[toolDetail(t.args), t.preview && t.preview !== toolDetail(t.args) ? `— preview —\n${t.preview}` : ""].filter(Boolean).join("\n\n") || "No details."}
+        </pre>
+      )}
+    </div>
   );
+}
+
+/** A Hermes approval has no id: it can only be answered in Hermes. */
+function ApprovalNotice({ a }: { a: Approval }) {
+  return (
+    <div className="appr" role="note">
+      <div className="appr-h"><Icon name="alert" /><h3>Needs approval in Hermes</h3></div>
+      {a.command && <pre className="cmdblk">{a.command}</pre>}
+      <p className="meta">Approve this in Hermes. Control Center cannot approve it.</p>
+    </div>
+  );
+}
+
+/** Messages written before blocks existed (and the dev mock) render from text + tools. */
+function orderedBlocks(m: ChatMessage): MessageBlock[] {
+  if (m.blocks?.length) return m.blocks;
+  return [
+    ...m.tools.map((t): MessageBlock => ({ kind: "tool", id: t.id })),
+    ...(m.text ? [{ kind: "text", text: m.text } as MessageBlock] : []),
+  ];
+}
+
+/** Renders the turn body in stream order: consecutive tool rows share one group, text and approvals sit between them. */
+function TurnBody({ m, onApprove }: { m: ChatMessage; onApprove?: (runId: string, approvalId: string, choice: "approve" | "deny") => Promise<void> }) {
+  const tools = new Map(m.tools.map(t => [t.id, t]));
+  const out: ReactNode[] = [];
+  let group: string[] = [];
+  const flush = (key: string) => {
+    if (!group.length) return;
+    out.push(
+      <div className="fgroup" key={`g-${key}`}>
+        {group.map(id => { const t = tools.get(id); return t ? <ToolFold key={id} t={t} /> : null; })}
+      </div>,
+    );
+    group = [];
+  };
+  orderedBlocks(m).forEach((b, i) => {
+    if (b.kind === "tool") { group.push(b.id); return; }
+    flush(String(i));
+    if (b.kind === "text") { out.push(<Markdown key={`t-${i}`} text={b.text} />); return; }
+    const a = b.approval;
+    out.push(a.id && onApprove && m.runId
+      ? <ApprovalCard key={`a-${a.id}`} a={a} onAnswer={c => onApprove(m.runId!, a.id!, c)} />
+      : <ApprovalNotice key={`a-${i}`} a={a} />);
+  });
+  flush("end");
+  return <>{out}</>;
 }
 
 export function UserMessage({ m, onOpenImage }: { m: ChatMessage; onOpenImage: (a: Attachment) => void }) {
@@ -81,8 +121,8 @@ export function UserMessage({ m, onOpenImage }: { m: ChatMessage; onOpenImage: (
   );
 }
 
-export function AssistantMessage({ m, pending, agent = "Hermes", onApprove }: {
-  m: ChatMessage; pending: Approval[]; agent?: string;
+export function AssistantMessage({ m, agent = "Hermes", onApprove }: {
+  m: ChatMessage; agent?: string;
   /** Answers a Pi approval for this message's run. */
   onApprove?: (runId: string, approvalId: string, choice: "approve" | "deny") => Promise<void>;
 }) {
@@ -98,7 +138,7 @@ export function AssistantMessage({ m, pending, agent = "Hermes", onApprove }: {
         <time>{fmtTime(m.createdAt)}</time>
       </div>
 
-      {(showReasoning(m) || m.tools.length > 0 || (m.todos?.length ?? 0) > 0) && (
+      {(showReasoning(m) || (m.todos?.length ?? 0) > 0) && (
         <div className="fgroup">
           {showReasoning(m) && (
             <div className="fold-wrap">
@@ -110,7 +150,6 @@ export function AssistantMessage({ m, pending, agent = "Hermes", onApprove }: {
               {thoughtOpen && <div className="thought" id={`thought-${m.id}`}>{m.reasoning}</div>}
             </div>
           )}
-          <ToolRows tools={m.tools} />
           <Todos id={m.id} todos={m.todos} />
         </div>
       )}
@@ -119,15 +158,9 @@ export function AssistantMessage({ m, pending, agent = "Hermes", onApprove }: {
         <div className="fold static" role="status" aria-live="polite"><span className="spin" aria-hidden="true" /><span className="lbl">Working</span></div>
       )}
 
-      {pending.map((a, i) => a.id && onApprove && m.runId ? (
-        <ApprovalCard key={a.id} a={a} onAnswer={c => onApprove(m.runId!, a.id!, c)} />
-      ) : (
-        <div className="appr" key={i} role="note">
-          <div className="appr-h"><Icon name="alert" /><h3>Needs approval in Hermes</h3></div>
-          {a.command && <pre className="cmdblk">{a.command}</pre>}
-          <p className="meta">Approve this in Hermes. Control Center cannot approve it.</p>
-        </div>
-      ))}
+      <TurnBody m={m} onApprove={onApprove} />
+
+      {running && <span className="caret" aria-hidden="true" />}
 
       {abnormal && (
         <div className="err-row" role="alert">
@@ -135,9 +168,6 @@ export function AssistantMessage({ m, pending, agent = "Hermes", onApprove }: {
           <span>{m.status === "failed" ? "Failed" : "Interrupted"}{m.error ? `: ${m.error}` : ""}</span>
         </div>
       )}
-
-      {m.text && <Markdown text={m.text} />}
-      {running && <span className="caret" aria-hidden="true" />}
 
       {!running && m.text && (
         <div className="msg-actions">

@@ -12,10 +12,19 @@ type ChatSession = { id: string; title: string; titleAuto: boolean; model: strin
   runState: "idle" | "running" | "needs_approval"; runId: string | null; unread: boolean; preview: string; awaiting: number };
 type Attachment = { id: string; kind: "image" | "file"; name: string; mime: string; size: number; w: number | null; h: number | null; url: string /* /api/chat/files/<id> */ };
 type ToolRow = { id: string; name: string; args: Record<string, unknown> | null; preview: string | null; status: "running" | "ok" | "failed"; durationMs: number | null };
+type ApprovalStatus = "pending" | "approved" | "denied" | "ended";
+/** A Hermes approval is a read-only notice (no id); a Pi approval has an id and can be answered. */
+type Approval = { command: string | null; note: string; id?: string; options?: string[]; status?: ApprovalStatus };
+/** Ordered parts of an assistant turn, so text, tools and approvals stay in the order they happened. */
+type MessageBlock =
+  | { kind: "text"; text: string }
+  | { kind: "tool"; id: string }
+  | { kind: "approval"; approval: Approval };
 type ChatMessage = { id: string; seq: number; role: "user" | "assistant"; text: string; reasoning: string | null;
-  tools: ToolRow[]; usage: { input: number; output: number } | null; status: "complete" | "failed" | "interrupted" | "running";
+  tools: ToolRow[]; blocks: MessageBlock[]; usage: { input: number; output: number } | null; status: "complete" | "failed" | "interrupted" | "running";
   runId: string | null; model: string | null; attachments: Attachment[]; createdAt: number; error: string | null };
 ```
+`blocks` is the ordered body of an assistant turn: text segments, tool rows (by id) and approval cards, in the order they arrived. `text` and `tools` stay for search, export and older rows; a row without `blocks_json` returns `blocks: []` and the UI falls back to tools-then-text.
 
 ## Routes
 - `GET /models` -> `ChatModel[]` (curated allowlist from settings `chat.models`; default list in server code; `online` false when provider unavailable). Each entry also carries `backend: "hermes" | "pi"`. Hermes entries are `"hermes"`. Pi entries are added from the Pi bridge; if the bridge is down they are omitted with no error.
@@ -32,7 +41,7 @@ type ChatMessage = { id: string; seq: number; role: "user" | "assistant"; text: 
   - `reasoning` `{ text }` (append)
   - `tool.started` `{ id, name, args, preview }`
   - `tool.completed` `{ id, ok: boolean, durationMs, preview }`
-  - `approval` `{ command: string | null, note: string }` (read-only notice: "needs approval in Hermes")
+  - `approval` `{ command: string | null, note: string, id?: string, options?: string[] }`. Pi carries `id`/`options` so the card can be answered; Hermes carries neither and stays a read-only notice.
   - `usage` `{ input, output }`
   - `done` `{ status: "complete" | "failed" | "interrupted", error: string | null, model: string | null }`
 - `POST /runs/:runId/stop` -> `{ ok: true }`

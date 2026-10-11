@@ -282,7 +282,6 @@ export default function Chat({ hash }: { hash: string }) {
   };
 
   const emptyView = !activeId || (!thread.loading && thread.messages.length === 0);
-  const approvalsFor = (id: string) => thread.approvals[id] ?? [];
 
   const sidebarProps = {
     list: sessions.list,
@@ -373,7 +372,7 @@ export default function Chat({ hash }: { hash: string }) {
                 m.role === "user" ? (
                   <UserMessage key={m.id} m={m} onOpenImage={setLightbox} />
                 ) : (
-                  <AssistantMessage key={m.id} m={m} pending={approvalsFor(m.id)} agent={chatBackend === "pi" ? "Pi" : "Hermes"} onApprove={onApprove} />
+                  <AssistantMessage key={m.id} m={m} agent={chatBackend === "pi" ? "Pi" : "Hermes"} onApprove={onApprove} />
                 ),
               )}
 

@@ -26,7 +26,7 @@ export function ApprovalCard({ a, onAnswer }: { a: Approval; onAnswer: (choice: 
       ) : (
         <p className="meta appr-result" role="status">{RESULT[a.status ?? "ended"]}</p>
       )}
-      {pending && <p className="meta">Pi waits for your answer and denies after 2 minutes.</p>}
+      {pending && <p className="meta">Pi waits for your answer and denies after 5 minutes.</p>}
       {err && <p className="err-row" role="alert">{err}</p>}
     </div>
   );

@@ -2,7 +2,7 @@ import { test, expect, describe } from "bun:test";
 import { newRunView, applyEvent, reduceEvents, showReasoning, isAbnormal } from "./reduce";
 import type { ChatMessage } from "./types";
 
-const base: ChatMessage = { id: "a1", seq: 2, role: "assistant", text: "", reasoning: null, tools: [], usage: null, status: "running", runId: null, model: null, attachments: [], createdAt: 0, error: null };
+const base: ChatMessage = { id: "a1", seq: 2, role: "assistant", text: "", reasoning: null, tools: [], blocks: [], usage: null, status: "running", runId: null, model: null, attachments: [], createdAt: 0, error: null };
 const ev = (id: number, type: string, data: any) => ({ id, type, data });
 
 test("deltas and reasoning append, run.started sets runId and model", () => {
@@ -50,7 +50,7 @@ test("usage and done set status, error and model; approval is collected", () => 
   expect(v.message.status).toBe("interrupted");
   expect(v.message.error).toBe("client gone");
   expect(v.message.model).toBe("m2");
-  expect(v.approvals).toEqual([{ command: "rm -rf x", note: "needs approval in Hermes" }]);
+  expect(v.message.blocks).toEqual([{ kind: "approval", approval: { command: "rm -rf x", note: "needs approval in Hermes" } }]);
   expect(v.done).toBe(true);
 });
 
@@ -103,36 +103,53 @@ describe("todo events", () => {
 describe("Pi approvals", () => {
   const ask = { id: "u1", command: "Run: rm -rf x", note: "Allow command?", options: ["approve", "deny"] };
   const start = (id: string) => ({ id, name: "bash", args: null, preview: null });
+  const approvalOf = (v: ReturnType<typeof newRunView>) => {
+    const b = v.message.blocks?.find(x => x.kind === "approval");
+    return b && b.kind === "approval" ? b.approval : undefined;
+  };
 
   test("a Pi approval keeps its id and options and starts pending", () => {
     const v = applyEvent(newRunView(base), ev(1, "approval", ask));
-    expect(v.approvals).toEqual([{ ...ask, status: "pending" }]);
+    expect(v.message.blocks).toEqual([{ kind: "approval", approval: { ...ask, status: "pending" } }]);
   });
   test("a Hermes approval (no id) stays exactly as before", () => {
     const v = applyEvent(newRunView(base), ev(1, "approval", { command: "x", note: "needs approval in Hermes" }));
-    expect(v.approvals).toEqual([{ command: "x", note: "needs approval in Hermes" }]);
+    expect(v.message.blocks).toEqual([{ kind: "approval", approval: { command: "x", note: "needs approval in Hermes" } }]);
   });
   test("tool.completed ok resolves the pending approval as approved", () => {
     const v = reduceEvents(newRunView(base), [ev(1, "tool.started", start("t1")), ev(2, "approval", ask), ev(3, "tool.completed", { id: "t1", ok: true, durationMs: 5 })]);
-    expect(v.approvals[0].status).toBe("approved");
+    expect(approvalOf(v)?.status).toBe("approved");
   });
   test("tool.completed failed resolves it as denied", () => {
     const v = reduceEvents(newRunView(base), [ev(1, "tool.started", start("t1")), ev(2, "approval", ask), ev(3, "tool.completed", { id: "t1", ok: false })]);
-    expect(v.approvals[0].status).toBe("denied");
+    expect(approvalOf(v)?.status).toBe("denied");
   });
   test("a run that ends while an approval is still pending marks it ended", () => {
     const v = reduceEvents(newRunView(base), [ev(1, "approval", ask), ev(2, "done", { status: "interrupted" })]);
-    expect(v.approvals[0].status).toBe("ended");
+    expect(approvalOf(v)?.status).toBe("ended");
   });
   test("an already resolved approval is not changed by later events", () => {
     const v = reduceEvents(newRunView(base), [
       ev(1, "approval", ask), ev(2, "tool.completed", { id: "t1", ok: true }),
       ev(3, "tool.completed", { id: "t2", ok: false }), ev(4, "done", { status: "complete" }),
     ]);
-    expect(v.approvals[0].status).toBe("approved");
+    expect(approvalOf(v)?.status).toBe("approved");
   });
   test("replaying the same events gives the same approvals", () => {
     const events = [ev(1, "approval", ask), ev(2, "tool.completed", { id: "t1", ok: true })];
-    expect(reduceEvents(reduceEvents(newRunView(base), events), events).approvals).toEqual(reduceEvents(newRunView(base), events).approvals);
+    expect(reduceEvents(reduceEvents(newRunView(base), events), events).message.blocks).toEqual(reduceEvents(newRunView(base), events).message.blocks);
+  });
+  test("blocks keep text, tools and approvals in the order they arrived", () => {
+    const v = reduceEvents(newRunView(base), [
+      ev(1, "delta", { text: "Let me clean that up." }),
+      ev(2, "delta", { text: " One moment." }),
+      ev(3, "tool.started", start("t1")),
+      ev(4, "approval", ask),
+      ev(5, "tool.completed", { id: "t1", ok: true }),
+      ev(6, "delta", { text: "Done." }),
+    ]);
+    expect(v.message.blocks?.map(b => b.kind)).toEqual(["text", "tool", "approval", "text"]);
+    expect(v.message.blocks?.[0]).toEqual({ kind: "text", text: "Let me clean that up. One moment." });
+    expect(v.message.blocks?.[3]).toEqual({ kind: "text", text: "Done." });
   });
 });

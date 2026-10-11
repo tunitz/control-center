@@ -2,21 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { chat } from "./api";
 import { applyEvent, newRunView, type RunView, showReasoning } from "./reduce";
 import { openRunStream, type RunStream } from "./sse";
-import type { Approval, ChatMessage, ChatSession, Effort } from "./types";
+import type { ChatMessage, ChatSession, Effort } from "./types";
 
 type Thread = {
   loading: boolean;
   error: string;
   messages: ChatMessage[];
   hasMore: boolean;
-  approvals: Record<string, Approval[]>;
   /** The run this thread is attached to, if any. */
   runId: string | null;
   /** True when the server says this session does not exist (404). */
   missing: boolean;
 };
 
-const EMPTY: Thread = { loading: true, error: "", messages: [], hasMore: false, approvals: {}, runId: null, missing: false };
+const EMPTY: Thread = { loading: true, error: "", messages: [], hasMore: false, runId: null, missing: false };
 
 /** Messages for one session plus the live stream of its active run (if any).
  *  Closing the app mid-run: on return we refetch, then re-attach from the last event we saw. */
@@ -51,12 +50,7 @@ export function useThread(sid: string | null, onRunEnd: (sid: string) => void) {
         const nv = applyEvent(v, ev);
         views.current.set(runId, nv);
         if (sidRef.current !== owner) return;
-        setSt(s => ({
-          ...s,
-          runId,
-          messages: s.messages.map(m => (m.id === nv.message.id ? nv.message : m)),
-          approvals: nv.approvals.length ? { ...s.approvals, [nv.message.id]: nv.approvals } : s.approvals,
-        }));
+        setSt(s => ({ ...s, runId, messages: s.messages.map(m => (m.id === nv.message.id ? nv.message : m)) }));
       },
       reason => {
         streams.current.delete(runId);

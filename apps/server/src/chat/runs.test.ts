@@ -150,6 +150,32 @@ test("approval frame sets needs_approval, does not hang, returns to running on t
   expect(S.getMessage(db, r.assistantMessage.id)!.status).toBe("complete");
 });
 
+test("approval blocks persist in stream order and resolve when the tool completes", async () => {
+  const r = begin("s1", "rm things");
+  await tick();
+  const s = hermes.last;
+  s.push(delta("Let me clean that up."));
+  s.push({ type: "tool.started", id: "t1", name: "bash", args: { command: "rm -rf x" }, preview: "rm -rf x" });
+  s.push({ type: "approval", id: "u1", command: "Run: rm -rf x", note: "Allow command?", options: ["approve", "deny"] });
+  await tick();
+  // Persisted while it is still pending: a reload must keep the card in its place.
+  expect(S.getMessage(db, r.assistantMessage.id)!.blocks).toEqual([
+    { kind: "text", text: "Let me clean that up." },
+    { kind: "tool", id: "t1" },
+    { kind: "approval", approval: { command: "Run: rm -rf x", note: "Allow command?", id: "u1", options: ["approve", "deny"], status: "pending" } },
+  ]);
+  s.push({ type: "tool.completed", id: "t1", ok: true, durationMs: 5, preview: "done" });
+  s.push(delta("All done."));
+  s.push(done("complete")); s.end();
+  await mgr.waitDone(r.runId);
+  expect(S.getMessage(db, r.assistantMessage.id)!.blocks).toEqual([
+    { kind: "text", text: "Let me clean that up." },
+    { kind: "tool", id: "t1" },
+    { kind: "approval", approval: { command: "Run: rm -rf x", note: "Allow command?", id: "u1", options: ["approve", "deny"], status: "approved" } },
+    { kind: "text", text: "All done." },
+  ]);
+});
+
 test("browser detach does not abort the Hermes stream", async () => {
   const r = begin("s1", "hello");
   await tick();
@@ -350,6 +376,19 @@ test("restart recovery: running rows become interrupted with a closing done even
   expect(dbEvents("old-run").length).toBe(1);
   const res = new RunManager({ db, hermes, now: () => 1 }).eventsResponse("old-run", null);
   return readAll(res).then(t => expect(t).toContain("event: done"));
+});
+
+test("restart recovery marks a pending approval card ended", () => {
+  S.insertMessage(db, {
+    id: "a2", sessionId: "s1", seq: 1, role: "assistant", text: "", createdAt: 2, status: "running", runId: "old-run-2", attachments: [],
+    blocks: [{ kind: "approval", approval: { command: "x", note: "Allow?", id: "u1", status: "pending" } }],
+  });
+  db.query("UPDATE chat_sessions SET run_state='running', run_id='old-run-2' WHERE id='s1'").run();
+  recoverRuns(db, 5000);
+  expect(S.getMessage(db, "a2")).toMatchObject({
+    status: "interrupted",
+    blocks: [{ kind: "approval", approval: { id: "u1", status: "ended" } }],
+  });
 });
 
 test("createChatContext runs restart recovery at construction", () => {

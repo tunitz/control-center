@@ -21,10 +21,11 @@ function migrateChatSessions(db: Database) {
   if (!have.has("pi_settings_json")) db.exec("ALTER TABLE chat_sessions ADD COLUMN pi_settings_json TEXT");
 }
 
-/** Adds todos_json (Pi's last todo list for the turn) to an existing chat_messages table. */
+/** Adds todos_json (Pi's last todo list) and blocks_json (ordered turn body) to an existing chat_messages table. */
 function migrateChatMessages(db: Database) {
   const have = new Set((db.query("PRAGMA table_info(chat_messages)").all() as { name: string }[]).map(c => c.name));
   if (have.size > 0 && !have.has("todos_json")) db.exec("ALTER TABLE chat_messages ADD COLUMN todos_json TEXT");
+  if (have.size > 0 && !have.has("blocks_json")) db.exec("ALTER TABLE chat_messages ADD COLUMN blocks_json TEXT");
 }
 
 /** Chat mirror tables (additive). chat_sessions.id = Hermes session id. FTS5 is kept in sync by triggers. */
@@ -37,7 +38,7 @@ export const CHAT_SCHEMA = `
   CREATE INDEX IF NOT EXISTS chat_sessions_list ON chat_sessions(archived, pinned, updated_at);
   CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
     seq INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', reasoning TEXT, tools_json TEXT, usage_json TEXT,
-    status TEXT NOT NULL DEFAULT 'complete', run_id TEXT, model TEXT, error TEXT, created_at INTEGER NOT NULL, todos_json TEXT,
+    status TEXT NOT NULL DEFAULT 'complete', run_id TEXT, model TEXT, error TEXT, created_at INTEGER NOT NULL, todos_json TEXT, blocks_json TEXT,
     UNIQUE(session_id, seq));
   CREATE TABLE IF NOT EXISTS chat_attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
     session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE, kind TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL,

@@ -266,11 +266,11 @@ async function main() {
   });
 
   if (!SKIP_TIMEOUT) {
-    await scenario("14 no answer for 2 minutes: the command is denied, the file is absent", async () => {
+    await scenario("14 no answer for 5 minutes: the command is denied, the file is absent", async () => {
       const s = await mk(); const f = join(WS, "gate-timeout.txt"); rmSync(f, { force: true });
       await api("POST", `/sessions/${s.id}/send`, fd(`Use the bash tool to run exactly: echo late > ${f}  Then reply done.`));
       await waitApproval(s.id);
-      await waitIdle(s.id, 150_000);
+      await waitIdle(s.id, 360_000);
       must(!existsSync(f), "file exists although nobody approved");
       return "denied by timeout";
     });

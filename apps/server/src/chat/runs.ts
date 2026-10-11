@@ -11,7 +11,7 @@ import type { ChatBackend } from "./backend";
 import type { PiClient } from "./pi";
 import { ChatError } from "./http";
 import * as S from "./store";
-import type { NewAttachment, ToolRow, Effort, ChatMessage } from "./store";
+import type { Approval, MessageBlock, NewAttachment, ToolRow, Effort, ChatMessage } from "./store";
 import { autoTitle } from "./title";
 
 export const MAX_ACTIVE_RUNS = 3;
@@ -44,6 +44,8 @@ type RunRec = {
   text: string;
   reasoning: string | null;
   tools: ToolRow[];
+  /** Ordered body of the turn (text, tool rows, approvals), persisted with the message. */
+  blocks: MessageBlock[];
   usage: { input: number; output: number } | null;
   todos: TodoItem[] | null;
   hermesRunId: string | null;
@@ -73,6 +75,20 @@ export type RunManagerOptions = {
 };
 
 const errMsg = (e: unknown): string => (e instanceof ChatError ? e.message : "hermes connection lost");
+
+/** Appends text to the trailing text block (or opens a new one), so the stream keeps its order. */
+function pushText(blocks: MessageBlock[], text: string): void {
+  const last = blocks[blocks.length - 1];
+  if (last && last.kind === "text") last.text += text;
+  else blocks.push({ kind: "text", text });
+}
+
+/** A tool result answers whichever approval is still pending; a run that ends first leaves it unanswered. */
+function resolveApprovals(blocks: MessageBlock[], to: "approved" | "denied" | "ended"): void {
+  for (const b of blocks) {
+    if (b.kind === "approval" && b.approval.status === "pending") b.approval.status = to;
+  }
+}
 
 export class RunManager {
   private readonly db: Database;
@@ -154,7 +170,7 @@ export class RunManager {
     let resolveDone!: () => void;
     const rec: RunRec = {
       runId, sessionId, assistantId, model: input.model, userText: input.text, startedAt: now, firstTurn,
-      text: "", reasoning: null, tools: [], usage: null, todos: null, hermesRunId: null, stopRequested: false,
+      text: "", reasoning: null, tools: [], blocks: [], usage: null, todos: null, hermesRunId: null, stopRequested: false,
       finished: false, needsApproval: false, approvalId: null, seq: 0, events: [], listeners: new Set(),
       started: new Promise<void>(r => (resolveStarted = r)), resolveStarted,
       done: new Promise<void>(r => (resolveDone = r)), resolveDone,
@@ -318,6 +334,7 @@ export class RunManager {
         return;
       case "delta":
         rec.text += f.text;
+        pushText(rec.blocks, f.text);
         this.persist(rec);
         this.addEvent(rec, "delta", { text: f.text });
         return;
@@ -328,6 +345,7 @@ export class RunManager {
         return;
       case "tool.started":
         rec.tools.push({ id: f.id, name: f.name, args: f.args, preview: f.preview, status: "running", durationMs: null });
+        rec.blocks.push({ kind: "tool", id: f.id });
         this.persist(rec);
         this.addEvent(rec, "tool.started", { id: f.id, name: f.name, args: f.args, preview: f.preview });
         return;
@@ -338,17 +356,24 @@ export class RunManager {
           t.durationMs = f.durationMs;
           t.preview = f.preview ?? t.preview;
         }
+        resolveApprovals(rec.blocks, f.ok ? "approved" : "denied");
         this.persist(rec);
         this.addEvent(rec, "tool.completed", { id: f.id, ok: f.ok, durationMs: f.durationMs, preview: f.preview });
         return;
       }
-      case "approval":
+      case "approval": {
         rec.needsApproval = true;
         rec.approvalId = f.id ?? null;
+        const approval: Approval = { command: f.command, note: f.note };
+        if (f.id) { approval.id = f.id; approval.options = f.options ?? ["approve", "deny"]; approval.status = "pending"; }
+        rec.blocks.push({ kind: "approval", approval });
         S.setRunState(this.db, rec.sessionId, "needs_approval", rec.runId, this.now());
+        // Persist now: a reload while the answer is pending must keep the card in its place.
+        this.persist(rec);
         this.addEvent(rec, "approval", { command: f.command, note: f.note, ...(f.id ? { id: f.id, options: f.options ?? ["approve", "deny"] } : {}) });
         this.emitRun(rec.sessionId, rec.runId, "needs_approval");
         return;
+      }
       case "todo":
         rec.todos = f.todos;
         this.persist(rec);
@@ -375,7 +400,7 @@ export class RunManager {
     const err = final === "failed" ? (error ?? "run failed") : null;
     const finalModel = model ?? rec.model;
     S.patchMessage(this.db, rec.assistantId, {
-      text: rec.text, reasoning: rec.reasoning, tools: rec.tools, usage: rec.usage, todos: rec.todos,
+      text: rec.text, reasoning: rec.reasoning, tools: rec.tools, blocks: rec.blocks, usage: rec.usage, todos: rec.todos,
       status: final, error: err, model: finalModel,
     });
     rec.finished = true;
@@ -402,7 +427,7 @@ export class RunManager {
 
   private persist(rec: RunRec): void {
     S.patchMessage(this.db, rec.assistantId, {
-      text: rec.text, reasoning: rec.reasoning, tools: rec.tools, usage: rec.usage, todos: rec.todos,
+      text: rec.text, reasoning: rec.reasoning, tools: rec.tools, blocks: rec.blocks, usage: rec.usage, todos: rec.todos,
     });
   }
 
@@ -459,7 +484,17 @@ export function recoverRuns(db: Database, now: number): void {
     const ids = new Set<string>();
     for (const r of db.query("SELECT DISTINCT run_id FROM chat_messages WHERE status = 'running' AND run_id IS NOT NULL").all() as { run_id: string }[]) ids.add(r.run_id);
     for (const r of db.query("SELECT run_id FROM chat_sessions WHERE run_state != 'idle' AND run_id IS NOT NULL").all() as { run_id: string }[]) ids.add(r.run_id);
+    // A run left mid-approval can never be answered: mark the card ended before the status flips.
+    const running = db.query("SELECT id, blocks_json FROM chat_messages WHERE status = 'running'").all() as { id: string; blocks_json: string | null }[];
     db.query("UPDATE chat_messages SET status = 'interrupted' WHERE status = 'running'").run();
+    for (const m of running) {
+      if (!m.blocks_json) continue;
+      let list: MessageBlock[];
+      try { const parsed = JSON.parse(m.blocks_json); if (!Array.isArray(parsed)) continue; list = parsed as MessageBlock[]; } catch { continue; }
+      let changed = false;
+      for (const b of list) if (b?.kind === "approval" && b.approval?.status === "pending") { b.approval.status = "ended"; changed = true; }
+      if (changed) db.query("UPDATE chat_messages SET blocks_json = ? WHERE id = ?").run(JSON.stringify(list), m.id);
+    }
     db.query("UPDATE chat_sessions SET run_state = 'idle', run_id = NULL, updated_at = MAX(updated_at, ?) WHERE run_state != 'idle'").run(now);
     for (const runId of ids) {
       const has = db.query("SELECT 1 FROM chat_run_events WHERE run_id = ? AND type = 'done' LIMIT 1").get(runId);
