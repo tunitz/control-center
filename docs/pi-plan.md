@@ -250,3 +250,12 @@ Final step: push to GitHub `tunitz/control-center`, deploy in the order above, v
 DONE and driven in a 390px browser against a throwaway Control Center + the real bridge and Pi: model picker with Pi tag (picking a Pi model starts a Pi chat, a chat keeps its backend), Pi chat label and placeholder, approval card (Approve/Deny, 44px, Approved/Denied/Not answered afterwards, full command shown), task list under the tool rows, thinking-level choices narrowed to what Pi reports, `/compact`, "Pi options" sheet (per-chat tools, queue modes, auto compaction/retry, Compact now), Settings card "Pi agent" (extra instructions, notes, default tools, stricter-only approval rules).
 Not built, by decision: Pi slash commands / prompt templates (T7b), API keys, llama endpoint, advanced form.
 Bugs found by the live drive and fixed: model ids resolved against the wrong backend on send/PATCH; a start that did not name tools reset a chat's tools; cleared tools override not reaching a running process; long DeepSeek names clipped the composer toolbar; approval command scrolled sideways.
+
+## T8 status (live gate, 2026-10-11)
+
+DONE: `tools/pi-live-gate.ts` passes 14 of 14 against a throwaway Control Center, the real bridge, real Pi and DeepSeek flash (about 2 minutes with the 2-minute approval timeout). Run: start a test instance on :3031 (see the control-center skill, test-instance reference), then `CC_PASSWORD=... bun run tools/pi-live-gate.ts` (add `--skip-timeout` to skip the 2-minute scenario).
+Bugs the gate found, each fixed with a test that failed first:
+- The bridge's event stream sent no bytes until its first 15 s keepalive, so every Pi reply started 15 s late. It now sends a comment line on open (run time of a plain answer: 15 s -> 1.1 s).
+- The fourth chat got a 429 while three idle chats held processes for 10 minutes. The bridge now closes the longest-idle chat to make room (429 only when all are mid-run).
+- Pi stores live settings in its global `settings.json`, so one chat's values leaked into the next. The server now sends all four settings on every run.
+- Stop while an approval was waiting hung for 15 s and left the run stuck. The bridge now declines open questions before aborting.

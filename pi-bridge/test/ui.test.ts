@@ -50,3 +50,35 @@ describe("ui_response forwarding", () => {
     expect((await api(h, "POST", "/chats/ui-bad/ui_response", { confirmed: true })).status).toBe(400);
   });
 });
+
+describe("abort while a question is waiting", () => {
+  test("abort cancels the pending confirm first, so it returns promptly and the run ends", async () => {
+    await api(h, "POST", "/chats/ui-abort/start", {});
+    const live = readEvents(h, "ui-abort", { until: settled, timeoutMs: 8000 });
+    await api(h, "POST", "/chats/ui-abort/prompt", { message: "CONFIRM rm" });
+    await readEvents(h, "ui-abort", { until: (f) => f.event === "extension_ui_request", timeoutMs: 5000 });
+    const t0 = Date.now();
+    const r = await api(h, "POST", "/chats/ui-abort/abort", {});
+    expect(r.status).toBe(200);
+    expect(Date.now() - t0).toBeLessThan(3000);
+    const run = await live;
+    expect(run.frames.some((f) => f.event === "agent_settled")).toBe(true);
+    const tool = run.frames.find((f) => f.event === "tool_execution_end");
+    expect(tool?.data.isError).toBe(true); // the question was declined, the command did not run
+  });
+
+  test("a question that was already answered is not cancelled twice", async () => {
+    await api(h, "POST", "/chats/ui-abort2/start", {});
+    const live = readEvents(h, "ui-abort2", { until: settled, timeoutMs: 8000 });
+    await api(h, "POST", "/chats/ui-abort2/prompt", { message: "CONFIRM rm" });
+    await readEvents(h, "ui-abort2", { until: (f) => f.event === "extension_ui_request", timeoutMs: 5000 });
+    await api(h, "POST", "/chats/ui-abort2/ui_response", { id: "ui-1", confirmed: true });
+    await live;
+    expect((await api(h, "POST", "/chats/ui-abort2/abort", {})).status).toBe(200);
+  });
+
+  test("abort on an idle chat with nothing pending is still ok", async () => {
+    await api(h, "POST", "/chats/ui-abort3/start", {});
+    expect((await api(h, "POST", "/chats/ui-abort3/abort", {})).status).toBe(200);
+  });
+});

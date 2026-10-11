@@ -186,7 +186,13 @@ export function createBridge(cfg: BridgeConfig): Bridge {
       resumeFrom = existing.sessionFile ?? sessionPath;
       await drop(existing);
     }
-    if (live.size >= cfg.maxLive) throw new HttpError(429, `at most ${cfg.maxLive} live Pi processes`);
+    if (live.size >= cfg.maxLive) {
+      // Make room by closing the least recently used chat that is not mid-run. Its session file
+      // stays on disk, so the next message resumes it. Only when every chat is busy is it a 429.
+      const idle = [...live.values()].filter((c) => !c.busy && !c.exited).sort((a, b) => a.lastActivity - b.lastActivity)[0];
+      if (!idle) throw new HttpError(429, `at most ${cfg.maxLive} live Pi processes, all busy`);
+      await drop(idle);
+    }
 
     const existingGrave = grave.get(id);
     if (existingGrave) {
@@ -265,6 +271,9 @@ export function createBridge(cfg: BridgeConfig): Bridge {
     let ka: ReturnType<typeof setInterval> | undefined;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
+        // Bytes must flow now: with nothing queued the response headers wait for the first event or
+        // the 15 s keepalive, and a client that waits for the stream before it prompts stalls that long.
+        controller.enqueue(enc.encode(": open\n\n"));
         const send = (f: Frame) => {
           if (closed) return;
           const head = f.id !== undefined ? `id: ${f.id}\n` : "";
@@ -364,6 +373,12 @@ export function createBridge(cfg: BridgeConfig): Bridge {
         case "abort": {
           const chat = requireLive(id);
           chat.touch();
+          // Pi cannot finish an abort while a tool is blocked on a question. Decline every open
+          // question first (the command does not run), then abort.
+          for (const qid of [...chat.pendingUi]) {
+            chat.pendingUi.delete(qid);
+            chat.write({ type: "extension_ui_response", id: qid, cancelled: true });
+          }
           await chat.expectOk({ type: "abort" });
           chat.touch();
           return json(200, { ok: true });
@@ -371,6 +386,7 @@ export function createBridge(cfg: BridgeConfig): Bridge {
         case "ui_response": {
           const chat = requireLive(id);
           if (typeof body.id !== "string" || body.id === "") throw new HttpError(400, "id is required");
+          chat.pendingUi.delete(body.id);
           let cmd: Record<string, unknown>;
           if (typeof body.confirmed === "boolean") cmd = { type: "extension_ui_response", id: body.id, confirmed: body.confirmed };
           else if (typeof body.value === "string") cmd = { type: "extension_ui_response", id: body.id, value: body.value };

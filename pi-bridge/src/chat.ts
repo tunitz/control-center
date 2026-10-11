@@ -36,6 +36,8 @@ export class Chat {
   launchKey = "";
   /** The tool list this process was launched with (null = Pi default). */
   launchTools: string[] | null = null;
+  /** Ids of questions (confirm/select/input) Pi has asked and nobody has answered yet. */
+  pendingUi = new Set<string>();
   private lastAssistant: any = null;
 
   constructor(
@@ -120,6 +122,9 @@ export class Chat {
     this.touch();
     let data = obj;
     switch (obj.type) {
+      case "extension_ui_request":
+        if (typeof obj.id === "string" && ["confirm", "select", "input", "editor"].includes(obj.method)) this.pendingUi.add(obj.id);
+        break;
       case "agent_start":
         this.busy = true;
         this.lastAssistant = null;

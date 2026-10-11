@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import type { ChatBackend } from "./backend";
 import type { ChatModelDef } from "./models";
 import type { ContentPart, HermesFrame, StartRunArgs, TodoItem } from "./hermes";
+import { PI_SETTING_DEFAULTS } from "./pi-settings";
 import { ChatError } from "./http";
 
 export type PiConfig = {
@@ -87,7 +88,9 @@ export class PiClient implements ChatBackend {
     const model = args.model;
     const provider = args.provider;
     // Always name the tools: null means "the global default", which also clears an override that was removed.
-    const settings = { tools: null, ...(args.piSettings ?? {}) };
+    // Pi stores live settings in its global settings.json, so a value set for one chat would leak into
+    // every other chat. Sending all of them each run keeps each chat on its own values.
+    const settings = { ...PI_SETTING_DEFAULTS, ...(args.piSettings ?? {}) };
     await this.call("POST", `/chats/${chat}/start`, {
       ...(args.ref ? { sessionPath: args.ref } : {}),
       ...(provider ? { model: { provider, modelId: model } } : {}),

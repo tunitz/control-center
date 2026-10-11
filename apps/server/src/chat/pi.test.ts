@@ -291,7 +291,7 @@ test("startRun sends the effort as thinking and the chat's stored settings with 
   await drain((await pi.startRun({
     sessionId: id, message: "hi", ...RUN, effort: "high", piSettings: { steeringMode: "all", autoRetry: false },
   })).frames);
-  expect(startBodies(b).at(-1)).toMatchObject({ thinking: "high", settings: { steeringMode: "all", autoRetry: false } });
+  expect(startBodies(b).at(-1)).toMatchObject({ thinking: "high", settings: { steeringMode: "all", autoRetry: false, followUpMode: "one-at-a-time", autoCompaction: true } });
 });
 
 test("startRun with no effort and no stored settings sends no thinking, and names tools:null so a cleared override takes effect", async () => {
@@ -302,6 +302,7 @@ test("startRun with no effort and no stored settings sends no thinking, and name
   const last = startBodies(b).at(-1);
   expect(last).not.toHaveProperty("thinking");
   expect(last).toMatchObject({ settings: { tools: null } });
+  expect(startBodies(b).at(-1).settings).toEqual({ tools: null, steeringMode: "one-at-a-time", followUpMode: "one-at-a-time", autoCompaction: true, autoRetry: true });
 });
 
 test("compact starts the chat from its session file, compacts and returns Pi's numbers", async () => {

@@ -388,3 +388,13 @@ test("clearing a chat's tools override is sent to the bridge as tools:null on th
   await waitIdle(s.id);
   expect(lastStart().settings.tools).toBeNull();
 });
+
+test("one chat's settings never leak into another chat: each run sends that chat's full settings", async () => {
+  const a = await piSession(), b = await piSession();
+  await js(await run(req("PATCH", PI_URL(a.id), { steeringMode: "all", autoRetry: false })));
+  await js(await run(req("POST", `/api/chat/sessions/${a.id}/send`, fd("one"))));
+  await waitIdle(a.id);
+  await js(await run(req("POST", `/api/chat/sessions/${b.id}/send`, fd("two"))));
+  await waitIdle(b.id);
+  expect(lastStart().settings).toEqual({ tools: null, steeringMode: "one-at-a-time", followUpMode: "one-at-a-time", autoCompaction: true, autoRetry: true });
+});

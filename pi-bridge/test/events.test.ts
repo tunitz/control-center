@@ -125,3 +125,22 @@ describe("event stream", () => {
     await api(h, "POST", "/chats/ev-busy/abort", {});
   });
 });
+
+describe("event stream opens immediately", () => {
+  test("response headers arrive without waiting for the first event or keepalive", async () => {
+    const h = await harness();
+    try {
+      await api(h, "POST", "/chats/ho-1/start", {});
+      const t0 = Date.now();
+      const res = await fetch(`${h.base}/chats/ho-1/events?after=9007199254740991`, { headers: { authorization: `Bearer ${h.token}` } });
+      expect(res.status).toBe(200);
+      expect(Date.now() - t0).toBeLessThan(1000);
+      const rd = res.body!.getReader();
+      const first = await rd.read();
+      expect(new TextDecoder().decode(first.value)).toStartWith(":");
+      await rd.cancel();
+    } finally {
+      await h.close();
+    }
+  });
+});
