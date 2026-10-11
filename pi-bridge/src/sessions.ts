@@ -123,16 +123,16 @@ function textOf(content: unknown): string {
 // Short-lived `pi --mode rpc --no-session` used when no chat is live, so /models never
 // needs a chat and never counts toward the live-process cap.
 export async function listModelsOnce(cfg: BridgeConfig, live?: { send(cmd: any, t: number): Promise<any> }): Promise<unknown[]> {
+  const claudeBridge = readConfig(cfg.agentDir).claudeBridge && existsSync(cfg.claudeBridgeExtension);
   if (live) {
     const resp = await live.send({ type: "get_available_models" }, cfg.commandTimeoutMs);
     if (!resp.success) throw new Error(resp.error ?? "get_available_models failed");
-    return resp.data?.models ?? [];
+    return onlyUsableAnthropic(resp.data?.models ?? [], claudeBridge);
   }
   let done: () => void = () => {};
   const exited = new Promise<void>((r) => (done = r));
   const args = ["--mode", "rpc", "--no-session", "--session-dir", cfg.sessionDir];
   // The Claude-bridge models only exist when its extension is loaded, so the probe loads it too.
-  const claudeBridge = readConfig(cfg.agentDir).claudeBridge && existsSync(cfg.claudeBridgeExtension);
   if (claudeBridge) args.push("-e", cfg.claudeBridgeExtension);
   const proc = new PiProcess(cfg, join(cfg.workspaceRoot, "_models"), args, {
     onEvent: () => {},
@@ -141,9 +141,19 @@ export async function listModelsOnce(cfg: BridgeConfig, live?: { send(cmd: any, 
   try {
     const resp = await proc.send({ type: "get_available_models" }, cfg.commandTimeoutMs);
     if (!resp.success) throw new Error(resp.error ?? "get_available_models failed");
-    return resp.data?.models ?? [];
+    return onlyUsableAnthropic(resp.data?.models ?? [], claudeBridge);
   } finally {
     await proc.kill(cfg.killGraceMs);
     await exited;
   }
+}
+
+/**
+ * With the Claude Code bridge on, Pi's native `anthropic` provider is the blocked path *and* reuses
+ * the same model ids as the `claude-bridge` provider (claude-sonnet-5-5, …). Consumers key models by
+ * id alone, so a duplicate would resolve to the blocked one. Hide it; the claude-bridge entries stay.
+ */
+export function onlyUsableAnthropic(models: unknown[], claudeBridge: boolean): unknown[] {
+  if (!claudeBridge) return models;
+  return models.filter((m) => (m as { provider?: unknown } | null)?.provider !== "anthropic");
 }

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { api, harness, type Harness } from "./helpers";
+import { onlyUsableAnthropic } from "../src/sessions";
 
 let h: Harness;
 beforeAll(async () => {
@@ -48,4 +49,14 @@ describe("GET /sessions and /models", () => {
     expect(again.status).toBe(200);
     expect(h.bridge.chats.size()).toBe(1);
   });
+});
+
+test("onlyUsableAnthropic hides native anthropic models when the Claude bridge is on", () => {
+  const models = [
+    { provider: "anthropic", id: "claude-sonnet-5-5" },
+    { provider: "claude-bridge", id: "claude-sonnet-5-5" },
+    { provider: "deepseek", id: "deepseek-flash" },
+  ];
+  expect(onlyUsableAnthropic(models, false)).toHaveLength(3);
+  expect(onlyUsableAnthropic(models, true).map((m: any) => m.provider)).toEqual(["claude-bridge", "deepseek"]);
 });
