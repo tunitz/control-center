@@ -26,6 +26,12 @@ describe("cc-gate with a chosen (non-workspace) cwd", () => {
     expect(at(HOME, "bash", { command: "cat ~/.local/share/cc-pi/env" }).confirm).toBe(true);
   });
 
+  test("with the control-center repo as the cwd, its data/ still asks and its src/ runs", () => {
+    const REPO = `${HOME}/projects/control-center`;
+    expect(at(REPO, "write", { path: `${REPO}/data/x`, content: "x" }).confirm).toBe(true);
+    expect(at(REPO, "write", { path: `${REPO}/src/x`, content: "x" }).confirm).toBe(false);
+  });
+
   test("with HOME as the cwd, ordinary writes under HOME run", () => {
     expect(at(HOME, "write", { path: `${HOME}/projects/alpha/a.ts`, content: "x" }).confirm).toBe(false);
   });

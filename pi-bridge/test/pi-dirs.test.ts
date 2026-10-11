@@ -184,13 +184,19 @@ describe("protected directory list stays in step with cc-gate", () => {
     }
   });
 
-  test("a chosen cwd may not contain a protected directory (HOME itself is allowed)", async () => {
-    // projects/ contains projects/control-center/data, so it cannot be the cwd. Listing it is still fine.
-    expect((await api(h, "GET", `/dirs?path=${encodeURIComponent(join(home, "projects"))}`)).status).toBe(200);
-    const r = await api(h, "POST", "/chats/cwd-contains/start", { cwd: join(home, "projects") });
-    expect(r.status).toBe(400);
-    expect(r.json.error).toMatch(/protected/);
-    expect((await api(h, "POST", "/chats/cwd-contains/start", { cwd: home })).status).toBe(200);
-    await api(h, "DELETE", "/chats/cwd-contains");
+  test("a chosen cwd may be an ancestor of a protected directory; protected dirs themselves are rejected", async () => {
+    // projects/ and projects/control-center contain the protected data/ folder. cc-gate covers access to it.
+    const ancestors = [home, join(home, "projects"), join(home, "projects", "control-center")];
+    for (const [i, dir] of ancestors.entries()) {
+      const id = `cwd-ancestor-${i}`;
+      expect((await api(h, "POST", `/chats/${id}/start`, { cwd: dir })).status).toBe(200);
+      await api(h, "DELETE", `/chats/${id}`);
+    }
+    const protectedDirs = [join(home, "projects", "control-center", "data"), join(home, ".hermes")];
+    for (const [i, dir] of protectedDirs.entries()) {
+      const r = await api(h, "POST", `/chats/cwd-protected-${i}/start`, { cwd: dir });
+      expect(r.status).toBe(400);
+      expect(r.json.error).toMatch(/protected/);
+    }
   });
 });

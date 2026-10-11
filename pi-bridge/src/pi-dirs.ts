@@ -114,13 +114,10 @@ export function makeDir(cfg: BridgeConfig, parentRaw: unknown, nameRaw: unknown)
 }
 
 /**
- * Validates a chat's cwd. The same rules as GET /dirs, plus: the directory must not contain a protected
- * folder. HOME itself is allowed (its protected children are dot-folders or are only reached by path).
+ * Validates a chat's cwd: absolute, existing, a directory inside HOME (after symlink resolution), and not
+ * itself a protected folder or inside one. A folder that merely contains a protected folder (e.g. ~/projects)
+ * is accepted; cc-gate asks before any write or read that reaches a protected path, whatever the cwd.
  */
 export function chosenCwd(cfg: BridgeConfig, raw: unknown): string {
-  const real = resolveDir(cfg, raw, "cwd");
-  if (real !== homeReal(cfg) && protectedRoots(cfg).some((r) => under(r, real))) {
-    throw new HttpError(400, "cwd cannot contain a protected directory");
-  }
-  return real;
+  return resolveDir(cfg, raw, "cwd");
 }
