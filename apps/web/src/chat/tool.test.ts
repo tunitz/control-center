@@ -28,3 +28,14 @@ test("a finished delegate_task is a dispatch, not a result", () => {
   expect(toolStatus(row({}))).toEqual({ cls: "stat-ok", label: "ok" });
   expect(toolStatus(row({ status: "running" }))).toEqual({ cls: "stat-run", label: "running" });
 });
+
+import { toolDetail } from "./tool";
+
+test("toolDetail shows every argument in full, uncut", () => {
+  const long = "x".repeat(500);
+  expect(toolDetail({ command: "git log --oneline\nls", timeout: 5 })).toBe("command:\ngit log --oneline\nls\n\ntimeout: 5");
+  expect(toolDetail({ path: "/a/b", content: long })).toContain(long);
+  expect(toolDetail({ tasks: [{ goal: "A" }] })).toBe('tasks:\n[\n  {\n    "goal": "A"\n  }\n]');
+  expect(toolDetail({ a: null })).toBe("");
+  expect(toolDetail(null)).toBe("");
+});

@@ -29,3 +29,16 @@ export function toolStatus(t: ToolRow): { cls: string; label: string } {
   if (t.name === "delegate_task") return { cls: "stat-run", label: "background" };
   return { cls: "stat-ok", label: "ok" };
 }
+
+/** Every argument in full for the expanded tool row. Nothing is cut: the data is already in the stream, no model tokens. */
+export function toolDetail(args: Record<string, unknown> | null): string {
+  if (!args) return "";
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(args)) {
+    if (v === null || v === undefined) continue;
+    if (typeof v === "string") out.push(v.includes("\n") || v.length > 60 ? `${k}:\n${v}` : `${k}: ${v}`);
+    else if (typeof v === "number" || typeof v === "boolean") out.push(`${k}: ${v}`);
+    else out.push(`${k}:\n${JSON.stringify(v, null, 2)}`);
+  }
+  return out.join("\n\n");
+}

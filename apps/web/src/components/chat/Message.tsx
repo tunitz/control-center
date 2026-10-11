@@ -4,7 +4,7 @@ import { Markdown } from "./Markdown";
 import { copyText } from "../../clipboard";
 import { fmtTokens } from "../../chat/context";
 import { isAbnormal, showReasoning } from "../../chat/reduce";
-import { toolStatus, toolTarget } from "../../chat/tool";
+import { toolDetail, toolStatus, toolTarget } from "../../chat/tool";
 import type { Approval, Attachment, ChatMessage, ToolRow } from "../../chat/types";
 
 const fmtSize = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -53,7 +53,7 @@ function ToolRows({ tools }: { tools: ToolRow[] }) {
             </button>
             {isOpen && (
               <pre className="out" id={`tool-${t.id}`}>
-                {t.preview ?? "No output preview."}
+                {[toolDetail(t.args), t.preview && t.preview !== toolDetail(t.args) ? `— preview —\n${t.preview}` : ""].filter(Boolean).join("\n\n") || "No details."}
               </pre>
             )}
           </div>

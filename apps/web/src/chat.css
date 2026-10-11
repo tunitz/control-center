@@ -115,7 +115,7 @@
 .chatx .stat-ok{color:var(--ok);font-size:13px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;flex:none}
 .chatx .stat-ok::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
 .chatx .stat-run{color:var(--accent-ink);font-size:13px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;flex:none}
-.chatx .out{margin:0;background:var(--surface2);border:0;border-top:1px solid var(--line);border-radius:0;padding:10px 12px 12px;font-size:13px;line-height:1.6;overflow:auto;max-height:200px;white-space:pre;color:var(--text)}
+.chatx .out{margin:0;background:var(--surface2);border:0;border-top:1px solid var(--line);border-radius:0;padding:10px 12px 12px;font-size:13px;line-height:1.6;overflow:auto;max-height:360px;white-space:pre;color:var(--text)}
 .chatx .thought{font-size:14px;color:var(--mut);padding:10px 12px 12px 34px;border-top:1px solid var(--line);line-height:1.6}
 .chatx .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;max-width:100%}
 .chatx table{border-collapse:collapse;width:100%;min-width:460px;font-size:14px}
