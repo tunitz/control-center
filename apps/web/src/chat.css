@@ -268,15 +268,22 @@
 .chatx .empty-head{display:flex;flex-direction:column;gap:4px}
 .chatx .empty-head h2{margin:0}
 .chatx .btn.primary:disabled,.chatx .btn.primary:disabled:hover{background:var(--surface);border-color:var(--ctl-line);color:var(--mut);opacity:1;cursor:default}
+/* Steer is not Send: amber outline and its own bent arrow, so a running chat never looks like it is about to start a new message. */
+.chatx .btn.steer{background:transparent;border-color:var(--warn);color:var(--warn)}
+.chatx .btn.steer:hover:not(:disabled){background:var(--warn-bg)}
+.chatx .btn.steer:disabled,.chatx .btn.steer:disabled:hover{border-color:var(--ctl-line);color:var(--mut);background:transparent;opacity:1;cursor:default}
 /* Icon-only send at <=480px: just the arrow, no circle. The 44px box stays as the tap target. Accent when it can send, muted when it cannot.
    Selectors carry .btn.primary/.btn.stop so they outrank the filled-button rules above in every state. */
 @media (max-width:480px){
   .chatx .send-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-  .chatx .btn.icon-send,.chatx .btn.primary.icon-send,.chatx .btn.primary.icon-send:hover,.chatx .btn.primary.icon-send:disabled,.chatx .btn.primary.icon-send:disabled:hover,.chatx .btn.stop.icon-send,.chatx .btn.stop.icon-send:hover{width:44px;height:44px;min-height:44px;padding:0;border:0;border-radius:10px;background:transparent;flex:none}
+  .chatx .btn.icon-send,.chatx .btn.primary.icon-send,.chatx .btn.primary.icon-send:hover,.chatx .btn.primary.icon-send:disabled,.chatx .btn.primary.icon-send:disabled:hover,.chatx .btn.steer.icon-send,.chatx .btn.steer.icon-send:hover:not(:disabled),.chatx .btn.steer.icon-send:disabled,.chatx .btn.steer.icon-send:disabled:hover,.chatx .btn.stop.icon-send,.chatx .btn.stop.icon-send:hover{width:44px;height:44px;min-height:44px;padding:0;border:0;border-radius:10px;background:transparent;flex:none}
   .chatx .icon-send .i{width:24px;height:24px;margin:0;stroke-width:2}
   .chatx .btn.primary.icon-send,.chatx .btn.primary.icon-send:hover{color:var(--accent)}
   .chatx .btn.primary.icon-send:disabled,.chatx .btn.primary.icon-send:disabled:hover{color:var(--mut);opacity:.55}
   .chatx .btn.primary.icon-send:not(:disabled):active{background:var(--accent-soft)}
+  .chatx .btn.steer.icon-send,.chatx .btn.steer.icon-send:hover:not(:disabled){color:var(--warn)}
+  .chatx .btn.steer.icon-send:disabled,.chatx .btn.steer.icon-send:disabled:hover{color:var(--mut);opacity:.55}
+  .chatx .btn.steer.icon-send:not(:disabled):active{background:var(--warn-bg)}
   .chatx .btn.stop.icon-send{color:var(--err)}
 }
 /* Composer toolbar: left group (attach, camera, meter), right group (thinking, model, send). Right group wraps as a unit and stays right-aligned. */

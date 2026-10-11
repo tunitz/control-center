@@ -252,7 +252,7 @@ export default function Chat({ hash }: { hash: string }) {
     if (name === "credits") return (await chat.credits()).text.split(" | ").join("\n");
     if (name === "steer") {
       if (!arg) return "Usage: /steer <note for the running task>";
-      return (await onSteer(arg)) === "ok" ? "Steer sent to the running task." : "Nothing is running.";
+      return (await onSteer(arg)) === "ok" ? `Sent to the running task:\n${arg}` : "Nothing is running.";
     }
     if (!activeId || !active) return "Open a chat first.";
     if (name === "usage") return usageReportText(await chat.sessionUsage(activeId), ctxWindow);

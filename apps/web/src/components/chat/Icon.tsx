@@ -1,7 +1,7 @@
 // Icons copied from docs/mockups/chat.html <symbol> defs (stroke icons, currentColor).
 import type { ReactElement } from "react";
 
-export type IconName = "menu" | "plus" | "search" | "dots" | "chev" | "chevr" | "check" | "pin" | "edit" | "copy" | "refresh" | "fork" | "clip" | "up" | "down" | "stop" | "x" | "file" | "image" | "code" | "chat" | "grid" | "gear" | "trash" | "archive" | "export" | "upload" | "camera" | "info" | "alert" | "spark" | "term" | "bulb" | "book" | "server";
+export type IconName = "menu" | "plus" | "search" | "dots" | "chev" | "chevr" | "check" | "pin" | "edit" | "copy" | "refresh" | "fork" | "clip" | "up" | "steer" | "down" | "stop" | "x" | "file" | "image" | "code" | "chat" | "grid" | "gear" | "trash" | "archive" | "export" | "upload" | "camera" | "info" | "alert" | "spark" | "term" | "bulb" | "book" | "server";
 
 const PATHS: Record<IconName, string> = {
   "menu": '<path d="M4 7h16M4 12h16M4 17h16"/>',
@@ -18,6 +18,7 @@ const PATHS: Record<IconName, string> = {
   "fork": '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9c0 4-6 3-12 8"/>',
   "clip": '<path d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>',
   "up": '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  "steer": '<path d="M5 20v-8a4 4 0 0 1 4-4h10M15 4l4 4-4 4"/>',
   "down": '<path d="M12 5v14M6 13l6 6 6-6"/>',
   "stop": '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>',
   "x": '<path d="M6 6l12 12M18 6L6 18"/>',

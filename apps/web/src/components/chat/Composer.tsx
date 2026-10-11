@@ -6,6 +6,7 @@ import { contextMeter } from "../../chat/context";
 import { shortModelLabel } from "./label";
 import { TextMenu } from "./TextMenu";
 import { effortLabel } from "../../chat/menu";
+import { sendMode } from "../../chat/sendmode";
 import { effortChoices, modelUsable } from "../../chat/pi";
 import type { Backend, ChatModel, Effort } from "../../chat/types";
 
@@ -66,6 +67,7 @@ export function Composer(p: ComposerProps) {
     return () => clearTimeout(t);
   }, [notice]);
   const busy = p.running;
+  const mode = sendMode(busy, backend === "pi" ? "Pi" : "Hermes");
 
   // Autogrow up to ~8 lines.
   useEffect(() => {
@@ -170,6 +172,8 @@ export function Composer(p: ComposerProps) {
       if (res === "finished") { setErr("Run already finished"); return; } // keep the text
       setText("");
       setNotice("Steer sent to the running task.");
+      // A row in the thread, so there is a record of what was sent into the run and when.
+      p.onNote("steer", value.trim());
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -181,7 +185,8 @@ export function Composer(p: ComposerProps) {
     // Phone: Enter is a newline. Desktop: Enter sends, Shift+Enter is a newline.
     if (p.phone || e.shiftKey) return;
     e.preventDefault();
-    if (busy) return;
+    // While a task runs the button says Steer, so Enter steers too. A slash command still runs as a command.
+    if (busy && parseSlash(text, backend) === null) { if (canSteer) void steer(); return; }
     void submit();
   };
 
@@ -242,8 +247,8 @@ export function Composer(p: ComposerProps) {
             ref={ta}
             rows={1}
             value={text}
-            placeholder={`Message ${backend === "pi" ? "Pi" : "Hermes"}…`}
-            aria-label={`Message ${backend === "pi" ? "Pi" : "Hermes"}`}
+            placeholder={mode.placeholder}
+            aria-label={mode.kind === "steer" ? "Steer the running task" : `Message ${backend === "pi" ? "Pi" : "Hermes"}`}
             onChange={e => setText(e.target.value)}
             onKeyDown={onKey}
             onPaste={onPaste}
@@ -313,17 +318,19 @@ export function Composer(p: ComposerProps) {
               </button>
             )}
             {busy ? (
-              <button className="btn primary icon-send" type="button" aria-label="Steer" disabled={!canSteer} onClick={() => void steer()}><Icon name="up" className="i sm" /><span className="send-lbl">Steer</span></button>
+              <button className="btn steer icon-send" type="button" aria-label={mode.label} title={mode.title} disabled={!canSteer} onClick={() => void steer()}>
+                <Icon name="steer" className="i sm" /><span className="send-lbl">{mode.label}</span>
+              </button>
             ) : (
-              <button className="btn primary icon-send" type="button" aria-label="Send" disabled={!canSend} onClick={() => void submit()}>
-                <Icon name="up" className="i sm" /><span className="send-lbl">Send</span>
+              <button className="btn primary icon-send" type="button" aria-label={mode.label} title={mode.title} disabled={!canSend} onClick={() => void submit()}>
+                <Icon name="up" className="i sm" /><span className="send-lbl">{mode.label}</span>
               </button>
             )}
             </div>
           </div>
         </div>
         <div className="comp-foot">
-          <span className={`hint${notice && !err ? " note" : ""}`} role={notice || err ? "status" : undefined}>{err || notice || (files.some(f => f.note === "Text PDFs only") ? "Text PDFs only" : p.phone ? (meter ? `Context ${meter.label} (${Math.round(meter.pct)}%)` : "") : "Enter to send · Shift+Enter for a new line")}</span>
+          <span className={`hint${notice && !err ? " note" : ""}`} role={notice || err ? "status" : undefined}>{err || notice || mode.hint || (files.some(f => f.note === "Text PDFs only") ? "Text PDFs only" : p.phone ? (meter ? `Context ${meter.label} (${Math.round(meter.pct)}%)` : "") : "Enter to send · Shift+Enter for a new line")}</span>
         </div>
       </div>
     </div>
