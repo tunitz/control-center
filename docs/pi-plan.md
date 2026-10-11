@@ -18,6 +18,7 @@ Success criteria (all measurable):
 4. `rm` of a file in the workspace shows an approval card; Deny leaves the file.
 5. From inside the Pi container, `env`, `/data`, and `curl 127.0.0.1:3030` expose nothing of Control Center.
 6. Hermes chats are unchanged: full existing suite green.
+7. Slash commands work in a Pi chat: every shared command (see T7b) behaves exactly as in a Hermes chat, `/credits` returns the balances with no model call, and Pi's own commands (extension commands, prompt templates, skill commands) appear in the palette and run.
 
 Out of scope: replacing Hermes, Pi packages/marketplace UI, themes/TUI settings, voice, multi-user, Pi `/login` OAuth flows, image input (DeepSeek is text-only; revisit with a vision model).
 
@@ -86,6 +87,7 @@ New run event `todo` `{ items: [{id, content, status}] }` (full replace). Additi
 | D2 | Pi runs in its **own container**; a host-user fallback is rejected unless the container route fails at T1. |
 | D3 | Approval for Pi is real (Approve/Deny), unlike Hermes (read-only notice). Default-deny when no browser answers within 120 s. |
 | D4 | Settings changes that Pi cannot apply live restart only that chat's Pi process, **between turns** (never mid-run). The UI says "applies next message". |
+| D6 | Slash commands: the existing client-side set (`/new /model /reasoning /stop /retry /title /export /pin /archive /delete /steer /credits /help`) is **backend-neutral** and works unchanged in Pi chats because the browser handles it before anything is sent. Pi's own commands are added to the palette only in Pi chats, from `get_commands`. `/credits` stays the host endpoint (`GET /api/chat/credits`, `credits-http.service`); Pi never sees it, so it costs no tokens and the Pi container needs no host access. `/pc` and `/llama` stay out of chat (same rule as Hermes). |
 | D5 | Todo tool is a CC-owned extension `cc-todo`, not the upstream example (the example is TUI-oriented and uses add/toggle semantics; we want full-list replace like Copilot). |
 
 ## 5. Workstreams and tasks
@@ -151,9 +153,21 @@ Every task ends: `bun run typecheck` + `bun test apps/server apps/web/src` green
 - Keys are write-only: never returned by any API; audit log records the change without value.
 - Tests: schema accept/reject; apply order; 409 mid-run; keys never in responses or logs (grep test over server logs in the live gate).
 
-**T0 (first, 1 hour): re-spike the gaps** in `~/projects/pi-spike`, before T1: (a) image over RPC with a vision model (Anthropic) and what MIME/size limits apply; (b) `--session`/`--session-dir` attach at spawn; (c) llama at `192.168.31.15:8080/v1` as a `models.json` provider (needs tun-sfx online; WoL if not); (d) `setActiveTools` from an extension command and whether `set_*` effect appears in `get_state`; (e) SYSTEM.md / APPEND_SYSTEM.md really change the next process; (f) Pi stop reason for error vs abort. Exit: all six answered with real output, else the affected row in the coverage table is downgraded.
+**T0 (first, 1 hour): re-spike the gaps** in `~/projects/pi-spike`, before T1: (a) image over RPC with a vision model (Anthropic) and what MIME/size limits apply; (b) `--session`/`--session-dir` attach at spawn; (c) llama at `192.168.31.15:8080/v1` as a `models.json` provider (needs tun-sfx online; WoL if not); (d) `setActiveTools` from an extension command and whether `set_*` effect appears in `get_state`; (e) SYSTEM.md / APPEND_SYSTEM.md really change the next process; (f) Pi stop reason for error vs abort; (g) `get_commands` real output (names, sources, argument hints) and whether an extension command sent via `prompt` runs with no model turn; (h) how a prompt-template command and a `/skill:name` command expand over RPC. Exit: all six answered with real output, else the affected row in the coverage table is downgraded.
 
 ### Workstream D — web
+
+**T7b Slash commands (runs with T7).** Skill: `control-center` (references/chat-slash-and-credits.md).
+- Shared set stays in `apps/web/src/chat/slash.ts`. The palette becomes `COMMANDS` + backend commands; `parseSlash` returns `{kind:"backend"}` for a backend command so it is sent as text to that backend, and `unknown` stays a local notice.
+- Pi commands: bridge exposes `GET /chats/:id/commands` -> RPC `get_commands` (name, description, source = extension | prompt | skill). CC passes it through `GET /sessions/:id/commands` (cached per Pi process; refreshed after a settings restart). Shown with a small source tag; ordering: shared first, then Pi.
+- Name clashes: shared commands win. A Pi command with a shared name is shown as `/pi:<name>` and sent as `/<name>` to Pi (VERIFIED in the spike: `/reload` sent as a prompt does NOT reload; it starts a model turn, so Pi built-in TUI commands such as `/reload`, `/login`, `/tree` are NOT offered). Only extension, prompt-template and skill commands are offered.
+- Extension commands run without a model turn when the extension handles them (SOURCE: extension commands run during streaming via `prompt`); T0 verifies this with a `cc-ping` extension command: no `agent_start`, reply arrives as an event, zero tokens.
+- Pi-side custom commands owned by CC (`cc-` prefix, extension `cc-bridge`): `/tools` (show/set active tools), `/system` (show the effective system prompt length and sources), `/todos` (print the current todo list). Each returns text through `ctx.ui.notify`; the bridge turns it into a local row (the same collapsible row as `/credits`).
+- Result display: any command output longer than one line goes into the thread as the collapsible local row (not stored in Hermes/Pi history), never under the composer.
+- `/credits` in a Pi chat: unchanged path (browser -> CC -> host endpoint). It must never be forwarded to Pi. Test: a Pi chat sends `/credits`, the bridge receives no prompt.
+- `/retry` in a Pi chat resends the last user text as a new prompt (not Pi's `clone`/`fork`); `/steer` maps to Pi `steer`; add `/followup <text>` -> Pi `follow_up` (Pi-only, shown only in Pi chats); `/compact` becomes available in Pi chats (RPC `compact`) and stays hidden in Hermes chats.
+- Tests (written first): palette per backend (Hermes: shared only; Pi: shared + Pi list), clash rule, `/credits` never reaches the backend, `/compact` hidden for Hermes and wired for Pi, command list refresh after restart, unknown command text built from the full list.
+- Live gate (T8): in a real Pi chat run `/help`, `/credits`, `/compact`, `/followup`, one extension command (`cc-ping`), one prompt-template command, one skill command; screenshot at 390px.
 
 **T7 UI.** Skill: `frontend-design`, `ui-copy-rules`. Client value first, minimal surface:
 - New-chat control: backend choice (Hermes / Pi), defaulting to last used.
@@ -204,6 +218,7 @@ Open questions:
 | OQ3 | Should Pi chats appear in the same sidebar? | Yes, with a small backend tag | T7 |
 | OQ4 | Does the watcher/await logic apply to Pi? | No: Pi has no background subagents | T3 |
 | OQ5 | Anthropic key in the Pi container? | **LOCKED: yes** (tun adds it to the pi stack env file; also needed for the vision test) | done |
+| OQ7 | Should Pi's prompt-template and skill commands show in the palette? | Yes, with a source tag; hide any command whose source is a Pi built-in TUI command | T0 (g)(h) |
 | OQ6 | tun-sfx llama online for tests? | WoL then test | T0 |
 
 Build status: tun builds this in a separate session; nothing is started from the planning session.
