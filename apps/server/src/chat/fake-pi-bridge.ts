@@ -1,0 +1,266 @@
+/**
+ * In-process stand-in for the pi-bridge HTTP API (pi-bridge/src/bridge.ts), for tests.
+ * Event names and payloads follow the bridge: the SSE event name is the Pi event type, and
+ * agent_settled carries stopReason/errorMessage copied from the last assistant message
+ * (pi-bridge/src/chat.ts). The run scenario is chosen from the prompt text:
+ *   contains "SLOW"  streams a partial, waits for abort, settles stopReason "aborted"
+ *   contains "ERR"   settles stopReason "error" with errorMessage "boom: provider down"
+ *   otherwise        streams "Hello" + " world", settles stopReason "stop"
+ */
+import type { Server } from "bun";
+
+export type FakeModel = { provider: string; id: string; name?: string; reasoning?: boolean; input?: string[] };
+type Frame = { id: number; event: string; data: any };
+type Sub = { send(f: Frame): void; close(): void };
+
+type ChatRec = {
+  id: string;
+  sessionFile: string;
+  live: boolean;
+  busy: boolean;
+  aborted: boolean;
+  abort: (() => void) | null;
+  seq: number;
+  ring: Frame[];
+  subs: Set<Sub>;
+  model: { provider: string; modelId: string } | null;
+  prompts: string[];
+  steers: string[];
+};
+
+export type FakeRequest = { method: string; path: string; auth: string | null; body: any };
+
+export const FAKE_MODELS: FakeModel[] = [
+  { provider: "deepseek", id: "deepseek-flash", name: "DeepSeek V4.1 Flash", reasoning: true },
+  { provider: "deepseek", id: "deepseek-pro", name: "DeepSeek V4.1 Pro", reasoning: true },
+];
+
+const json = (status: number, body: unknown) => Response.json(body, { status });
+
+export class FakePiBridge {
+  readonly token: string;
+  readonly models: FakeModel[];
+  readonly chats = new Map<string, ChatRec>();
+  readonly requests: FakeRequest[] = [];
+  modelsCalls = 0;
+  /** The next N GET /models calls fail with 500 (for the no-cache-on-failure test). */
+  failModels = 0;
+  readonly url: string;
+  private readonly server: Server<undefined>;
+
+  private constructor(server: Server<undefined>, token: string, models: FakeModel[]) {
+    this.server = server;
+    this.token = token;
+    this.models = models;
+    this.url = `http://127.0.0.1:${server.port}`;
+  }
+
+  static start(opts: { token?: string; models?: FakeModel[] } = {}): FakePiBridge {
+    const token = opts.token ?? "fake-bridge-token-0123456789";
+    const models = opts.models ?? FAKE_MODELS;
+    let self: FakePiBridge | undefined;
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => self!.handle(req) });
+    self = new FakePiBridge(server, token, models);
+    return self;
+  }
+
+  async close(): Promise<void> {
+    for (const rec of this.chats.values()) for (const s of [...rec.subs]) s.close();
+    this.server.stop(true);
+  }
+
+  /** Test hook: the Pi process behind a chat exits; the bridge reports process_exit and closes streams. */
+  crash(id: string): void {
+    const rec = this.chats.get(id);
+    if (!rec) return;
+    rec.live = false;
+    rec.busy = false;
+    this.emit(rec, "process_exit", { type: "process_exit", code: 1 });
+  }
+
+  async handle(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    const auth = req.headers.get("authorization");
+    const text = await req.text();
+    let body: any = {};
+    try { body = text.trim() ? JSON.parse(text) : {}; } catch { body = {}; }
+    this.requests.push({ method: req.method, path: url.pathname, auth, body });
+    if (auth !== `Bearer ${this.token}`) return json(401, { error: "unauthorized" });
+    return this.route(req.method, url, body);
+  }
+
+  private route(method: string, url: URL, body: any): Response {
+    const p = url.pathname;
+    if (method === "GET" && p === "/models") {
+      this.modelsCalls++;
+      if (this.failModels > 0) { this.failModels--; return json(500, { error: "internal error" }); }
+      return json(200, { models: this.models });
+    }
+    let m = /^\/chats\/([^/]+)\/(start|prompt|steer|abort|command)$/.exec(p);
+    if (method === "POST" && m) return this.post(m[1], m[2], body);
+    m = /^\/chats\/([^/]+)$/.exec(p);
+    if (method === "DELETE" && m) {
+      const rec = this.chats.get(m[1]);
+      if (!rec || !rec.live) return json(404, { error: "no live chat with that id" });
+      rec.live = false;
+      this.chats.delete(m[1]);
+      for (const s of [...rec.subs]) s.close();
+      return json(200, { ok: true });
+    }
+    m = /^\/chats\/([^/]+)\/events$/.exec(p);
+    if (method === "GET" && m) return this.events(m[1], url);
+    return json(404, { error: "not found" });
+  }
+
+  private post(id: string, action: string, body: any): Response {
+    if (action === "start") {
+      let rec = this.chats.get(id);
+      if (!rec || !rec.live) {
+        const sessionFile = typeof body.sessionPath === "string" ? body.sessionPath : `/fake/sessions/${id}.jsonl`;
+        rec = {
+          id, sessionFile, live: true, busy: false, aborted: false, abort: null, seq: 0, ring: [],
+          subs: new Set(), model: null, prompts: [], steers: [],
+        };
+        this.chats.set(id, rec);
+      }
+      if (body.model && typeof body.model === "object") {
+        const found = this.models.find((x) => x.provider === body.model.provider && x.id === body.model.modelId);
+        if (!found) return json(502, { error: `Model not found: ${body.model.provider}/${body.model.modelId}` });
+        rec.model = { provider: found.provider, modelId: found.id };
+      }
+      return json(200, { sessionFile: rec.sessionFile, state: { sessionFile: rec.sessionFile, isStreaming: rec.busy } });
+    }
+    const rec = this.chats.get(id);
+    if (!rec || !rec.live) return json(404, { error: "no live chat with that id" });
+
+    if (action === "prompt") {
+      if (typeof body.message !== "string" || body.message.trim() === "") return json(400, { error: "message must be a non-empty string" });
+      if (rec.busy) return json(409, { error: "already processing" });
+      rec.prompts.push(body.message);
+      this.run(rec, body.message);
+      return json(200, { disposition: "started" });
+    }
+    if (action === "steer") {
+      if (!rec.busy) return json(502, { error: "no run in progress" });
+      rec.steers.push(body.message);
+      return json(200, { disposition: "steered" });
+    }
+    if (action === "abort") {
+      rec.aborted = true;
+      rec.abort?.();
+      return json(200, { ok: true });
+    }
+    if (action === "command") {
+      if (body.name !== "set_model") return json(400, { error: `command not allowed: ${String(body.name)}` });
+      const args = body.args ?? {};
+      const found = this.models.find((x) => x.provider === args.provider && x.id === args.modelId);
+      if (!found) return json(502, { error: `Model not found: ${args.provider}/${args.modelId}` });
+      rec.model = { provider: found.provider, modelId: found.id };
+      return json(200, { success: true, data: { provider: found.provider, id: found.id } });
+    }
+    return json(404, { error: "not found" });
+  }
+
+  private events(id: string, url: URL): Response {
+    const rec = this.chats.get(id);
+    if (!rec) return json(404, { error: "no chat with that id" });
+    const after = Number(url.searchParams.get("after") ?? "0");
+    const enc = new TextEncoder();
+    let sub: Sub | undefined;
+    let closed = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        // An SSE comment flushes the headers at once; without a first chunk Bun holds the response open.
+        controller.enqueue(enc.encode(": open\n\n"));
+        const write = (f: Frame) => controller.enqueue(enc.encode(`id: ${f.id}\nevent: ${f.event}\ndata: ${JSON.stringify(f.data)}\n\n`));
+        for (const f of rec.ring) if (f.id > after) write(f);
+        sub = {
+          send: (f) => { if (!closed) write(f); },
+          close: () => { if (closed) return; closed = true; rec.subs.delete(sub!); try { controller.close(); } catch {} },
+        };
+        if (!rec.live) { sub.close(); return; }
+        rec.subs.add(sub);
+      },
+      cancel: () => {
+        closed = true;
+        if (sub) rec.subs.delete(sub);
+      },
+    });
+    return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8" } });
+  }
+
+  private emit(rec: ChatRec, event: string, data: any): void {
+    const f: Frame = { id: ++rec.seq, event, data };
+    rec.ring.push(f);
+    for (const s of [...rec.subs]) s.send(f);
+    if (event === "process_exit") for (const s of [...rec.subs]) s.close();
+  }
+
+  private assistant(text: string, stopReason: string, errorMessage?: string) {
+    return {
+      role: "assistant",
+      content: text ? [{ type: "text", text }] : [],
+      api: "fake",
+      provider: "deepseek",
+      model: "deepseek-flash",
+      usage: { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 12, cost: { total: 0 } },
+      stopReason,
+      ...(errorMessage ? { errorMessage } : {}),
+      timestamp: Date.now(),
+    };
+  }
+
+  private settle(rec: ChatRec, msgs: any[], last: any): void {
+    this.emit(rec, "turn_end", { type: "turn_end", message: last, toolResults: [] });
+    this.emit(rec, "agent_end", { type: "agent_end", messages: msgs });
+    // Same enrichment as pi-bridge/src/chat.ts: terminal info comes from the last assistant message.
+    this.emit(rec, "agent_settled", {
+      type: "agent_settled",
+      aborted: last.stopReason === "aborted",
+      stopReason: last.stopReason ?? null,
+      errorMessage: last.errorMessage ?? null,
+    });
+    rec.busy = false;
+    rec.aborted = false;
+    rec.abort = null;
+  }
+
+  private run(rec: ChatRec, message: string): void {
+    rec.busy = true;
+    rec.aborted = false;
+    const scenario = message.includes("SLOW") ? "slow" : message.includes("ERR") ? "err" : "ok";
+    const user = { role: "user", content: [{ type: "text", text: message }], timestamp: Date.now() };
+    const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+    const update = (ae: any) => this.emit(rec, "message_update", { type: "message_update", usage: {}, assistantMessageEvent: ae });
+    void (async () => {
+      this.emit(rec, "agent_start", { type: "agent_start" });
+      this.emit(rec, "turn_start", { type: "turn_start" });
+      this.emit(rec, "message_start", { type: "message_start", message: user });
+      this.emit(rec, "message_end", { type: "message_end", message: user });
+      this.emit(rec, "message_start", { type: "message_start", message: { role: "assistant", content: [] } });
+      await tick();
+      if (scenario === "err") {
+        const msg = this.assistant("", "error", "boom: provider down");
+        this.emit(rec, "message_end", { type: "message_end", message: msg });
+        this.settle(rec, [user, msg], msg);
+        return;
+      }
+      if (scenario === "slow") {
+        update({ type: "text_start", contentIndex: 0 });
+        update({ type: "text_delta", contentIndex: 0, delta: "partial" });
+        if (!rec.aborted) await new Promise<void>((r) => (rec.abort = r));
+        const msg = this.assistant("partial", "aborted", "Request was aborted");
+        this.emit(rec, "message_end", { type: "message_end", message: msg });
+        this.settle(rec, [user, msg], msg);
+        return;
+      }
+      update({ type: "text_start", contentIndex: 0 });
+      update({ type: "text_delta", contentIndex: 0, delta: "Hello" });
+      update({ type: "text_delta", contentIndex: 0, delta: " world" });
+      update({ type: "text_end", contentIndex: 0 });
+      const msg = this.assistant("Hello world", "stop");
+      this.emit(rec, "message_end", { type: "message_end", message: msg });
+      this.settle(rec, [user, msg], msg);
+    })();
+  }
+}

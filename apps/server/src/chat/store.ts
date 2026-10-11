@@ -117,15 +117,28 @@ export function listSessions(db: Database, opts: { archived?: boolean } = {}): C
 
 export function createSession(
   db: Database,
-  s: { id: string; model: string; provider: string; effort: Effort | null; now: number; title?: string; lockedModel?: string | null },
+  s: { id: string; model: string; provider: string; effort: Effort | null; now: number; title?: string; lockedModel?: string | null; backend?: "hermes" | "pi"; backendRef?: string | null },
 ): ChatSession {
   db.query(
     `INSERT INTO chat_sessions (id, title, title_auto, model, provider, model_locked, effort, pinned, archived,
-       created_at, updated_at, run_state, run_id, unread)
-     VALUES (?, ?, 1, ?, ?, ?, ?, 0, 0, ?, ?, 'idle', NULL, 0)`,
-  ).run(s.id, s.title ?? "New chat", s.model, s.provider, s.lockedModel ?? null, s.effort, s.now, s.now);
+       created_at, updated_at, run_state, run_id, unread, backend, backend_ref)
+     VALUES (?, ?, 1, ?, ?, ?, ?, 0, 0, ?, ?, 'idle', NULL, 0, ?, ?)`,
+  ).run(s.id, s.title ?? "New chat", s.model, s.provider, s.lockedModel ?? null, s.effort, s.now, s.now,
+    s.backend ?? "hermes", s.backendRef ?? null);
   return getSession(db, s.id)!;
 }
+
+/** The backend a session was created on and its backend-specific ref. Null when the session is unknown. */
+export function getBackend(db: Database, id: string): { backend: "hermes" | "pi"; ref: string | null } | null {
+  const r = db.query("SELECT backend, backend_ref FROM chat_sessions WHERE id = ?").get(id) as
+    { backend: "hermes" | "pi"; backend_ref: string | null } | null;
+  return r ? { backend: r.backend, ref: r.backend_ref } : null;
+}
+
+export function setBackendRef(db: Database, id: string, ref: string | null): void {
+  db.query("UPDATE chat_sessions SET backend_ref = ? WHERE id = ?").run(ref, id);
+}
+
 
 export function updateSession(
   db: Database,

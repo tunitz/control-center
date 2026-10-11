@@ -13,12 +13,21 @@ function migrateSampleTable(db: Database, table: string, perMetric: (m: string) 
   }
 }
 
+/** Adds the backend columns to an existing chat_sessions table. Existing rows read as 'hermes'. */
+function migrateChatSessions(db: Database) {
+  const have = new Set((db.query("PRAGMA table_info(chat_sessions)").all() as { name: string }[]).map(c => c.name));
+  if (!have.has("backend")) db.exec("ALTER TABLE chat_sessions ADD COLUMN backend TEXT NOT NULL DEFAULT 'hermes'");
+  if (!have.has("backend_ref")) db.exec("ALTER TABLE chat_sessions ADD COLUMN backend_ref TEXT");
+  if (!have.has("pi_settings_json")) db.exec("ALTER TABLE chat_sessions ADD COLUMN pi_settings_json TEXT");
+}
+
 /** Chat mirror tables (additive). chat_sessions.id = Hermes session id. FTS5 is kept in sync by triggers. */
 export const CHAT_SCHEMA = `
   CREATE TABLE IF NOT EXISTS chat_sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', title_auto INTEGER NOT NULL DEFAULT 1,
     model TEXT NOT NULL, provider TEXT NOT NULL DEFAULT '', model_locked TEXT, effort TEXT, pinned INTEGER NOT NULL DEFAULT 0,
     archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-    run_state TEXT NOT NULL DEFAULT 'idle', run_id TEXT, unread INTEGER NOT NULL DEFAULT 0);
+    run_state TEXT NOT NULL DEFAULT 'idle', run_id TEXT, unread INTEGER NOT NULL DEFAULT 0,
+    backend TEXT NOT NULL DEFAULT 'hermes', backend_ref TEXT, pi_settings_json TEXT);
   CREATE INDEX IF NOT EXISTS chat_sessions_list ON chat_sessions(archived, pinned, updated_at);
   CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
     seq INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', reasoning TEXT, tools_json TEXT, usage_json TEXT,
@@ -63,6 +72,7 @@ export function openDb(path: string): Database {
   CREATE TABLE IF NOT EXISTS unit_disks (unit_id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, json TEXT NOT NULL);
   `);
   db.exec(CHAT_SCHEMA);
+  migrateChatSessions(db);
   migrateSampleTable(db, "samples_raw", m => [m]);
   migrateSampleTable(db, "samples_1m", m => [`${m}_avg`, `${m}_min`, `${m}_max`]);
   migrateSampleTable(db, "samples_15m", m => [`${m}_avg`, `${m}_min`, `${m}_max`]);

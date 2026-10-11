@@ -8,7 +8,8 @@ import type { Database } from "bun:sqlite";
 import { ChatError, json, readJson } from "./http";
 import { FakeHermes } from "./fake-hermes";
 import { HttpHermes, UnconfiguredHermes, type HermesClient } from "./hermes";
-import { getConfig, getModelDef, getModels, isEffort } from "./models";
+import { PiClient, PI_BRIDGE_DEFAULT_URL } from "./pi";
+import { getConfig, getModelDef, getModels, isEffort, type ChatModel, type ChatModelDef } from "./models";
 import * as S from "./store";
 import type { Effort } from "./store";
 import { toMarkdown, exportFilename } from "./export";
@@ -20,6 +21,8 @@ import { DelegationWatcher } from "./watcher";
 export type ChatContext = {
   db: Database;
   hermes: HermesClient;
+  /** Pi backend client. Absent when no bridge is configured; Pi sessions then answer 503. */
+  pi?: PiClient;
   uploadRoot: string;
   now: () => number;
   /** Reports finished background subagents. Started by index.ts. */
@@ -34,7 +37,7 @@ const managers = new WeakMap<ChatContext, RunManager>();
 export function runsOf(ctx: ChatContext): RunManager {
   let m = managers.get(ctx);
   if (!m) {
-    m = new RunManager({ db: ctx.db, hermes: ctx.hermes, now: () => ctx.now() });
+    m = new RunManager({ db: ctx.db, hermes: ctx.hermes, pi: ctx.pi, now: () => ctx.now() });
     managers.set(ctx, m);
   }
   return m;
@@ -50,9 +53,12 @@ export function createChatContext(
   else if (env.HERMES_API_KEY) {
     hermes = new HttpHermes({ baseUrl: env.HERMES_URL || "http://127.0.0.1:8642", apiKey: env.HERMES_API_KEY });
   } else hermes = new UnconfiguredHermes();
-  const ctx: ChatContext = { db, hermes, uploadRoot: uploadRoot(env), now: () => Date.now(), creditsUrl: env.CREDITS_URL || "http://127.0.0.1:9103/credits" };
+  const pi = env.PI_BRIDGE_TOKEN
+    ? new PiClient({ baseUrl: env.PI_BRIDGE_URL || PI_BRIDGE_DEFAULT_URL, token: env.PI_BRIDGE_TOKEN })
+    : undefined;
+  const ctx: ChatContext = { db, hermes, pi, uploadRoot: uploadRoot(env), now: () => Date.now(), creditsUrl: env.CREDITS_URL || "http://127.0.0.1:9103/credits" };
   recoverRuns(db, ctx.now());
-  const runs = new RunManager({ db, hermes, now: () => ctx.now(), emit: opts.emit });
+  const runs = new RunManager({ db, hermes, pi, now: () => ctx.now(), emit: opts.emit });
   managers.set(ctx, runs);
   ctx.watcher = new DelegationWatcher({ db, hermes, runs, now: () => ctx.now() });
   return ctx;
@@ -77,7 +83,7 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
   }
   const p = url.pathname.replace(/^\/api\/chat/, "");
 
-  if (p === "/models" && method === "GET") return json(await getModels(ctx.db, ctx.hermes));
+  if (p === "/models" && method === "GET") return json(await mergedModels(ctx));
   if (p === "/config" && method === "GET") return json(getConfig(ctx.db));
   if (p === "/credits" && method === "GET") return creditsRoute(ctx);
 
@@ -130,6 +136,11 @@ function safeId(raw: string): string {
   return id;
 }
 
+/** Adds the session's backend to the API object. The store's ChatSession shape is unchanged. */
+function withBackend<T extends S.ChatSession>(ctx: ChatContext, s: T): T & { backend: "hermes" | "pi" } {
+  return { ...s, backend: S.getBackend(ctx.db, s.id)?.backend ?? "hermes" };
+}
+
 function requireSession(ctx: ChatContext, id: string): S.ChatSession {
   const s = S.getSession(ctx.db, id);
   if (!s) throw new ChatError(404, "session not found");
@@ -139,8 +150,21 @@ function requireSession(ctx: ChatContext, id: string): S.ChatSession {
 function listSessionsRoute(url: URL, ctx: ChatContext): Response {
   const archived = url.searchParams.get("archived") === "1";
   const q = url.searchParams.get("q") ?? "";
-  if (q.trim() !== "") return json(S.searchSessions(ctx.db, { q, archived }));
-  return json(S.listSessions(ctx.db, { archived }));
+  if (q.trim() !== "") return json(S.searchSessions(ctx.db, { q, archived }).map(s => withBackend(ctx, s)));
+  return json(S.listSessions(ctx.db, { archived }).map(s => withBackend(ctx, s)));
+}
+
+/** Hermes models (as before, each tagged 'hermes') plus Pi models when the bridge answers. A down bridge drops Pi silently. */
+async function mergedModels(ctx: ChatContext): Promise<(ChatModel & { backend: "hermes" | "pi" })[]> {
+  const hermes = (await getModels(ctx.db, ctx.hermes)).map(m => ({ ...m, backend: "hermes" as const }));
+  if (!ctx.pi) return hermes;
+  let pi: ChatModelDef[] = [];
+  try {
+    pi = await ctx.pi.listModels();
+  } catch {
+    return hermes;
+  }
+  return [...hermes, ...pi.map(m => ({ ...m, online: true, backend: "pi" as const }))];
 }
 
 function resolveModel(ctx: ChatContext, model: unknown): { model: string; provider: string } {
@@ -158,6 +182,9 @@ function parseEffort(v: unknown): Effort | null {
 
 async function createSessionRoute(req: Request, ctx: ChatContext): Promise<Response> {
   const body = await readJson(req);
+  const backend = body.backend === undefined ? "hermes" : body.backend;
+  if (backend !== "hermes" && backend !== "pi") throw new ChatError(400, "backend must be 'hermes' or 'pi'");
+  if (backend === "pi") return createPiSessionRoute(body, ctx);
   const cfg = getConfig(ctx.db);
   const picked = body.model === undefined ? { model: cfg.defaultModel, provider: getModelDef(ctx.db, cfg.defaultModel)!.provider } : resolveModel(ctx, body.model);
   const effort: Effort | null = body.effort === undefined ? cfg.defaultEffort : parseEffort(body.effort);
@@ -172,12 +199,47 @@ async function createSessionRoute(req: Request, ctx: ChatContext): Promise<Respo
   const session = S.createSession(ctx.db, {
     id, model: picked.model, provider: picked.provider, effort, now: ctx.now(), lockedModel: picked.model,
   });
-  return json(session, 201);
+  return json({ ...session, backend: "hermes" }, 201);
+}
+
+/** Pi sessions need an explicit model: Pi models are not in the Hermes catalogue. The chat is started on the bridge and its ref stored. */
+async function createPiSessionRoute(body: Record<string, any>, ctx: ChatContext): Promise<Response> {
+  if (!ctx.pi) throw new ChatError(503, "pi backend not configured");
+  if (typeof body.model !== "string" || body.model === "") throw new ChatError(400, "model is required for pi sessions");
+  const model = await piModelDef(ctx, body.model);
+  const effort: Effort | null = body.effort === undefined ? null : parseEffort(body.effort);
+
+  const id = await ctx.pi.createSession();
+  try {
+    await ctx.pi.lockModel(id, model.id, model.provider, ctx.pi.sessionRef(id));
+  } catch (e) {
+    await ctx.pi.deleteSession(id).catch(() => {});
+    throw e;
+  }
+  const session = S.createSession(ctx.db, {
+    id, model: model.id, provider: model.provider, effort, now: ctx.now(), lockedModel: model.id,
+    backend: "pi", backendRef: ctx.pi.sessionRef(id),
+  });
+  return json({ ...session, backend: "pi" }, 201);
+}
+
+/** Resolves a Pi model from the bridge's live list. Unknown or unreachable is a 400/503; nothing is stored. */
+async function piModelDef(ctx: ChatContext, model: string): Promise<{ id: string; provider: string }> {
+  let list;
+  try {
+    list = await ctx.pi!.listModels();
+  } catch {
+    throw new ChatError(503, "pi bridge unreachable");
+  }
+  const def = list.find(m => m.id === model);
+  if (!def) throw new ChatError(400, "unknown model");
+  return { id: def.id, provider: def.provider };
 }
 
 async function patchSessionRoute(req: Request, id: string, ctx: ChatContext): Promise<Response> {
   requireSession(ctx, id);
   const body = await readJson(req);
+  if (body.backend !== undefined) throw new ChatError(400, "backend cannot be changed");
   const patch: Parameters<typeof S.updateSession>[2] = {};
   if (body.title !== undefined) {
     if (typeof body.title !== "string" || body.title.trim() === "") throw new ChatError(400, "title must be a non-empty string");
@@ -198,16 +260,19 @@ async function patchSessionRoute(req: Request, id: string, ctx: ChatContext): Pr
   }
   if (body.effort !== undefined) patch.effort = parseEffort(body.effort);
   const updated = S.updateSession(ctx.db, id, patch, ctx.now());
-  return json(updated);
+  return json(withBackend(ctx, updated!));
 }
 
 async function deleteSessionRoute(id: string, ctx: ChatContext): Promise<Response> {
   const s = requireSession(ctx, id);
   if (s.runState !== "idle") throw new ChatError(409, "run active");
-  await ctx.hermes.deleteSession(id);
+  const b = S.getBackend(ctx.db, id);
+  if (b?.backend === "pi") await ctx.pi?.deleteSession(id, b.ref);
+  else await ctx.hermes.deleteSession(id);
   S.deleteSession(ctx.db, id);
   rmSync(buildSessionDir(ctx.uploadRoot, id), { recursive: true, force: true });
   return json({ ok: true });
+
 }
 
 function messagesRoute(url: URL, id: string, ctx: ChatContext): Response {

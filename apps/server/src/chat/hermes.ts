@@ -4,6 +4,7 @@
  * `parseFrame` maps raw Hermes SSE events to typed frames; it is pure and unit-tested.
  */
 import { ChatError } from "./http";
+import type { ChatBackend } from "./backend";
 
 export type ModelOptions = {
   unavailable_models: string[];
@@ -30,6 +31,9 @@ export type StartRunArgs = {
   message: string | ContentPart[];
   model: string;
   effort?: "off" | "low" | "medium" | "high" | null;
+  /** Pi only: the model's provider and the session's backend ref. Hermes never receives these. */
+  provider?: string;
+  ref?: string | null;
 };
 
 /** A finished background subagent batch: Hermes writes it into the session transcript (no push). */
@@ -38,16 +42,8 @@ export type Completion = { id: number; ts: number; delegationId: string | null }
 export type Dispatch = { delegationId: string; ts: number };
 export type Delegations = { done: Completion[]; dispatched: Dispatch[] };
 
-export interface HermesClient {
-  createSession(): Promise<string>;
-  deleteSession(id: string): Promise<void>;
-  lockModel(id: string, model: string, provider: string): Promise<void>;
+export interface HermesClient extends ChatBackend {
   modelOptions(): Promise<ModelOptions>;
-  startRun(args: StartRunArgs): Promise<{ runId: string; frames: AsyncIterable<HermesFrame> }>;
-  stopRun(runId: string): Promise<void>;
-  steerRun(runId: string, message: string): Promise<void>;
-  /** Recent background-subagent dispatches and completions of a session (cheap HTTP read, no model call). */
-  delegations?(sessionId: string): Promise<Delegations>;
 }
 
 /** Used when no transport is configured. Every call fails with 503. */

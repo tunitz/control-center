@@ -7,6 +7,8 @@
 import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import type { HermesClient, HermesFrame, ContentPart } from "./hermes";
+import type { ChatBackend } from "./backend";
+import type { PiClient } from "./pi";
 import { ChatError } from "./http";
 import * as S from "./store";
 import type { NewAttachment, ToolRow, Effort, ChatMessage } from "./store";
@@ -59,6 +61,8 @@ type RunRec = {
 export type RunManagerOptions = {
   db: Database;
   hermes: HermesClient;
+  /** Pi backend. Sessions with backend 'pi' dispatch here; absent means no Pi sessions can run. */
+  pi?: PiClient;
   now: () => number;
   emit?: (event: string, data: unknown) => void;
   ringSize?: number;
@@ -70,6 +74,7 @@ const errMsg = (e: unknown): string => (e instanceof ChatError ? e.message : "he
 export class RunManager {
   private readonly db: Database;
   private readonly hermes: HermesClient;
+  private readonly pi?: PiClient;
   private readonly now: () => number;
   private readonly emit: (event: string, data: unknown) => void;
   private readonly ringSize: number;
@@ -80,6 +85,7 @@ export class RunManager {
   constructor(opts: RunManagerOptions) {
     this.db = opts.db;
     this.hermes = opts.hermes;
+    this.pi = opts.pi;
     this.now = opts.now;
     this.emit = opts.emit ?? (() => {});
     this.ringSize = opts.ringSize ?? RING_SIZE;
@@ -101,10 +107,22 @@ export class RunManager {
     return this.reserved.size;
   }
 
-  /** Locks the model in Hermes only when it differs from the stored locked model. */
+  /** The client for a session's backend. Pi sessions with no configured bridge fail the run (503). */
+  private clientFor(sessionId: string): { client: ChatBackend; backend: "hermes" | "pi" } {
+    const b = S.getBackend(this.db, sessionId);
+    if (b?.backend === "pi") {
+      if (!this.pi) throw new ChatError(503, "pi backend not configured");
+      return { client: this.pi, backend: "pi" };
+    }
+    return { client: this.hermes, backend: "hermes" };
+  }
+
+  /** Locks the model in the session's backend only when it differs from the stored locked model. */
   async ensureModel(sessionId: string, model: string, provider: string): Promise<void> {
     if (S.getLockedModel(this.db, sessionId) === model) return;
-    await this.hermes.lockModel(sessionId, model, provider);
+    const { client, backend } = this.clientFor(sessionId);
+    if (backend === "pi") await client.lockModel(sessionId, model, provider, S.getBackend(this.db, sessionId)?.ref ?? null);
+    else await client.lockModel(sessionId, model, provider);
     S.setLockedModel(this.db, sessionId, model);
   }
 
@@ -223,7 +241,7 @@ export class RunManager {
     }
     if (rec.finished) return;
     rec.stopRequested = true;
-    if (rec.hermesRunId) await this.hermes.stopRun(rec.hermesRunId);
+    if (rec.hermesRunId) await this.clientFor(rec.sessionId).client.stopRun(rec.hermesRunId);
   }
 
   /** Forwards a steer to Hermes. 409 'run finished' once the run is over. */
@@ -236,7 +254,7 @@ export class RunManager {
     if (rec.finished) throw new ChatError(409, "run finished");
     await rec.started;
     if (rec.finished || !rec.hermesRunId) throw new ChatError(409, "run finished");
-    await this.hermes.steerRun(rec.hermesRunId, message);
+    await this.clientFor(rec.sessionId).client.steerRun(rec.hermesRunId, message);
   }
 
   /* ---------- internals ---------- */
@@ -244,8 +262,12 @@ export class RunManager {
   private async pump(rec: RunRec, input: RunInput): Promise<void> {
     let handle: { runId: string; frames: AsyncIterable<HermesFrame> };
     try {
-      handle = await this.hermes.startRun({
+      const { client, backend } = this.clientFor(rec.sessionId);
+      const sess = S.getSession(this.db, rec.sessionId);
+      const ref = backend === "pi" ? S.getBackend(this.db, rec.sessionId)?.ref ?? null : undefined;
+      handle = await client.startRun({
         sessionId: rec.sessionId, message: input.message, model: input.model, effort: input.effort,
+        ...(backend === "pi" ? { provider: sess?.provider, ref } : {}),
       });
     } catch (e) {
       rec.resolveStarted();
@@ -254,7 +276,7 @@ export class RunManager {
     }
     rec.hermesRunId = handle.runId;
     rec.resolveStarted();
-    if (rec.stopRequested) this.hermes.stopRun(handle.runId).catch(() => {});
+    if (rec.stopRequested) this.clientFor(rec.sessionId).client.stopRun(handle.runId).catch(() => {});
     try {
       for await (const f of handle.frames) {
         this.apply(rec, f);
