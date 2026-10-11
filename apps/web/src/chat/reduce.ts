@@ -33,6 +33,11 @@ export function applyEvent(view: RunView, ev: RunEvent): RunView {
       };
     case "approval":
       return { ...v, approvals: [...view.approvals, { command: d.command ?? null, note: String(d.note ?? "needs approval in Hermes") }] };
+    case "todo": {
+      if (!Array.isArray(d.todos)) return v;
+      const todos = d.todos.filter((t: any) => typeof t?.id === "string" && typeof t?.content === "string");
+      return { ...v, message: { ...m, todos } };
+    }
     case "usage":
       return { ...v, message: { ...m, usage: { input: Number(d.input) || 0, output: Number(d.output) || 0 } } };
     case "done":

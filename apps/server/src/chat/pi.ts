@@ -11,7 +11,7 @@
 import { randomUUID } from "node:crypto";
 import type { ChatBackend } from "./backend";
 import type { ChatModelDef } from "./models";
-import type { ContentPart, HermesFrame, StartRunArgs } from "./hermes";
+import type { ContentPart, HermesFrame, StartRunArgs, TodoItem } from "./hermes";
 import { ChatError } from "./http";
 
 export const PI_BRIDGE_DEFAULT_URL = "http://127.0.0.1:3050";
@@ -204,6 +204,20 @@ function splitContent(message: string | ContentPart[]): { text: string; images: 
   return { text: texts.join("\n"), images };
 }
 
+const TODO_STATUS = new Set(["pending", "in_progress", "completed"]);
+
+/** Valid items only; null when the value is not a list at all. */
+function parseTodos(v: unknown): TodoItem[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: TodoItem[] = [];
+  for (const t of v) {
+    if (typeof t?.id === "string" && typeof t?.content === "string" && TODO_STATUS.has(t?.status)) {
+      out.push({ id: t.id, content: t.content, status: t.status });
+    }
+  }
+  return out;
+}
+
 /** Per-run mapping state: Pi reports usage per turn, the UI wants one running total. */
 export type PiMapState = { input: number; output: number };
 export const newPiMapState = (): PiMapState => ({ input: 0, output: 0 });
@@ -243,14 +257,18 @@ export function mapPiEvent(event: string, data: any, model: string, st: PiMapSta
       const args = typeof data?.args === "object" && data.args !== null ? (data.args as Record<string, unknown>) : null;
       return [{ type: "tool.started", id: String(data?.toolCallId ?? ""), name, args, preview: argPreview(name, args) }];
     }
-    case "tool_execution_end":
-      return [{
+    case "tool_execution_end": {
+      const done: HermesFrame = {
         type: "tool.completed",
         id: String(data?.toolCallId ?? ""),
         ok: data?.isError !== true,
         durationMs: typeof data?.durationMs === "number" ? data.durationMs : null,
         preview: resultPreview(data?.result),
-      }];
+      };
+      // The todo list comes from the tool result's details (full replace), never from the widget.
+      const todos = data?.toolName === "todo_write" && data?.isError !== true ? parseTodos(data?.result?.details?.todos) : null;
+      return todos ? [done, { type: "todo", todos }] : [done];
+    }
     case "message_end": {
       const m = data?.message;
       if (m?.role !== "assistant" || typeof m?.usage !== "object" || m.usage === null) return [];

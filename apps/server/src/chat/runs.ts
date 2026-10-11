@@ -6,7 +6,7 @@
  */
 import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import type { HermesClient, HermesFrame, ContentPart } from "./hermes";
+import type { HermesClient, HermesFrame, ContentPart, TodoItem } from "./hermes";
 import type { ChatBackend } from "./backend";
 import type { PiClient } from "./pi";
 import { ChatError } from "./http";
@@ -45,6 +45,7 @@ type RunRec = {
   reasoning: string | null;
   tools: ToolRow[];
   usage: { input: number; output: number } | null;
+  todos: TodoItem[] | null;
   hermesRunId: string | null;
   stopRequested: boolean;
   finished: boolean;
@@ -153,7 +154,7 @@ export class RunManager {
     let resolveDone!: () => void;
     const rec: RunRec = {
       runId, sessionId, assistantId, model: input.model, userText: input.text, startedAt: now, firstTurn,
-      text: "", reasoning: null, tools: [], usage: null, hermesRunId: null, stopRequested: false,
+      text: "", reasoning: null, tools: [], usage: null, todos: null, hermesRunId: null, stopRequested: false,
       finished: false, needsApproval: false, approvalId: null, seq: 0, events: [], listeners: new Set(),
       started: new Promise<void>(r => (resolveStarted = r)), resolveStarted,
       done: new Promise<void>(r => (resolveDone = r)), resolveDone,
@@ -348,6 +349,11 @@ export class RunManager {
         this.addEvent(rec, "approval", { command: f.command, note: f.note, ...(f.id ? { id: f.id, options: f.options ?? ["approve", "deny"] } : {}) });
         this.emitRun(rec.sessionId, rec.runId, "needs_approval");
         return;
+      case "todo":
+        rec.todos = f.todos;
+        this.persist(rec);
+        this.addEvent(rec, "todo", { todos: f.todos });
+        return;
       case "usage":
         rec.usage = { input: f.input, output: f.output };
         this.persist(rec);
@@ -369,7 +375,7 @@ export class RunManager {
     const err = final === "failed" ? (error ?? "run failed") : null;
     const finalModel = model ?? rec.model;
     S.patchMessage(this.db, rec.assistantId, {
-      text: rec.text, reasoning: rec.reasoning, tools: rec.tools, usage: rec.usage,
+      text: rec.text, reasoning: rec.reasoning, tools: rec.tools, usage: rec.usage, todos: rec.todos,
       status: final, error: err, model: finalModel,
     });
     rec.finished = true;
@@ -396,7 +402,7 @@ export class RunManager {
 
   private persist(rec: RunRec): void {
     S.patchMessage(this.db, rec.assistantId, {
-      text: rec.text, reasoning: rec.reasoning, tools: rec.tools, usage: rec.usage,
+      text: rec.text, reasoning: rec.reasoning, tools: rec.tools, usage: rec.usage, todos: rec.todos,
     });
   }
 

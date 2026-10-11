@@ -8,11 +8,12 @@ export type ChatSession = {
 };
 export type SessionHit = ChatSession & { snippet: string };
 export type Attachment = { id: string; kind: "image" | "file"; name: string; mime: string; size: number; w: number | null; h: number | null; url: string };
+export type TodoItem = { id: string; content: string; status: "pending" | "in_progress" | "completed" };
 export type ToolRow = { id: string; name: string; args: Record<string, unknown> | null; preview: string | null; status: "running" | "ok" | "failed"; durationMs: number | null };
 export type MessageStatus = "complete" | "failed" | "interrupted" | "running";
 export type ChatMessage = {
   id: string; seq: number; role: "user" | "assistant"; text: string; reasoning: string | null;
-  tools: ToolRow[]; usage: { input: number; output: number } | null; status: MessageStatus;
+  tools: ToolRow[]; usage: { input: number; output: number } | null; todos?: TodoItem[] | null; status: MessageStatus;
   runId: string | null; model: string | null; attachments: Attachment[]; createdAt: number; error: string | null;
 };
 export type ChatConfig = { defaultModel: string; defaultEffort: Effort | null; maxUploadMb: number; contextWindow: Record<string, number> };

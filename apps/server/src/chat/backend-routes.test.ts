@@ -211,3 +211,22 @@ test("approval on a Hermes run is refused (Hermes approvals stay read-only)", as
   expect(r.status).toBe(409);
   await waitIdle(s.id);
 });
+
+test("a Pi todo_write is streamed as a todo event and persisted on the assistant message", async () => {
+  const { body: s } = await js(await run(req("POST", "/api/chat/sessions", { backend: "pi", model: "deepseek-pro" })));
+  const sent = await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("TODO please"))));
+  await waitIdle(s.id);
+  const want = [{ id: "1", content: "step one", status: "completed" as const }, { id: "2", content: "step two", status: "in_progress" as const }];
+  expect(S.getMessage(ctx.db, sent.body.assistantMessage.id)!.todos).toEqual(want);
+  const msgs = await js(await run(req("GET", `/api/chat/sessions/${s.id}/messages`)));
+  expect(msgs.body.messages.find((m: any) => m.role === "assistant").todos).toEqual(want);
+  const ev = ctx.db.query("SELECT data FROM chat_run_events WHERE run_id = ? AND type = 'todo'").all(sent.body.runId) as { data: string }[];
+  expect(ev.map((e) => JSON.parse(e.data))).toEqual([{ todos: want }]);
+});
+
+test("a message without todos reports todos: null (also for old rows)", async () => {
+  const { body: s } = await js(await run(req("POST", "/api/chat/sessions", { backend: "pi", model: "deepseek-pro" })));
+  const sent = await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("hello"))));
+  await waitIdle(s.id);
+  expect(S.getMessage(ctx.db, sent.body.assistantMessage.id)!.todos).toBeNull();
+});

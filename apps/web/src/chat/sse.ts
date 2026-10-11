@@ -1,6 +1,6 @@
 import type { RunEvent } from "./types";
 
-const TYPES = ["run.started", "delta", "reasoning", "tool.started", "tool.completed", "approval", "usage", "done"] as const;
+const TYPES = ["run.started", "delta", "reasoning", "tool.started", "tool.completed", "approval", "todo", "usage", "done"] as const;
 
 export type RunStream = { close(): void };
 

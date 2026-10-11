@@ -1,5 +1,6 @@
 /** SQLite access for chat tables. All values are bound parameters. */
 import type { Database } from "bun:sqlite";
+import type { TodoItem } from "./hermes";
 
 export const EFFORTS = ["off", "low", "medium", "high"] as const;
 export type Effort = (typeof EFFORTS)[number];
@@ -52,6 +53,8 @@ export type ChatMessage = {
   reasoning: string | null;
   tools: ToolRow[];
   usage: { input: number; output: number } | null;
+  /** Pi: last todo list the agent wrote during this turn. null when none. */
+  todos: TodoItem[] | null;
   status: "complete" | "failed" | "interrupted" | "running";
   runId: string | null;
   model: string | null;
@@ -208,7 +211,7 @@ export function insertMessage(
 
 type MessageRow = {
   id: string; seq: number; role: string; text: string; reasoning: string | null; tools_json: string | null;
-  usage_json: string | null; status: string; run_id: string | null; model: string | null; error: string | null; created_at: number;
+  usage_json: string | null; todos_json: string | null; status: string; run_id: string | null; model: string | null; error: string | null; created_at: number;
 };
 
 function attachmentsFor(db: Database, messageId: string): AttachmentView[] {
@@ -227,6 +230,7 @@ function toMessage(db: Database, r: MessageRow): ChatMessage {
     reasoning: r.reasoning,
     tools: r.tools_json ? (JSON.parse(r.tools_json) as ChatMessage["tools"]) : [],
     usage: r.usage_json ? (JSON.parse(r.usage_json) as ChatMessage["usage"]) : null,
+    todos: r.todos_json ? (JSON.parse(r.todos_json) as ChatMessage["todos"]) : null,
     status: r.status as ChatMessage["status"],
     runId: r.run_id,
     model: r.model,
@@ -241,7 +245,7 @@ export function listMessages(
   db: Database, sessionId: string, opts: { before?: number; limit?: number } = {},
 ): { messages: ChatMessage[]; hasMore: boolean } {
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 100);
-  const cols = "id, seq, role, text, reasoning, tools_json, usage_json, status, run_id, model, error, created_at";
+  const cols = "id, seq, role, text, reasoning, tools_json, usage_json, todos_json, status, run_id, model, error, created_at";
   const rows = opts.before === undefined
     ? db.query(`SELECT ${cols} FROM chat_messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?`).all(sessionId, limit + 1)
     : db.query(`SELECT ${cols} FROM chat_messages WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`)
@@ -255,7 +259,7 @@ export function listMessages(
 /** Every message in ascending order (used by export). */
 export function listAllMessages(db: Database, sessionId: string): ChatMessage[] {
   const rows = db.query(
-    `SELECT id, seq, role, text, reasoning, tools_json, usage_json, status, run_id, model, error, created_at
+    `SELECT id, seq, role, text, reasoning, tools_json, usage_json, todos_json, status, run_id, model, error, created_at
      FROM chat_messages WHERE session_id = ? ORDER BY seq ASC`,
   ).all(sessionId) as MessageRow[];
   return rows.map(r => toMessage(db, r));
@@ -338,7 +342,7 @@ export function searchSessions(
 /** One message by id, with attachments (used by the run manager and tests). */
 export function getMessage(db: Database, id: string): ChatMessage | null {
   const r = db.query(
-    "SELECT id, seq, role, text, reasoning, tools_json, usage_json, status, run_id, model, error, created_at FROM chat_messages WHERE id = ?",
+    "SELECT id, seq, role, text, reasoning, tools_json, usage_json, todos_json, status, run_id, model, error, created_at FROM chat_messages WHERE id = ?",
   ).get(id) as MessageRow | null;
   return r ? toMessage(db, r) : null;
 }
@@ -355,6 +359,7 @@ export function patchMessage(
   id: string,
   p: {
     text?: string; reasoning?: string | null; tools?: ToolRow[]; usage?: { input: number; output: number } | null;
+    todos?: TodoItem[] | null;
     status?: ChatMessage["status"]; error?: string | null; model?: string | null;
   },
 ): void {
@@ -364,6 +369,7 @@ export function patchMessage(
   if (p.reasoning !== undefined) { sets.push("reasoning = ?"); params.push(p.reasoning); }
   if (p.tools !== undefined) { sets.push("tools_json = ?"); params.push(JSON.stringify(p.tools)); }
   if (p.usage !== undefined) { sets.push("usage_json = ?"); params.push(p.usage ? JSON.stringify(p.usage) : null); }
+  if (p.todos !== undefined) { sets.push("todos_json = ?"); params.push(p.todos ? JSON.stringify(p.todos) : null); }
   if (p.status !== undefined) { sets.push("status = ?"); params.push(p.status); }
   if (p.error !== undefined) { sets.push("error = ?"); params.push(p.error); }
   if (p.model !== undefined) { sets.push("model = ?"); params.push(p.model); }

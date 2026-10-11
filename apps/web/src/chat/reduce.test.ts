@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect, describe } from "bun:test";
 import { newRunView, applyEvent, reduceEvents, showReasoning, isAbnormal } from "./reduce";
 import type { ChatMessage } from "./types";
 
@@ -71,4 +71,31 @@ test("failed and interrupted are abnormal, complete and running are not", () => 
   expect(isAbnormal({ ...base, status: "interrupted" })).toBe(true);
   expect(isAbnormal({ ...base, status: "complete" })).toBe(false);
   expect(isAbnormal({ ...base, status: "running" })).toBe(false);
+});
+
+describe("todo events", () => {
+  const base = { id: "a1", seq: 2, role: "assistant", text: "", reasoning: null, tools: [], usage: null, status: "running", runId: "r", model: "m", attachments: [], createdAt: 0, error: null } as any;
+  const t1 = [{ id: "1", content: "a", status: "in_progress" }];
+  const t2 = [{ id: "1", content: "a", status: "completed" }, { id: "2", content: "b", status: "pending" }];
+  test("a todo event replaces the whole list", () => {
+    let v = newRunView(base);
+    v = applyEvent(v, { id: 1, type: "todo", data: { todos: t1 } });
+    expect(v.message.todos).toEqual(t1);
+    v = applyEvent(v, { id: 2, type: "todo", data: { todos: t2 } });
+    expect(v.message.todos).toEqual(t2);
+  });
+  test("an empty list clears; a replayed event is ignored", () => {
+    let v = applyEvent(newRunView(base), { id: 1, type: "todo", data: { todos: t1 } });
+    v = applyEvent(v, { id: 1, type: "todo", data: { todos: t2 } });
+    expect(v.message.todos).toEqual(t1);
+    v = applyEvent(v, { id: 2, type: "todo", data: { todos: [] } });
+    expect(v.message.todos).toEqual([]);
+  });
+  test("a malformed payload leaves the list alone", () => {
+    const v = applyEvent(applyEvent(newRunView(base), { id: 1, type: "todo", data: { todos: t1 } }), { id: 2, type: "todo", data: { todos: "x" } });
+    expect(v.message.todos).toEqual(t1);
+  });
+  test("newRunView starts with no todos", () => {
+    expect(newRunView(base).message.todos ?? null).toBeNull();
+  });
 });

@@ -5,6 +5,7 @@
  * (pi-bridge/src/chat.ts). The run scenario is chosen from the prompt text:
  *   contains "SLOW"  streams a partial, waits for abort, settles stopReason "aborted"
  *   contains "ERR"   settles stopReason "error" with errorMessage "boom: provider down"
+ *   contains "TODO"  runs one todo_write (2 items), then answers "Hello world"
  *   contains "TOOL"  runs one bash tool call (start, end), then answers "Hello world"
  *   contains "GATE"  runs one bash tool call that needs approval: emits extension_ui_request
  *                    confirm (id "ui-1") and waits for POST ui_response; confirmed -> tool ok,
@@ -243,7 +244,7 @@ export class FakePiBridge {
   private run(rec: ChatRec, message: string): void {
     rec.busy = true;
     rec.aborted = false;
-    const scenario = message.includes("SLOW") ? "slow" : message.includes("ERR") ? "err" : message.includes("GATE") ? "gate" : message.includes("TOOL") ? "tool" : "ok";
+    const scenario = message.includes("SLOW") ? "slow" : message.includes("ERR") ? "err" : message.includes("GATE") ? "gate" : message.includes("TODO") ? "todo" : message.includes("TOOL") ? "tool" : "ok";
     const user = { role: "user", content: [{ type: "text", text: message }], timestamp: Date.now() };
     const tick = () => new Promise<void>((r) => setTimeout(r, 0));
     const update = (ae: any) => this.emit(rec, "message_update", { type: "message_update", usage: {}, assistantMessageEvent: ae });
@@ -268,6 +269,14 @@ export class FakePiBridge {
         this.emit(rec, "message_end", { type: "message_end", message: msg });
         this.settle(rec, [user, msg], msg);
         return;
+      }
+      if (scenario === "todo") {
+        const todos = [{ id: "1", content: "step one", status: "completed" }, { id: "2", content: "step two", status: "in_progress" }];
+        this.emit(rec, "tool_execution_start", { type: "tool_execution_start", toolCallId: "todo-1", toolName: "todo_write", args: { todos } });
+        this.emit(rec, "tool_execution_end", {
+          type: "tool_execution_end", toolCallId: "todo-1", toolName: "todo_write", isError: false,
+          result: { content: [{ type: "text", text: "Todo list updated (2 items)" }], details: { todos } },
+        });
       }
       if (scenario === "tool" || scenario === "gate") {
         const args = { command: "echo hi > /tmp/x", timeout: null };

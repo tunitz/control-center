@@ -96,3 +96,31 @@ test("process_exit -> done failed", () => {
 test("unknown events map to nothing", () => {
   expect(map(newPiMapState(), "turn_start", { type: "turn_start" })).toEqual([]);
 });
+
+test("todo_write tool_execution_end -> tool.completed plus a todo frame from result.details (not the widget)", () => {
+  const todos = [
+    { id: "1", content: "read code", status: "completed" as const },
+    { id: "2", content: "write test", status: "in_progress" as const },
+  ];
+  const f = map(newPiMapState(), "tool_execution_end", {
+    toolCallId: "t1", toolName: "todo_write", isError: false,
+    result: { content: [{ type: "text", text: "Todo list updated (2 items)" }], details: { todos } },
+  });
+  expect(f.map((x) => x.type)).toEqual(["tool.completed", "todo"]);
+  expect(f[1]).toEqual({ type: "todo", todos });
+});
+
+test("a failed todo_write, or a malformed list, produces no todo frame; bad items are dropped", () => {
+  const st = newPiMapState();
+  const end = (isError: boolean, details: unknown) => map(st, "tool_execution_end", { toolCallId: "t", toolName: "todo_write", isError, result: { content: [], details } });
+  expect(end(true, { todos: [{ id: "1", content: "x", status: "pending" }] }).map((x) => x.type)).toEqual(["tool.completed"]);
+  expect(end(false, undefined).map((x) => x.type)).toEqual(["tool.completed"]);
+  expect(end(false, { todos: "nope" }).map((x) => x.type)).toEqual(["tool.completed"]);
+  const f = end(false, { todos: [{ id: "1", content: "ok", status: "pending" }, { id: 2, content: "bad id" }, { id: "3", content: "bad status", status: "weird" }] });
+  expect(f[1]).toEqual({ type: "todo", todos: [{ id: "1", content: "ok", status: "pending" }] });
+});
+
+test("an empty list clears the todos", () => {
+  const f = map(newPiMapState(), "tool_execution_end", { toolCallId: "t", toolName: "todo_write", isError: false, result: { content: [], details: { todos: [] } } });
+  expect(f[1]).toEqual({ type: "todo", todos: [] });
+});

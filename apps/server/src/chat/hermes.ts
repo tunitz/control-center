@@ -12,6 +12,8 @@ export type ModelOptions = {
 };
 
 /** Typed frames a run produces (see contract "run events"). */
+export type TodoItem = { id: string; content: string; status: "pending" | "in_progress" | "completed" };
+
 export type HermesFrame =
   | { type: "run.started"; runId: string; sessionId: string; assistantMessageId: string; model: string }
   | { type: "delta"; text: string }
@@ -20,6 +22,7 @@ export type HermesFrame =
   | { type: "tool.completed"; id: string; ok: boolean; durationMs: number | null; preview: string | null }
   | { type: "approval"; command: string | null; note: string; id?: string; options?: string[] }
   | { type: "usage"; input: number; output: number }
+  | { type: "todo"; todos: TodoItem[] }
   | { type: "done"; status: "complete" | "failed" | "interrupted"; error: string | null; model: string | null };
 
 export type ContentPart =
