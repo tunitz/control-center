@@ -17,29 +17,34 @@ export const COMMANDS = [
 ] as const;
 
 /** Commands the page handles (they need the active chat); the rest the composer handles itself. */
-export const PAGE_COMMANDS = ["retry", "title", "export", "pin", "archive", "delete", "steer", "credits"] as const;
+export const PAGE_COMMANDS = ["retry", "title", "export", "pin", "archive", "delete", "steer", "credits", "compact"] as const;
 
-export const helpText = () => COMMANDS.map(c => `/${c.name}  ${c.desc}`).join("\n");
+/** Commands that exist only for one backend. */
+export const PI_COMMANDS = [{ name: "compact", desc: "Shrink this chat's context" }] as const;
+type AnyCommand = { name: string; desc: string };
+const commandsFor = (backend: "hermes" | "pi"): readonly AnyCommand[] => (backend === "pi" ? [...COMMANDS, ...PI_COMMANDS] : COMMANDS);
+
+export const helpText = (backend: "hermes" | "pi" = "hermes") => commandsFor(backend).map(c => `/${c.name}  ${c.desc}`).join("\n");
 export const unknownText = (name: string) => `Unknown command /${name}. Type /help to list them.`;
 
 export type Parsed = { kind: "command"; name: string; arg: string } | { kind: "unknown"; name: string } | null;
 
 /** Parses a message that starts with "/". Null for plain text. */
-export function parseSlash(text: string): Parsed {
+export function parseSlash(text: string, backend: "hermes" | "pi" = "hermes"): Parsed {
   const t = text.trim();
   if (!t.startsWith("/")) return null;
   const m = /^\/(\S*)\s*(.*)$/s.exec(t);
   const name = (m?.[1] ?? "").toLowerCase();
   const arg = (m?.[2] ?? "").trim();
-  if (COMMANDS.some(c => c.name === name)) return { kind: "command", name, arg };
+  if (commandsFor(backend).some(c => c.name === name)) return { kind: "command", name, arg };
   return { kind: "unknown", name };
 }
 
 /** Palette entries while the user is still typing the command word (no space yet). */
-export function suggestions(text: string): (typeof COMMANDS)[number][] {
+export function suggestions(text: string, backend: "hermes" | "pi" = "hermes"): AnyCommand[] {
   if (!text.startsWith("/") || /\s/.test(text)) return [];
   const q = text.slice(1).toLowerCase();
-  return COMMANDS.filter(c => c.name.startsWith(q));
+  return commandsFor(backend).filter(c => c.name.startsWith(q));
 }
 
 const EFFORT_WORDS: Record<string, Effort> = { off: "off", low: "low", med: "medium", medium: "medium", high: "high" };

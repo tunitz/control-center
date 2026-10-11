@@ -294,14 +294,14 @@ test("startRun sends the effort as thinking and the chat's stored settings with 
   expect(startBodies(b).at(-1)).toMatchObject({ thinking: "high", settings: { steeringMode: "all", autoRetry: false } });
 });
 
-test("startRun with no effort and no settings sends neither", async () => {
+test("startRun with no effort and no stored settings sends no thinking, and names tools:null so a cleared override takes effect", async () => {
   const b = bridge();
   const pi = new PiClient({ baseUrl: b.url, token: b.token });
   const id = await pi.createSession();
   await drain((await pi.startRun({ sessionId: id, message: "hi", ...RUN })).frames);
   const last = startBodies(b).at(-1);
   expect(last).not.toHaveProperty("thinking");
-  expect(last).not.toHaveProperty("settings");
+  expect(last).toMatchObject({ settings: { tools: null } });
 });
 
 test("compact starts the chat from its session file, compacts and returns Pi's numbers", async () => {

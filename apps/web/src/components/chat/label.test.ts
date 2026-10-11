@@ -11,3 +11,9 @@ test("shortModelLabel keeps labels without the prefix and never returns empty", 
   expect(shortModelLabel("Claude")).toBe("Claude");
   expect(shortModelLabel("Claude  ")).toBe("Claude  ".trim());
 });
+
+test("shortModelLabel also drops the DeepSeek vendor prefix so Pi's long names fit one toolbar row", () => {
+  expect(shortModelLabel("DeepSeek V4.1 Flash")).toBe("V4.1 Flash");
+  expect(shortModelLabel("DeepSeek V4 Pro")).toBe("V4 Pro");
+  expect(shortModelLabel("deepseek")).toBe("deepseek");
+});

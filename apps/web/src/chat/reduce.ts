@@ -6,6 +6,12 @@ export function newRunView(base: ChatMessage): RunView {
   return { message: { ...base, text: "", reasoning: null, tools: [], usage: null, status: "running", error: null }, lastId: 0, approvals: [], done: false };
 }
 
+/** The first tool result after a Pi approval is its answer; a run that ends first leaves it unanswered. */
+function resolveApprovals(list: Approval[], to: "approved" | "denied" | "ended"): Approval[] {
+  if (!list.some(a => a.status === "pending")) return list;
+  return list.map(a => (a.status === "pending" ? { ...a, status: to } : a));
+}
+
 /** Applies one SSE event. Events at or below lastId are duplicates (replay) and are skipped. */
 export function applyEvent(view: RunView, ev: RunEvent): RunView {
   if (ev.id <= view.lastId) return view;
@@ -26,13 +32,22 @@ export function applyEvent(view: RunView, ev: RunEvent): RunView {
     case "tool.completed":
       return {
         ...v,
+        approvals: resolveApprovals(view.approvals, d.ok ? "approved" : "denied"),
         message: {
           ...m,
           tools: m.tools.map(t => (t.id === String(d.id) ? { ...t, status: d.ok ? "ok" : "failed", durationMs: d.durationMs ?? null, preview: d.preview ?? t.preview } : t)),
         },
       };
-    case "approval":
-      return { ...v, approvals: [...view.approvals, { command: d.command ?? null, note: String(d.note ?? "needs approval in Hermes") }] };
+    case "approval": {
+      // Hermes sends a notice only. Pi sends an id, so the card can be answered and later resolved.
+      const a: Approval = { command: d.command ?? null, note: String(d.note ?? "needs approval in Hermes") };
+      if (typeof d.id === "string") {
+        a.id = d.id;
+        a.options = Array.isArray(d.options) ? d.options.map(String) : ["approve", "deny"];
+        a.status = "pending";
+      }
+      return { ...v, approvals: [...view.approvals, a] };
+    }
     case "todo": {
       if (!Array.isArray(d.todos)) return v;
       const todos = d.todos.filter((t: any) => typeof t?.id === "string" && typeof t?.content === "string");
@@ -44,6 +59,7 @@ export function applyEvent(view: RunView, ev: RunEvent): RunView {
       return {
         ...v,
         done: true,
+        approvals: resolveApprovals(view.approvals, "ended"),
         message: { ...m, status: d.status ?? "complete", error: d.error ?? null, model: d.model ?? m.model },
       };
     default:

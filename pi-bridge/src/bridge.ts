@@ -121,7 +121,7 @@ export function createBridge(cfg: BridgeConfig): Bridge {
   /** Live Pi settings a chat may carry (docs/pi-plan.md T6). Anything else is rejected, not ignored. */
   interface LiveSettings {
     /** Per-chat tool selection; applied at launch (--tools), so a change restarts the process. */
-    tools?: string[];
+    tools?: string[] | null;
     steeringMode?: string;
     followUpMode?: string;
     autoCompaction?: boolean;
@@ -138,7 +138,7 @@ export function createBridge(cfg: BridgeConfig): Bridge {
         if (typeof val !== "string" || !QUEUE_MODES.includes(val)) throw new HttpError(400, `${k} must be all or one-at-a-time`);
         out[k] = val;
       } else if (k === "tools") {
-        out.tools = parseTools(val, "tools");
+        out.tools = val === null ? null : parseTools(val, "tools");
       } else if (k === "autoCompaction" || k === "autoRetry") {
         if (typeof val !== "boolean") throw new HttpError(400, `${k} must be a boolean`);
         out[k] = val;
@@ -164,13 +164,18 @@ export function createBridge(cfg: BridgeConfig): Bridge {
     const settings = parseSettings(body.settings);
     const sessionPath = body.sessionPath === undefined ? undefined : checkSessionPath(body.sessionPath);
 
-    // What Pi reads only at startup: the tool list and the config files. The chat's own tools win
-    // over the global default. If these changed since launch, the process is restarted (idle only).
-    const tools = settings?.tools ?? readConfig(cfg.agentDir).defaultTools;
+    // What Pi reads only at startup: the tool list and the config files. A start that names `tools`
+    // sets them (null = the global default). A start that does not, keeps what the running process
+    // has, so a model change or a settings read never resets a chat's tools. If the tools or the
+    // config files changed since launch, the process is restarted (idle only).
+    const namesTools = settings !== undefined && "tools" in settings;
+    const existing = live.get(id);
+    const running = existing && !existing.exited ? existing : undefined;
+    const tools = namesTools ? settings!.tools ?? readConfig(cfg.agentDir).defaultTools
+      : running ? running.launchTools : readConfig(cfg.agentDir).defaultTools;
     const key = JSON.stringify([tools, fingerprint(cfg.agentDir)]);
 
     let resumeFrom = sessionPath;
-    const existing = live.get(id);
     if (existing && !existing.exited) {
       await existing.ready;
       if (existing.launchKey === key) {

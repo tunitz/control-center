@@ -34,6 +34,8 @@ export class Chat {
   proc: PiProcess | undefined;
   /** What this process was started with (tools + config files). A different key means it must restart. */
   launchKey = "";
+  /** The tool list this process was launched with (null = Pi default). */
+  launchTools: string[] | null = null;
   private lastAssistant: any = null;
 
   constructor(
@@ -52,6 +54,7 @@ export class Chat {
 
   launch(sessionPath?: string, tools?: string[] | null, key = ""): void {
     this.launchKey = key;
+    this.launchTools = tools && tools.length > 0 ? tools : null;
     const args = ["--mode", "rpc", "--session-dir", this.cfg.sessionDir];
     if (sessionPath) args.push("--session", sessionPath);
     if (tools && tools.length > 0) args.push("--tools", tools.join(","));

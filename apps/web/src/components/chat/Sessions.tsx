@@ -85,7 +85,7 @@ export function Sessions(p: SessionsProps) {
                       </span>
                       <span className="row-txt">
                         <span className="row-title">{s.title}</span>
-                        <span className="row-meta">{(s as SessionHit).snippet || `${s.provider} · ${s.model}`}</span>
+                        <span className="row-meta">{(s as SessionHit).snippet || `${s.provider} · ${s.model}`}{s.backend === "pi" && <span className="btag">Pi</span>}</span>
                       </span>
                     </a>
                     <button className="more" type="button" aria-haspopup="menu" aria-expanded={menu === s.id} aria-label={`Chat actions for ${s.title}`} onClick={() => setMenu(menu === s.id ? null : s.id)}>

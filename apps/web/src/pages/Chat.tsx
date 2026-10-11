@@ -3,6 +3,7 @@ import "../chat.css";
 import { chat } from "../chat/api";
 import { navigate } from "../route";
 import { sendEffort } from "../chat/effort";
+import { backendOfKey, effortChoices, keyOf, modelUsable, splitKey, tokenNote, viewModels } from "../chat/pi";
 import { installChatMock } from "../chat/mock";
 import { useThread } from "../chat/useThread";
 import { useSessions } from "../chat/useSessions";
@@ -13,8 +14,9 @@ import { forgetChat, rememberChat } from "../chat/last";
 import { Composer } from "../components/chat/Composer";
 import { AssistantMessage, UserMessage } from "../components/chat/Message";
 import { Sessions } from "../components/chat/Sessions";
+import { PiSheet } from "../components/chat/PiSheet";
 import { Icon } from "../components/chat/Icon";
-import type { Attachment, ChatConfig, ChatModel, ChatSession, Effort } from "../chat/types";
+import type { Attachment, Backend, ChatConfig, ChatModel, ChatSession, Effort } from "../chat/types";
 
 // Dev mock: installs only when localStorage cc-chat-mock=1 or ?chatmock=1 (no-op otherwise).
 installChatMock();
@@ -46,7 +48,10 @@ export default function Chat({ hash }: { hash: string }) {
   const [query, setQuery] = useState("");
   const [archived, setArchived] = useState(false);
   const [drawer, setDrawer] = useState(false);
-  const [models, setModels] = useState<ChatModel[]>([]);
+  const [rawModels, setModels] = useState<ChatModel[]>([]);
+  const models = useMemo(() => viewModels(rawModels), [rawModels]);
+  const [piSheet, setPiSheet] = useState(false);
+  const [piLevels, setPiLevels] = useState<string[] | null>(null);
   const [config, setConfig] = useState<ChatConfig | null>(null);
   const [pageErr, setPageErr] = useState("");
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
@@ -84,7 +89,7 @@ export default function Chat({ hash }: { hash: string }) {
     if (r.state === "running" && r.sessionId === activeRef.current && r.runId && r.runId !== attachedRef.current) reloadRef.current();
   }), []);
 
-  useEffect(() => { setLiveModel(null); setLiveEffort(null); setMenu(false); setDrawer(false); }, [activeId]);
+  useEffect(() => { setLiveModel(null); setLiveEffort(null); setMenu(false); setDrawer(false); setPiSheet(false); }, [activeId]);
 
   // Remember the session on screen so the Chat tab can return to it; drop it if the server says it is gone.
   useEffect(() => {
@@ -97,11 +102,26 @@ export default function Chat({ hash }: { hash: string }) {
     }
   }, [activeId, thread.missing]);
 
-  const modelId = liveModel ?? active?.model ?? config?.defaultModel ?? models[0]?.id ?? "";
+  const chatBackend: Backend | null = active ? (active.backend ?? "hermes") : null;
+  const modelId = liveModel ?? (active ? keyOf(active.backend, active.model) : config?.defaultModel ?? models[0]?.id ?? "");
   const effort = liveEffort ?? active?.effort ?? config?.defaultEffort ?? null;
   const modelRec = models.find(m => m.id === modelId);
   const ctxInput = estimateContextTokens(thread.messages);
-  const ctxWindow = config?.contextWindow[modelId];
+  const ctxWindow = backendOfKey(modelId) === "pi" ? undefined : config?.contextWindow[modelId];
+
+  // Pi reports which thinking levels the current model supports; ask while the chat is idle.
+  useEffect(() => {
+    setPiLevels(null);
+    if (!activeId || chatBackend !== "pi" || thread.runId) return;
+    let live = true;
+    chat.piSettings(activeId).then(r => { if (live) setPiLevels(r.thinkingLevels); }).catch(() => {});
+    return () => { live = false; };
+  }, [activeId, chatBackend, active?.model, thread.runId]);
+  // An effort the model cannot take is dropped rather than sent.
+  const effortFor = (): Effort | null => {
+    const sent = sendEffort(modelRec, effort);
+    return sent && effortChoices(modelRec, piLevels).includes(sent) ? sent : null;
+  };
 
   // Scroll anchoring: follow the bottom unless the user scrolled up.
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -142,10 +162,16 @@ export default function Chat({ hash }: { hash: string }) {
     navigate(`#/chat/${encodeURIComponent(id)}`);
   };
 
+  /** A new chat takes the backend of the selected model; Hermes is the default. */
+  const createChat = (): Promise<ChatSession> => {
+    const { backend, id } = splitKey(modelId);
+    return chat.createSession({ model: id || undefined, effort: effortFor(), ...(backend === "pi" ? { backend } : {}) });
+  };
+
   const newChat = async () => {
     setDrawer(false);
     try {
-      const s: ChatSession = await chat.createSession({ model: modelId || undefined, effort: sendEffort(modelRec, effort) });
+      const s: ChatSession = await createChat();
       sessions.setList(prev => [s, ...prev]);
       navigate(`#/chat/${encodeURIComponent(s.id)}`);
     } catch (e) { setPageErr((e as Error).message); }
@@ -153,15 +179,15 @@ export default function Chat({ hash }: { hash: string }) {
 
   const onSend = async (text: string, files: File[]) => {
     let id = activeId;
-    const effortToSend = sendEffort(modelRec, effort);
+    const effortToSend = effortFor();
     if (!id) {
-      const s: ChatSession = await chat.createSession({ model: modelId || undefined, effort: effortToSend });
+      const s: ChatSession = await createChat();
       sessions.setList(prev => [s, ...prev]);
       navigate(`#/chat/${encodeURIComponent(s.id)}`);
       id = s.id;
     }
     // Pass the id explicitly: on a brand-new chat the thread hook has not seen the new route yet.
-    await thread.send({ sid: id, text, files, model: modelId, effort: effortToSend });
+    await thread.send({ sid: id, text, files, model: splitKey(modelId).id, effort: effortToSend });
     scrollToEnd();
     void sessions.refresh();
   };
@@ -190,6 +216,11 @@ export default function Chat({ hash }: { hash: string }) {
       return (await onSteer(arg)) === "ok" ? "Steer sent to the running task." : "Nothing is running.";
     }
     if (!activeId || !active) return "Open a chat first.";
+    if (name === "compact") {
+      if (active.backend !== "pi") return "Only Pi chats can compact.";
+      if (thread.runId) return "Wait for the running task or stop it first.";
+      return tokenNote(await chat.piCompact(activeId, arg || undefined));
+    }
     if (name === "export") { window.location.href = chat.exportUrl(activeId); return "Downloading the chat."; }
     if (name === "title") {
       if (!arg) return "Usage: /title <new name>";
@@ -219,9 +250,11 @@ export default function Chat({ hash }: { hash: string }) {
   };
 
   const onModel = async (id: string) => {
+    const picked = models.find(m => m.id === id);
+    if (picked && !modelUsable(picked, chatBackend)) return; // a chat keeps its backend
     setLiveModel(id);
     if (activeId) {
-      try { await chat.patchSession(activeId, { model: id }); } catch (e) { setPageErr((e as Error).message); }
+      try { await chat.patchSession(activeId, { model: splitKey(id).id }); } catch (e) { setPageErr((e as Error).message); }
     }
   };
   const onEffort = async (e: Effort) => {
@@ -229,6 +262,10 @@ export default function Chat({ hash }: { hash: string }) {
     if (activeId) {
       try { await chat.patchSession(activeId, { effort: e }); } catch (err) { setPageErr((err as Error).message); }
     }
+  };
+
+  const onApprove = async (runId: string, approvalId: string, choice: "approve" | "deny") => {
+    await chat.approve(runId, approvalId, choice);
   };
 
   const emptyView = !activeId || (!thread.loading && thread.messages.length === 0);
@@ -275,7 +312,7 @@ export default function Chat({ hash }: { hash: string }) {
                 <select className="pill" aria-label="Model" value={modelId} disabled={!models.length} onChange={e => void onModel(e.target.value)}
                   style={{ appearance: "none", paddingRight: 12 }}>
                   {models.map(m => (
-                    <option key={m.id} value={m.id} disabled={!m.online}>{m.provider} · {m.label}{m.online ? "" : " (offline)"}</option>
+                    <option key={m.id} value={m.id} disabled={!m.online || !modelUsable(m, chatBackend)}>{m.backend === "pi" ? "Pi · " : ""}{m.provider} · {m.label}{m.online ? "" : " (offline)"}</option>
                   ))}
                 </select>
               </div>}
@@ -285,6 +322,9 @@ export default function Chat({ hash }: { hash: string }) {
                 </button>
                 {menu && (
                   <div className="pop menu" role="menu">
+                    {activeId && active?.backend === "pi" && (
+                      <button className="menu-item" role="menuitem" type="button" onClick={() => { setMenu(false); setPiSheet(true); }}><Icon name="gear" className="i sm" />Pi options</button>
+                    )}
                     {activeId && <a className="menu-item" role="menuitem" href={chat.exportUrl(activeId)}><Icon name="export" className="i sm" />Export (Markdown)</a>}
                     <div className="menu-sep" />
                     <p className="meta" style={{ padding: "6px 10px" }}>
@@ -307,7 +347,7 @@ export default function Chat({ hash }: { hash: string }) {
                 <div className="empty">
                   <div className="empty-head">
                     <h2>What can I help with?</h2>
-                    <p className="meta" role="note">Hermes can run commands on this machine.</p>
+                    <p className="meta" role="note">{backendOfKey(modelId) === "pi" ? "Pi can run commands on this machine and asks before risky ones." : "Hermes can run commands on this machine."}</p>
                   </div>
                 </div>
               )}
@@ -320,7 +360,7 @@ export default function Chat({ hash }: { hash: string }) {
                 m.role === "user" ? (
                   <UserMessage key={m.id} m={m} onOpenImage={setLightbox} />
                 ) : (
-                  <AssistantMessage key={m.id} m={m} pending={approvalsFor(m.id)} />
+                  <AssistantMessage key={m.id} m={m} pending={approvalsFor(m.id)} agent={chatBackend === "pi" ? "Pi" : "Hermes"} onApprove={onApprove} />
                 ),
               )}
 
@@ -354,6 +394,8 @@ export default function Chat({ hash }: { hash: string }) {
             running={!!thread.runId}
             runId={thread.runId}
             models={models}
+            chatBackend={chatBackend}
+            piLevels={piLevels}
             model={modelId}
             effort={effort}
             ctxInput={ctxInput}
@@ -370,6 +412,8 @@ export default function Chat({ hash }: { hash: string }) {
           />
         </section>
       </div>
+
+      {piSheet && activeId && <PiSheet sid={activeId} running={!!thread.runId} onClose={() => setPiSheet(false)} />}
 
       {lightbox && (
         <div role="dialog" aria-modal="true" aria-label={lightbox.name} onClick={() => setLightbox(null)}

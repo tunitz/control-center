@@ -187,6 +187,17 @@ async function mergedModels(ctx: ChatContext): Promise<(ChatModel & { backend: "
   return [...hermes, ...pi.map(m => ({ ...m, online: true, backend: "pi" as const }))];
 }
 
+/** Resolves a model id against the registry of the chat's own backend (Pi and Hermes have separate catalogues). */
+async function resolveModelFor(ctx: ChatContext, sessionId: string, model: unknown): Promise<{ model: string; provider: string }> {
+  if (S.getBackend(ctx.db, sessionId)?.backend === "pi") {
+    if (typeof model !== "string") throw new ChatError(400, "model must be a string");
+    if (!ctx.pi) throw new ChatError(503, "pi backend not configured");
+    const d = await piModelDef(ctx, model);
+    return { model: d.id, provider: d.provider };
+  }
+  return resolveModel(ctx, model);
+}
+
 function resolveModel(ctx: ChatContext, model: unknown): { model: string; provider: string } {
   if (typeof model !== "string") throw new ChatError(400, "model must be a string");
   const def = getModelDef(ctx.db, model);
@@ -274,7 +285,7 @@ async function patchSessionRoute(req: Request, id: string, ctx: ChatContext): Pr
     patch.archived = body.archived;
   }
   if (body.model !== undefined) {
-    const r = resolveModel(ctx, body.model);
+    const r = await resolveModelFor(ctx, id, body.model);
     patch.model = r.model;
     patch.provider = r.provider;
   }
@@ -398,7 +409,7 @@ async function sendRoute(req: Request, id: string, ctx: ChatContext): Promise<Re
   const modelField = form.get("model");
   const effortField = form.get("effort");
   const picked = typeof modelField === "string" && modelField !== ""
-    ? resolveModel(ctx, modelField) : { model: s.model, provider: s.provider };
+    ? await resolveModelFor(ctx, id, modelField) : { model: s.model, provider: s.provider };
   const effort = typeof effortField === "string" && effortField !== "" ? parseEffort(effortField) : s.effort;
   // Effort is a hint, sent only to models that report reasoning.
   let reasoning = getModelDef(ctx.db, picked.model)?.reasoning === true;

@@ -3,6 +3,7 @@ import { api, type Unit } from "../api";
 import { cached, remember, useLive } from "../hooks";
 import InstallPanel from "../components/InstallPanel";
 import EditUnit from "../components/EditUnit";
+import PiConfigCard from "../components/PiConfigCard";
 import { getThemeMode, setThemeMode, type ThemeMode } from "../theme";
 
 const THEME_OPTIONS: { mode: ThemeMode; label: string }[] = [
@@ -58,6 +59,7 @@ export default function Settings({ onSignOut }: { onSignOut: () => void }) {
         <label htmlFor="np">New (min 8)</label><input id="np" type="password" autoComplete="new-password" value={pw.next} onChange={e => setPw({ ...pw, next: e.target.value })} style={{ maxWidth: 300 }} />
         <div style={{ marginTop: 12 }}><button className="btn" onClick={() => run(async () => { await api("/auth/password", { method: "POST", body: pw }); setPw({ current: "", next: "" }); }, "Password changed")}>Change</button></div>
       </div>
+      <PiConfigCard onMsg={setMsg} />
       <div className="card"><h3 style={{ marginTop: 0 }}>Audit log</h3>
         <div className="scroll"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Unit</th><th>Detail</th></tr></thead><tbody>{audit?.map(a => <tr key={a.id}><td>{new Date(a.ts * 1000).toLocaleString()}</td><td>{a.actor}</td><td>{a.action}</td><td>{a.unit ?? ""}</td><td className="muted">{a.detail}</td></tr>)}</tbody></table></div>
       </div>

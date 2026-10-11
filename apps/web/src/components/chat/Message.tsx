@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
+import { ApprovalCard } from "./Approval";
+import { Todos } from "./Todos";
 import { copyText } from "../../clipboard";
 import { fmtTokens } from "../../chat/context";
 import { isAbnormal, showReasoning } from "../../chat/reduce";
@@ -79,20 +81,24 @@ export function UserMessage({ m, onOpenImage }: { m: ChatMessage; onOpenImage: (
   );
 }
 
-export function AssistantMessage({ m, pending }: { m: ChatMessage; pending: Approval[] }) {
+export function AssistantMessage({ m, pending, agent = "Hermes", onApprove }: {
+  m: ChatMessage; pending: Approval[]; agent?: string;
+  /** Answers a Pi approval for this message's run. */
+  onApprove?: (runId: string, approvalId: string, choice: "approve" | "deny") => Promise<void>;
+}) {
   const [thoughtOpen, setThoughtOpen] = useState(false);
   const running = m.status === "running";
   const abnormal = isAbnormal(m);
   return (
     <div className="asst">
       <div className="ahead">
-        <span className="who">Hermes</span>
+        <span className="who">{agent}</span>
         {m.model && (<><span>·</span><span>{m.model}</span></>)}
         <span>·</span>
         <time>{fmtTime(m.createdAt)}</time>
       </div>
 
-      {(showReasoning(m) || m.tools.length > 0) && (
+      {(showReasoning(m) || m.tools.length > 0 || (m.todos?.length ?? 0) > 0) && (
         <div className="fgroup">
           {showReasoning(m) && (
             <div className="fold-wrap">
@@ -105,6 +111,7 @@ export function AssistantMessage({ m, pending }: { m: ChatMessage; pending: Appr
             </div>
           )}
           <ToolRows tools={m.tools} />
+          <Todos id={m.id} todos={m.todos} />
         </div>
       )}
 
@@ -112,7 +119,9 @@ export function AssistantMessage({ m, pending }: { m: ChatMessage; pending: Appr
         <div className="fold static" role="status" aria-live="polite"><span className="spin" aria-hidden="true" /><span className="lbl">Working</span></div>
       )}
 
-      {pending.map((a, i) => (
+      {pending.map((a, i) => a.id && onApprove && m.runId ? (
+        <ApprovalCard key={a.id} a={a} onAnswer={c => onApprove(m.runId!, a.id!, c)} />
+      ) : (
         <div className="appr" key={i} role="note">
           <div className="appr-h"><Icon name="alert" /><h3>Needs approval in Hermes</h3></div>
           {a.command && <pre className="cmdblk">{a.command}</pre>}

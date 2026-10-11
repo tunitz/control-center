@@ -1,4 +1,4 @@
-import type { ChatConfig, ChatMessage, ChatModel, ChatSession, Effort, SessionHit } from "./types";
+import type { Backend, ChatConfig, ChatMessage, ChatModel, ChatSession, Effort, PiConfig, PiSettings, SessionHit } from "./types";
 
 export class ChatError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -25,7 +25,7 @@ export const chat = {
     if (q.trim()) p.set("q", q.trim());
     return chatReq<(ChatSession | SessionHit)[]>("GET", `/sessions?${p}`);
   },
-  createSession: (o: { model?: string; effort?: Effort | null }) => chatReq<ChatSession>("POST", "/sessions", o),
+  createSession: (o: { model?: string; effort?: Effort | null; backend?: Backend }) => chatReq<ChatSession>("POST", "/sessions", o),
   patchSession: (id: string, patch: Partial<Pick<ChatSession, "title" | "pinned" | "archived" | "model" | "effort">>) =>
     chatReq<ChatSession>("PATCH", `/sessions/${encodeURIComponent(id)}`, patch),
   deleteSession: (id: string) => chatReq<{ ok: true }>("DELETE", `/sessions/${encodeURIComponent(id)}`),
@@ -44,6 +44,15 @@ export const chat = {
   },
   stopRun: (runId: string) => chatReq<{ ok: true }>("POST", `/runs/${encodeURIComponent(runId)}/stop`),
   steerRun: (runId: string, message: string) => chatReq<{ ok: true }>("POST", `/runs/${encodeURIComponent(runId)}/steer`, { message }),
+  approve: (runId: string, id: string, choice: "approve" | "deny") =>
+    chatReq<{ ok: true }>("POST", `/runs/${encodeURIComponent(runId)}/approval`, { id, choice }),
+  piSettings: (sid: string) => chatReq<{ settings: PiSettings; thinkingLevels: string[] }>("GET", `/sessions/${encodeURIComponent(sid)}/pi-settings`),
+  patchPiSettings: (sid: string, patch: Partial<PiSettings>) =>
+    chatReq<{ settings: PiSettings }>("PATCH", `/sessions/${encodeURIComponent(sid)}/pi-settings`, patch),
+  piCompact: (sid: string, instructions?: string) =>
+    chatReq<{ tokensBefore: number; tokensAfter: number }>("POST", `/sessions/${encodeURIComponent(sid)}/pi-compact`, instructions ? { instructions } : {}),
+  piConfig: () => chatReq<PiConfig>("GET", "/pi-config"),
+  putPiConfig: (patch: Partial<Omit<PiConfig, "knownTools">>) => chatReq<PiConfig>("PUT", "/pi-config", patch),
   credits: () => chatReq<{ text: string }>("GET", "/credits"),
   exportUrl: (id: string) => `/api/chat/sessions/${encodeURIComponent(id)}/export`,
 };

@@ -353,3 +353,38 @@ test("per-chat tools: unknown, duplicate and empty lists are 400", async () => {
     expect((await js(await run(req("PATCH", PI_URL(s.id), { tools })))).status).toBe(400);
   }
 });
+
+test("send on a Pi chat accepts a model id that only Pi knows (the web always sends the model)", async () => {
+  const s = await piSession();
+  const f = fd("hello"); f.set("model", "deepseek-flash");
+  const sent = await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, f)));
+  expect(sent.status).toBe(201);
+  await waitIdle(s.id);
+  expect(S.getSession(ctx.db, s.id)!.model).toBe("deepseek-flash"); // a model sent with the message becomes the chat's model
+});
+
+test("PATCH model on a Pi chat resolves against Pi's models; a Hermes-only model is 400", async () => {
+  const s = await piSession();
+  const ok = await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { model: "deepseek-flash" })));
+  expect(ok.status).toBe(200);
+  expect(ok.body).toMatchObject({ model: "deepseek-flash", provider: "deepseek", backend: "pi" });
+  const bad = await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { model: "claude-sonnet-5-5" })));
+  expect(bad.status).toBe(400);
+});
+
+test("PATCH model on a Hermes chat with a Pi-only model is 400", async () => {
+  const { body: h } = await js(await run(req("POST", "/api/chat/sessions", {})));
+  expect((await js(await run(req("PATCH", `/api/chat/sessions/${h.id}`, { model: "deepseek-flash-pi-only" })))).status).toBe(400);
+});
+
+test("clearing a chat's tools override is sent to the bridge as tools:null on the next run", async () => {
+  const s = await piSession();
+  await js(await run(req("PATCH", PI_URL(s.id), { tools: ["read"] })));
+  await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("one"))));
+  await waitIdle(s.id);
+  expect(lastStart().settings.tools).toEqual(["read"]);
+  await js(await run(req("PATCH", PI_URL(s.id), { tools: null })));
+  await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("two"))));
+  await waitIdle(s.id);
+  expect(lastStart().settings.tools).toBeNull();
+});

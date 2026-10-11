@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { Icon } from "./Icon";
 import { ACCEPTED_TYPES, MAX_BYTES, prepareImage } from "../../chat/imaging";
-import { PAGE_COMMANDS, effortOptions, helpText, parseEffort, parseSlash, suggestions, unknownText, type Parsed } from "../../chat/slash";
+import { PAGE_COMMANDS, helpText, parseEffort, parseSlash, suggestions, unknownText, type Parsed } from "../../chat/slash";
 import { contextMeter } from "../../chat/context";
 import { shortModelLabel } from "./label";
 import { TextMenu } from "./TextMenu";
-import { effortLabel, effortMenuItems } from "../../chat/menu";
-import type { ChatModel, Effort } from "../../chat/types";
+import { effortLabel } from "../../chat/menu";
+import { effortChoices, modelUsable } from "../../chat/pi";
+import type { Backend, ChatModel, Effort } from "../../chat/types";
 
 export type Pending = { key: string; file: File; name: string; kind: "image" | "file"; status: "preparing" | "ready" | "error"; error: string; note: string };
 
@@ -18,6 +19,10 @@ export type ComposerProps = {
   running: boolean;
   runId: string | null;
   models: ChatModel[];
+  /** Backend of the open chat; null before a chat exists. A chat keeps its backend, so other models are disabled. */
+  chatBackend: Backend | null;
+  /** Thinking levels Pi reports for the current model (Pi chats only). */
+  piLevels: string[] | null;
   model: string;
   effort: Effort | null;
   ctxInput: number | null;
@@ -47,9 +52,10 @@ export function Composer(p: ComposerProps) {
   const fileIn = useRef<HTMLInputElement>(null);
   const camIn = useRef<HTMLInputElement>(null);
   const model = p.models.find(m => m.id === p.model);
-  const efforts = effortOptions(model);
+  const backend: Backend = p.chatBackend ?? model?.backend ?? "hermes";
+  const efforts = effortChoices(model, p.piLevels);
   const meter = contextMeter(p.ctxInput, p.ctxWindow);
-  const slash = suggestions(text);
+  const slash = suggestions(text, backend);
   // Short notices clear themselves; they used to stay under the composer until the next send.
   useEffect(() => {
     if (!notice) return;
@@ -95,7 +101,7 @@ export function Composer(p: ComposerProps) {
 
   const runCommand = (cmd: Exclude<Parsed, null>) => {
     if (cmd.kind === "unknown") { setNotice(unknownText(cmd.name)); return true; }
-    if (cmd.name === "help") { p.onNote("/help", helpText()); setText(""); return true; }
+    if (cmd.name === "help") { p.onNote("/help", helpText(backend)); setText(""); return true; }
     if ((PAGE_COMMANDS as readonly string[]).includes(cmd.name)) {
       const keep = text;
       setText("");
@@ -105,7 +111,7 @@ export function Composer(p: ComposerProps) {
     if (cmd.name === "new") { p.onNew(); setText(""); return true; }
     if (cmd.name === "stop") { if (p.running) p.onStop(); else setNotice("Nothing is running."); setText(""); return true; }
     if (cmd.name === "model") {
-      const hit = p.models.find(m => m.id.toLowerCase() === cmd.arg.toLowerCase() || m.label.toLowerCase() === cmd.arg.toLowerCase());
+      const hit = p.models.find(m => modelUsable(m, p.chatBackend) && (m.id.toLowerCase() === cmd.arg.toLowerCase() || m.label.toLowerCase() === cmd.arg.toLowerCase()));
       if (hit) { p.onModel(hit.id); setText(""); setNotice(`Model set to ${hit.label}.`); }
       else if (!cmd.arg) setModelOpen(true);
       else setNotice(`No model called "${cmd.arg}".`);
@@ -121,7 +127,7 @@ export function Composer(p: ComposerProps) {
   };
 
   const submit = async () => {
-    const cmd = parseSlash(text);
+    const cmd = parseSlash(text, backend);
     setErr(""); setNotice("");
     if (cmd && runCommand(cmd)) return;
     if (busy) return;
@@ -213,8 +219,8 @@ export function Composer(p: ComposerProps) {
             ref={ta}
             rows={1}
             value={text}
-            placeholder="Message Hermes…"
-            aria-label="Message Hermes"
+            placeholder={`Message ${backend === "pi" ? "Pi" : "Hermes"}…`}
+            aria-label={`Message ${backend === "pi" ? "Pi" : "Hermes"}`}
             onChange={e => setText(e.target.value)}
             onKeyDown={onKey}
             onPaste={onPaste}
@@ -243,7 +249,7 @@ export function Composer(p: ComposerProps) {
               <TextMenu
                 ariaLabel="Thinking level"
                 trigger={`Think: ${p.effort ? effortLabel(p.effort) : "Default"}`}
-                items={effortMenuItems(model).map(i => ({ value: i.value, label: i.label }))}
+                items={efforts.map(v => ({ value: v, label: effortLabel(v) }))}
                 value={p.effort ?? ""}
                 open={effortOpen}
                 onOpenChange={setEffortOpen}
@@ -254,7 +260,11 @@ export function Composer(p: ComposerProps) {
               <TextMenu
                 ariaLabel="Model"
                 trigger={shortModelLabel(model?.label ?? p.model)}
-                items={p.models.map(m => ({ value: m.id, label: shortModelLabel(m.label), sub: m.provider, note: m.online ? undefined : "offline", disabled: !m.online }))}
+                items={p.models.map(m => {
+                  const usable = modelUsable(m, p.chatBackend);
+                  const note = !m.online ? "offline" : !usable ? (m.backend === "pi" ? "Pi chats only" : "Hermes chats only") : m.backend === "pi" ? "Pi" : undefined;
+                  return { value: m.id, label: shortModelLabel(m.label), sub: m.provider, note, disabled: !m.online || !usable };
+                })}
                 value={p.model}
                 open={modelOpen}
                 onOpenChange={setModelOpen}

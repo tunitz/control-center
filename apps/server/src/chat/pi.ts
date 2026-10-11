@@ -86,7 +86,8 @@ export class PiClient implements ChatBackend {
     const chat = args.sessionId;
     const model = args.model;
     const provider = args.provider;
-    const settings = args.piSettings && Object.keys(args.piSettings).length > 0 ? args.piSettings : null;
+    // Always name the tools: null means "the global default", which also clears an override that was removed.
+    const settings = { tools: null, ...(args.piSettings ?? {}) };
     await this.call("POST", `/chats/${chat}/start`, {
       ...(args.ref ? { sessionPath: args.ref } : {}),
       ...(provider ? { model: { provider, modelId: model } } : {}),

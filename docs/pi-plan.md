@@ -137,7 +137,7 @@ Every task ends: `bun run typecheck` + `bun test apps/server apps/web/src` green
 
 ### Workstream C — settings
 
-**T6 Settings model and apply path.** Slice T6a (DONE, live-verified on real Pi): thinking level (from the chat effort), steering mode, follow-up mode, auto compaction, auto retry, manual compact; stored per chat in `pi_settings_json`, sent with every bridge `start`. Slice T6b-server (DONE, live-verified: system prompt took effect and the restart kept the session): global system prompt, AGENTS.md, default and per-chat tools, stricter-only gate rules, restart-on-change in the bridge. Not built, by decision: API keys (set once over SSH), models.json/llama (after the tun-sfx test), advanced settings.json form, extension toggles. The web screens for T6b live in a Settings area, not in the chat (tun, 2026-10-11), and are built under T7. Coverage table (UI must expose each row):
+**T6 Settings model and apply path.** Slice T6a (DONE, live-verified on real Pi): thinking level (from the chat effort), steering mode, follow-up mode, auto compaction, auto retry, manual compact; stored per chat in `pi_settings_json`, sent with every bridge `start`. Slice T6b-server (DONE, live-verified: system prompt took effect and the restart kept the session): global system prompt, AGENTS.md, default and per-chat tools, stricter-only gate rules, restart-on-change in the bridge. Not built, by decision: API keys (set once over SSH), models.json/llama (after the tun-sfx test), advanced settings.json form, extension toggles. The web screens for T6b live in Settings (global card "Pi agent") and a per-chat "Pi options" sheet in the chat menu (tun, 2026-10-11). Coverage table (UI must expose each row):
 
 | Setting | Live over RPC? | UI control | Apply |
 |---|---|---|---|
@@ -244,3 +244,9 @@ Open questions:
 Build status: tun builds this in a separate session; nothing is started from the planning session.
 
 Final step: push to GitHub `tunitz/control-center`, deploy in the order above, verify live, update skill + memory.
+
+## T7 status (web, 2026-10-11)
+
+DONE and driven in a 390px browser against a throwaway Control Center + the real bridge and Pi: model picker with Pi tag (picking a Pi model starts a Pi chat, a chat keeps its backend), Pi chat label and placeholder, approval card (Approve/Deny, 44px, Approved/Denied/Not answered afterwards, full command shown), task list under the tool rows, thinking-level choices narrowed to what Pi reports, `/compact`, "Pi options" sheet (per-chat tools, queue modes, auto compaction/retry, Compact now), Settings card "Pi agent" (extra instructions, notes, default tools, stricter-only approval rules).
+Not built, by decision: Pi slash commands / prompt templates (T7b), API keys, llama endpoint, advanced form.
+Bugs found by the live drive and fixed: model ids resolved against the wrong backend on send/PATCH; a start that did not name tools reset a chat's tools; cleared tools override not reaching a running process; long DeepSeek names clipped the composer toolbar; approval command scrolled sideways.

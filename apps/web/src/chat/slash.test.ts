@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseSlash, suggestions, parseEffort, effortOptions } from "./slash";
+import { parseSlash, suggestions, parseEffort, effortOptions, helpText, PI_COMMANDS } from "./slash";
 
 test("plain text is not a command", () => {
   expect(parseSlash("hello /new")).toBeNull();
@@ -38,8 +38,23 @@ test("effort options follow reasoning flags", () => {
 
 import { PAGE_COMMANDS, COMMANDS, helpText, unknownText } from "./slash";
 test("every page command is a listed command; help and unknown text come from the list", () => {
-  for (const n of PAGE_COMMANDS) expect(COMMANDS.some(c => c.name === n)).toBe(true);
+  for (const n of PAGE_COMMANDS) expect([...COMMANDS, ...PI_COMMANDS].some(c => c.name === n)).toBe(true);
   for (const c of COMMANDS) expect(helpText()).toContain(`/${c.name}`);
   expect(parseSlash("/retry")).toEqual({ kind: "command", name: "retry", arg: "" });
   expect(unknownText("x")).toBe("Unknown command /x. Type /help to list them.");
+});
+
+test("/compact exists only for Pi chats", () => {
+  expect(parseSlash("/compact")).toEqual({ kind: "unknown", name: "compact" });
+  expect(parseSlash("/compact", "hermes")).toEqual({ kind: "unknown", name: "compact" });
+  expect(parseSlash("/compact focus on code", "pi")).toEqual({ kind: "command", name: "compact", arg: "focus on code" });
+  expect(suggestions("/comp", "pi").map(c => c.name)).toEqual(["compact"]);
+  expect(suggestions("/comp").map(c => c.name)).toEqual([]);
+  expect(suggestions("/", "pi").map(c => c.name)).toContain("compact");
+  expect(suggestions("/", "hermes").map(c => c.name)).not.toContain("compact");
+});
+
+test("help lists /compact only for Pi", () => {
+  expect(helpText("pi")).toContain("/compact");
+  expect(helpText()).not.toContain("/compact");
 });

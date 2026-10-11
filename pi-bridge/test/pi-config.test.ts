@@ -161,3 +161,46 @@ describe("restart when launch inputs change", () => {
     expect(b.json.state.autoRetryEnabled).toBe(false);
   });
 });
+
+describe("a start that does not name the tools keeps the running tools", () => {
+  test("start without settings after start with tools: same process, same --tools", async () => {
+    const a = await api(h, "POST", "/chats/k-1/start", { settings: { tools: ["read", "ls"] } });
+    const b = await api(h, "POST", "/chats/k-1/start", { model: { provider: "deepseek", modelId: "deepseek-pro" } });
+    expect(b.json.state.pid).toBe(a.json.state.pid);
+    expect(toolsArg(await argvOf("k-1"))).toBe("read,ls");
+  });
+
+  test("settings without a tools key also keep them", async () => {
+    const a = await api(h, "POST", "/chats/k-2/start", { settings: { tools: ["read"] } });
+    const b = await api(h, "POST", "/chats/k-2/start", { settings: { autoRetry: false } });
+    expect(b.json.state.pid).toBe(a.json.state.pid);
+    expect(toolsArg(await argvOf("k-2"))).toBe("read");
+  });
+
+  test("tools: null goes back to the global default and restarts", async () => {
+    await put({ defaultTools: ["ls", "find"] });
+    const a = await api(h, "POST", "/chats/k-3/start", { settings: { tools: ["read"] } });
+    const b = await api(h, "POST", "/chats/k-3/start", { settings: { tools: null } });
+    expect(b.json.state.pid).not.toBe(a.json.state.pid);
+    expect(toolsArg(await argvOf("k-3"))).toBe("ls,find");
+  });
+
+  test("a global file change restarts the chat but keeps the chat's own tools", async () => {
+    const a = await api(h, "POST", "/chats/k-4/start", { settings: { tools: ["read", "grep"] } });
+    await put({ appendSystemPrompt: "new rule" });
+    const b = await api(h, "POST", "/chats/k-4/start", {});
+    expect(b.json.state.pid).not.toBe(a.json.state.pid);
+    expect(toolsArg(await argvOf("k-4"))).toBe("read,grep");
+  });
+
+  test("a reaped chat that is started again without settings gets the global default", async () => {
+    await put({ defaultTools: ["ls"] });
+    await api(h, "POST", "/chats/k-5/start", {});
+    expect(toolsArg(await argvOf("k-5"))).toBe("ls");
+  });
+
+  test("tools: null is accepted by the settings parser; other non-list values are not", async () => {
+    expect((await api(h, "POST", "/chats/k-6/start", { settings: { tools: null } })).status).toBe(200);
+    expect((await api(h, "POST", "/chats/k-7/start", { settings: { tools: "read" } })).status).toBe(400);
+  });
+});

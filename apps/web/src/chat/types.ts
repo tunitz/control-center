@@ -1,10 +1,12 @@
 // Mirrors docs/chat-contract.md. Change only via the contract owner.
 export type Effort = "off" | "low" | "medium" | "high";
-export type ChatModel = { id: string; provider: string; label: string; reasoning: boolean; canDisableReasoning: boolean; vision: boolean; local: boolean; online: boolean };
+export type Backend = "hermes" | "pi";
+export type ChatModel = { id: string; provider: string; label: string; reasoning: boolean; canDisableReasoning: boolean; vision: boolean; local: boolean; online: boolean; backend?: Backend };
 export type ChatSession = {
   id: string; title: string; titleAuto: boolean; model: string; provider: string; effort: Effort | null;
   pinned: boolean; archived: boolean; createdAt: number; updatedAt: number;
   runState: "idle" | "running" | "needs_approval"; runId: string | null; unread: boolean; preview: string; awaiting: number;
+  backend?: Backend;
 };
 export type SessionHit = ChatSession & { snippet: string };
 export type Attachment = { id: string; kind: "image" | "file"; name: string; mime: string; size: number; w: number | null; h: number | null; url: string };
@@ -18,4 +20,7 @@ export type ChatMessage = {
 };
 export type ChatConfig = { defaultModel: string; defaultEffort: Effort | null; maxUploadMb: number; contextWindow: Record<string, number> };
 export type RunEvent = { id: number; type: string; data: any };
-export type Approval = { command: string | null; note: string };
+/** A Hermes approval is a read-only notice (no id). A Pi approval has an id and can be answered. */
+export type Approval = { command: string | null; note: string; id?: string; options?: string[]; status?: "pending" | "approved" | "denied" | "ended" };
+export type PiSettings = { tools: string[] | null; steeringMode: "all" | "one-at-a-time"; followUpMode: "all" | "one-at-a-time"; autoCompaction: boolean; autoRetry: boolean };
+export type PiConfig = { appendSystemPrompt: string; agentsMd: string; defaultTools: string[] | null; gate: { extraProtectedPaths: string[]; extraRisky: string[] }; knownTools: string[] };

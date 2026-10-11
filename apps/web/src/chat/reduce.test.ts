@@ -99,3 +99,40 @@ describe("todo events", () => {
     expect(newRunView(base).message.todos ?? null).toBeNull();
   });
 });
+
+describe("Pi approvals", () => {
+  const ask = { id: "u1", command: "Run: rm -rf x", note: "Allow command?", options: ["approve", "deny"] };
+  const start = (id: string) => ({ id, name: "bash", args: null, preview: null });
+
+  test("a Pi approval keeps its id and options and starts pending", () => {
+    const v = applyEvent(newRunView(base), ev(1, "approval", ask));
+    expect(v.approvals).toEqual([{ ...ask, status: "pending" }]);
+  });
+  test("a Hermes approval (no id) stays exactly as before", () => {
+    const v = applyEvent(newRunView(base), ev(1, "approval", { command: "x", note: "needs approval in Hermes" }));
+    expect(v.approvals).toEqual([{ command: "x", note: "needs approval in Hermes" }]);
+  });
+  test("tool.completed ok resolves the pending approval as approved", () => {
+    const v = reduceEvents(newRunView(base), [ev(1, "tool.started", start("t1")), ev(2, "approval", ask), ev(3, "tool.completed", { id: "t1", ok: true, durationMs: 5 })]);
+    expect(v.approvals[0].status).toBe("approved");
+  });
+  test("tool.completed failed resolves it as denied", () => {
+    const v = reduceEvents(newRunView(base), [ev(1, "tool.started", start("t1")), ev(2, "approval", ask), ev(3, "tool.completed", { id: "t1", ok: false })]);
+    expect(v.approvals[0].status).toBe("denied");
+  });
+  test("a run that ends while an approval is still pending marks it ended", () => {
+    const v = reduceEvents(newRunView(base), [ev(1, "approval", ask), ev(2, "done", { status: "interrupted" })]);
+    expect(v.approvals[0].status).toBe("ended");
+  });
+  test("an already resolved approval is not changed by later events", () => {
+    const v = reduceEvents(newRunView(base), [
+      ev(1, "approval", ask), ev(2, "tool.completed", { id: "t1", ok: true }),
+      ev(3, "tool.completed", { id: "t2", ok: false }), ev(4, "done", { status: "complete" }),
+    ]);
+    expect(v.approvals[0].status).toBe("approved");
+  });
+  test("replaying the same events gives the same approvals", () => {
+    const events = [ev(1, "approval", ask), ev(2, "tool.completed", { id: "t1", ok: true })];
+    expect(reduceEvents(reduceEvents(newRunView(base), events), events).approvals).toEqual(reduceEvents(newRunView(base), events).approvals);
+  });
+});
