@@ -17,10 +17,13 @@ export const COMMANDS = [
 ] as const;
 
 /** Commands the page handles (they need the active chat); the rest the composer handles itself. */
-export const PAGE_COMMANDS = ["retry", "title", "export", "pin", "archive", "delete", "steer", "credits", "compact"] as const;
+export const PAGE_COMMANDS = ["retry", "title", "export", "pin", "archive", "delete", "steer", "credits", "login", "yolo"] as const;
 
 /** Commands that exist only for one backend. */
-export const PI_COMMANDS = [{ name: "compact", desc: "Shrink this chat's context" }] as const;
+export const PI_COMMANDS = [
+  { name: "login", desc: "Sign in to a Pi provider" },
+  { name: "yolo", desc: "Auto-approve Pi's risky commands in this chat" },
+] as const;
 type AnyCommand = { name: string; desc: string };
 const commandsFor = (backend: "hermes" | "pi"): readonly AnyCommand[] => (backend === "pi" ? [...COMMANDS, ...PI_COMMANDS] : COMMANDS);
 

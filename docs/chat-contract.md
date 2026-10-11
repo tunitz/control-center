@@ -23,6 +23,8 @@ type MessageBlock =
 type ChatMessage = { id: string; seq: number; role: "user" | "assistant"; text: string; reasoning: string | null;
   tools: ToolRow[]; blocks: MessageBlock[]; usage: { input: number; output: number } | null; status: "complete" | "failed" | "interrupted" | "running";
   runId: string | null; model: string | null; attachments: Attachment[]; createdAt: number; error: string | null };
+/** A persistent local slash-command row (`/help`, `/model`, …). `afterSeq` anchors it after that message seq. */
+type CommandNote = { id: number; name: string; body: string; afterSeq: number; createdAt: number };
 ```
 `blocks` is the ordered body of an assistant turn: text segments, tool rows (by id) and approval cards, in the order they arrived. `text` and `tools` stay for search, export and older rows; a row without `blocks_json` returns `blocks: []` and the UI falls back to tools-then-text.
 
@@ -33,8 +35,11 @@ type ChatMessage = { id: string; seq: number; role: "user" | "assistant"; text: 
 - `POST /sessions` `{ model?: string; effort?: Effort|null; backend?: "hermes" | "pi" }` -> `ChatSession` (creates the Hermes session, source `api_server`, locks the model). `backend` defaults to `"hermes"`. `backend: "pi"` requires `model` (a Pi model id from `GET /models`), creates a Pi chat on the bridge, and stores its session file. 503 when no Pi bridge is configured. `backend` is immutable after creation: a PATCH carrying `backend` is 400.
 - `PATCH /sessions/:id` any of `{ title, pinned, archived, model, effort }` -> `ChatSession`. A `title` change sets `titleAuto=false`. A `model` change is locked in Hermes at the next send.
 - `DELETE /sessions/:id` -> `{ ok: true }` (deletes the Hermes session, mirror rows, and files). Refused with 409 when a run is active.
-- `GET /sessions/:id/messages?before=<seq>&limit=40` -> `{ messages: ChatMessage[] /* ascending seq */; hasMore: boolean }`. Newest page when `before` is absent.
+- `GET /sessions/:id/messages?before=<seq>&limit=40` -> `{ messages: ChatMessage[] /* ascending seq */; hasMore: boolean; commands: CommandNote[] }`. Newest page when `before` is absent; `commands` is every command row of the session (oldest first), independent of the message page.
+- `POST /sessions/:id/commands` `{ name, body? }` -> `201 CommandNote`. Records a local command row in the thread. `name` has a leading `/` stripped and is capped at 40 chars; `body` is capped at 8000. The row is anchored after the newest message at the time of the call. 404 unknown session, 400 missing name.
 - `POST /sessions/:id/send` multipart/form-data: `text` (string, may be empty if files), `model?`, `effort?`, `files` (0..6, repeated). -> `201 { runId, userMessage: ChatMessage, assistantMessage: ChatMessage }`. 409 `{error:"run active"}` if the session already has a run.
+- `DELETE /sessions/:id/messages/:messageId` -> `{ ok: true }`. Removes one mirrored message and its attachment files. The backend's own history is untouched. 404 when the id is unknown or belongs to another session; 409 while a run is active.
+- `POST /sessions/:id/messages/:messageId/retry` -> `201 { runId, userMessage, assistantMessage }`, the same shape as `send`. Rebranches: the given user message and every message after it are dropped, then the message runs again, so the previous reply is replaced in the thread. Only a non-empty user message may be retried (400), unknown ids are 404, a run active is 409. Attachments are not carried over — retry re-sends the text only.
 - `GET /runs/:runId/events` SSE. Header `Last-Event-ID` (or `?last=`) replays missed events. Each event: `id: <n>\nevent: <type>\ndata: <json>\n\n`. A comment `: keepalive` every 15s. Stream ends after `done`.
   - `run.started` `{ runId, sessionId, assistantMessageId, model }`
   - `delta` `{ text }` (append to assistant text)
@@ -55,6 +60,7 @@ type ChatMessage = { id: string; seq: number; role: "user" | "assistant"; text: 
 - One active run per session; the sidebar shows `runState`.
 - A message with `status:"interrupted"` or `"failed"` is never shown as a normal reply.
 - `title` is auto-set after the first assistant reply to the first 8 words of the first user message (`titleAuto=true`).
+- Retry branches from a user message: it and everything after it are deleted from the mirror before the new run, so only the new reply is shown. The backend still holds the old turns in its own session, so its context is not rewound. Deleting a message or rebranching also drops command rows anchored at or after it.
 - Model is per session. New sessions use `config.defaultModel`.
 - Reasoning effort is a hint, sent only when the model has `reasoning:true`.
 
@@ -92,3 +98,27 @@ A Pi chat may start in a directory the user picks, instead of `workspace/<chatId
   - A chosen cwd must not be or sit inside a protected path. A folder that only contains one (e.g. `~/projects`, `~/projects/control-center`) is allowed; cc-gate asks before any access that reaches the protected path. HOME itself is allowed as a cwd.
 - **Resume**: every Pi `/start` sent by the server carries the chat's stored `cwd`, so a reaped chat resumes in the same directory. The bridge keeps the cwd for the chat's life; a `/start` with a different cwd returns `409`.
 - **Bridge**: `GET /dirs?path=`, `POST /dirs {parent,name}`, and `POST /chats/:id/start {cwd?}`. `/start` echoes `cwd` (and `state.cwd`). Without `cwd`, the chat runs in `workspace/<chatId>` as before.
+
+## Pi provider sign-in (`/login`, additive)
+
+Pi's own `/login` is a TUI flow, so the chat offers it as a server-driven sign-in against the Pi
+bridge. Only Pi chats show the command. Credentials land in Pi's `auth.json`; no route ever returns
+a stored credential.
+
+- `GET /api/chat/pi/auth/providers` -> `{ providers: PiAuthProvider[] }`, where
+  `PiAuthProvider = { id, name, authTypes: ("oauth"|"api_key")[], oauthLabel?, subscription, configured, source? }`.
+  Only providers with a usable method are listed. 503 when no Pi bridge is configured.
+- `POST /api/chat/pi/auth/login` `{ provider, authType }` -> `201 { id, provider, providerName, authType }`.
+  `401`-style validation is `400`; a second sign-in while one runs is `409` on the bridge.
+- `GET /api/chat/pi/auth/login/:id/events` SSE, replayable (`?after=` or `Last-Event-ID`). Events:
+  - `auth` `{ type: "info"|"auth_url"|"device_code"|"progress", ... }` (the bridge's notice)
+  - `prompt` `{ id, type: "text"|"secret"|"select"|"manual_code", message, placeholder?, options? }`
+  - `prompt_end` `{ id, cancelled? }`
+  - `done` `{ ok, error, provider, authType }` (stream closes)
+- `POST /api/chat/pi/auth/login/:id/respond` `{ value, promptId? }` -> `{ ok: true }`; `409` when the
+  question is no longer waiting.
+- `POST /api/chat/pi/auth/login/:id/cancel` -> `{ ok: true }`.
+
+A successful `done` drops the server's cached Pi model list, so a freshly signed-in provider's models
+appear on the next picker load. The Pi picker now trims only Anthropic (Opus/Sonnet/Haiku 5.5); every
+other provider Pi has credentials for is shown as-is.

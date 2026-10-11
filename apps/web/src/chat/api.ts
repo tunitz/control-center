@@ -1,4 +1,4 @@
-import type { Backend, ChatConfig, ChatMessage, ChatModel, ChatSession, Effort, PiConfig, PiSettings, SessionHit } from "./types";
+import type { Backend, ChatConfig, ChatMessage, ChatModel, ChatSession, CommandNote, Effort, PiAuthProvider, PiAuthType, PiConfig, PiSettings, SessionHit } from "./types";
 
 /** GET /api/chat/pi/dirs: subfolders of `path` (root is the home folder, parent null there). */
 export type PiDirList = { path: string; parent: string | null; entries: { name: string; path: string }[] };
@@ -37,8 +37,17 @@ export const chat = {
   messages: (id: string, before?: number) => {
     const p = new URLSearchParams({ limit: "40" });
     if (before != null) p.set("before", String(before));
-    return chatReq<{ messages: ChatMessage[]; hasMore: boolean }>("GET", `/sessions/${encodeURIComponent(id)}/messages?${p}`);
+    return chatReq<{ messages: ChatMessage[]; hasMore: boolean; commands: CommandNote[] }>("GET", `/sessions/${encodeURIComponent(id)}/messages?${p}`);
   },
+  /** Records a local command row so it survives a reload. Returns the stored row. */
+  addCommand: (id: string, name: string, body: string) =>
+    chatReq<CommandNote>("POST", `/sessions/${encodeURIComponent(id)}/commands`, { name, body }),
+  deleteMessage: (id: string, messageId: string) =>
+    chatReq<{ ok: true }>("DELETE", `/sessions/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`),
+  /** Drops the message and everything after it, then runs it again. Returns the new turn. */
+  retryMessage: (id: string, messageId: string) =>
+    chatReq<{ runId: string; userMessage: ChatMessage; assistantMessage: ChatMessage }>(
+      "POST", `/sessions/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}/retry`, {}),
   send: (id: string, o: { text: string; model?: string; effort?: Effort | null; files: File[] }) => {
     const fd = new FormData();
     fd.append("text", o.text);
@@ -58,6 +67,13 @@ export const chat = {
     chatReq<{ tokensBefore: number; tokensAfter: number }>("POST", `/sessions/${encodeURIComponent(sid)}/pi-compact`, instructions ? { instructions } : {}),
   piConfig: () => chatReq<PiConfig>("GET", "/pi-config"),
   putPiConfig: (patch: Partial<Omit<PiConfig, "knownTools">>) => chatReq<PiConfig>("PUT", "/pi-config", patch),
+  piAuthProviders: () => chatReq<{ providers: PiAuthProvider[] }>("GET", "/pi/auth/providers"),
+  piAuthStart: (provider: string, authType: PiAuthType) =>
+    chatReq<{ id: string; provider: string; providerName: string; authType: PiAuthType }>("POST", "/pi/auth/login", { provider, authType }),
+  piAuthRespond: (id: string, value: string, promptId?: string) =>
+    chatReq<{ ok: true }>("POST", `/pi/auth/login/${encodeURIComponent(id)}/respond`, promptId ? { value, promptId } : { value }),
+  piAuthCancel: (id: string) => chatReq<{ ok: true }>("POST", `/pi/auth/login/${encodeURIComponent(id)}/cancel`, {}),
+  piAuthEventsUrl: (id: string, after = 0) => `/api/chat/pi/auth/login/${encodeURIComponent(id)}/events?after=${after}`,
   credits: () => chatReq<{ text: string }>("GET", "/credits"),
   exportUrl: (id: string) => `/api/chat/sessions/${encodeURIComponent(id)}/export`,
 };

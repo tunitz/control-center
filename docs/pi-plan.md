@@ -20,7 +20,7 @@ Success criteria (all measurable):
 6. Hermes chats are unchanged: full existing suite green.
 7. Slash commands work in a Pi chat: every shared command (see T7b) behaves exactly as in a Hermes chat, `/credits` returns the balances with no model call, and Pi's own commands (extension commands, prompt templates, skill commands) appear in the palette and run.
 
-Out of scope: replacing Hermes, Pi packages/marketplace UI, themes/TUI settings, voice, multi-user, Pi `/login` OAuth flows, image input (DeepSeek is text-only; revisit with a vision model).
+Out of scope: replacing Hermes, Pi packages/marketplace UI, themes/TUI settings, voice, multi-user, image input (DeepSeek is text-only; revisit with a vision model). Pi `/login` was out of scope in this v1 plan; it is implemented in T10 below.
 
 ## 2. Current context and assumptions
 
@@ -265,3 +265,24 @@ Bugs the gate found, each fixed with a test that failed first:
 - Hermes picker: Sonnet 5.5, Haiku 5.5, DeepSeek Flash (OpenAI and local Llama removed by tun).
 - Pi picker (curated in `apps/server/src/chat/pi.ts`): all DeepSeek models, and only Opus 5.5, Sonnet 5.5, Haiku 5.5 from Anthropic (Pi lists 18 Anthropic models). The sidebar tags every chat Hermes or Pi.
 - Anthropic in Pi uses `ANTHROPIC_OAUTH_TOKEN` in `~/.local/share/cc-pi/env` (the bridge passes it to Pi). It is a Claude subscription token. LIVE RESULT: Anthropic answers third-party apps with 400 "Third-party apps now draw from your extra usage, not your plan limits", so Pi's Anthropic models need extra usage enabled on the account (or an API key in `ANTHROPIC_API_KEY`).
+
+## T10 status: `/login` in the chat (2026-10-12)
+
+DONE. Pi's provider sign-in is available from a Pi chat as `/login [provider]`; the T7b note that
+Pi built-in TUI commands are not offered still holds for `/reload`, `/tree` and the rest, but
+`/login` now has a server-driven implementation.
+
+- The bridge owns one Pi `ModelRuntime` pointed at `~/.local/share/cc-pi/agent` (the same
+  `auth.json` the spawned `pi --mode rpc` processes read), so a completed sign-in is usable on the
+  next run without restarting any chat. One sign-in runs at a time.
+- `pi-bridge/src/login.ts` maps the runtime's `prompt()`/`notify()` to SSE (`prompt`, `auth`) and
+  back over HTTP; `pi-bridge/src/bridge.ts` exposes `/auth/providers`, `/auth/login`,
+  `/auth/login/:id/{events,response,cancel}` behind the bearer token. `auth.json` is never returned.
+- Server routes live in `apps/server/src/chat/routes.ts`; the web sheet is
+  `apps/web/src/components/chat/LoginSheet.tsx` (open from the chat menu via `/login`).
+- Model curation changed so a signed-in provider is actually useful: only Anthropic is trimmed to
+  Opus/Sonnet/Haiku 5.5; every other provider Pi has a key for is shown.
+- Tests: `pi-bridge/test/login.test.ts` (scripted runtime), route tests in
+  `apps/server/src/chat/backend-routes.test.ts`, palette tests in `apps/web/src/chat/slash.test.ts`.
+  Live-verified against the installed Pi 1.1.0: `/auth/providers` lists the real provider set and a
+  DeepSeek API-key sign-in prompts for a `secret`, then cancels cleanly.

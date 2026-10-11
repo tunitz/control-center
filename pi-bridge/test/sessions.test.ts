@@ -37,10 +37,15 @@ describe("GET /sessions and /models", () => {
     expect(byId.bbbb2222.name).toBeUndefined();
   });
 
-  test("GET /models proxies get_available_models via a short-lived process when none is live", async () => {
+  test("GET /models always uses a fresh process, never a live chat's stale availability", async () => {
     const r = await api(h, "GET", "/models");
     expect(r.status).toBe(200);
     expect(r.json.models.map((m: any) => m.id)).toEqual(["deepseek-flash", "deepseek-pro"]);
     expect(h.bridge.chats.size()).toBe(0);
+    // A live chat stays untouched: /models must not reuse its snapshot (it predates a /login).
+    expect((await api(h, "POST", "/chats/m-live/start", {})).status).toBe(200);
+    const again = await api(h, "GET", "/models");
+    expect(again.status).toBe(200);
+    expect(h.bridge.chats.size()).toBe(1);
   });
 });

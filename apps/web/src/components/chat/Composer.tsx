@@ -38,6 +38,8 @@ export type ComposerProps = {
   onNew: () => void;
   onModel: (id: string) => void;
   onEffort: (e: Effort) => void;
+  /** Floating "jump to latest" button above the composer, shown while the thread is scrolled up. */
+  jump: { show: boolean; unseen: boolean; onJump: () => void };
 };
 
 export function Composer(p: ComposerProps) {
@@ -105,22 +107,29 @@ export function Composer(p: ComposerProps) {
     if ((PAGE_COMMANDS as readonly string[]).includes(cmd.name)) {
       const keep = text;
       setText("");
-      p.onAction(cmd.name, cmd.arg).then(msg => setNotice(msg)).catch(e => { setText(keep); setErr((e as Error).message); });
+      // `onAction` records the command row itself; here we only restore the text if it throws.
+      p.onAction(cmd.name, cmd.arg).catch(e => { setText(keep); setErr((e as Error).message); });
       return true;
     }
     if (cmd.name === "new") { p.onNew(); setText(""); return true; }
-    if (cmd.name === "stop") { if (p.running) p.onStop(); else setNotice("Nothing is running."); setText(""); return true; }
+    if (cmd.name === "stop") {
+      if (p.running) p.onNote("/stop", "Stopped the running task.");
+      else p.onNote("/stop", "Nothing is running.");
+      if (p.running) p.onStop();
+      setText("");
+      return true;
+    }
     if (cmd.name === "model") {
       const hit = p.models.find(m => modelUsable(m, p.chatBackend) && (m.id.toLowerCase() === cmd.arg.toLowerCase() || m.label.toLowerCase() === cmd.arg.toLowerCase()));
-      if (hit) { p.onModel(hit.id); setText(""); setNotice(`Model set to ${hit.label}.`); }
-      else if (!cmd.arg) setModelOpen(true);
-      else setNotice(`No model called "${cmd.arg}".`);
+      if (hit) { p.onModel(hit.id); setText(""); p.onNote("/model", `Model set to ${hit.label}.`); }
+      else if (!cmd.arg) { setModelOpen(true); p.onNote("/model", "Choose a model in the picker."); }
+      else p.onNote("/model", `No model called "${cmd.arg}".`);
       return true;
     }
     if (cmd.name === "reasoning") {
       const e = parseEffort(cmd.arg);
-      if (!e || !efforts.includes(e)) { setNotice(efforts.length ? `Use one of: ${efforts.join(", ")}.` : "This model has no thinking control."); return true; }
-      p.onEffort(e); setText(""); setNotice(`Thinking set to ${e}.`);
+      if (!e || !efforts.includes(e)) { p.onNote("/reasoning", efforts.length ? `Use one of: ${efforts.join(", ")}.` : "This model has no thinking control."); return true; }
+      p.onEffort(e); setText(""); p.onNote("/reasoning", `Thinking set to ${e}.`);
       return true;
     }
     return false;
@@ -185,6 +194,13 @@ export function Composer(p: ComposerProps) {
   return (
     <div className="composer-wrap" onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={onDrop}>
       <div className="comp-inner">
+        {p.jump.show && (
+          <button className={`ib jump-btn${p.jump.unseen ? " has-new" : ""}`} type="button"
+            aria-label={p.jump.unseen ? "New messages, scroll to latest" : "Scroll to latest"}
+            title={p.jump.unseen ? "New messages — jump to latest" : "Jump to latest"} onClick={p.jump.onJump}>
+            <Icon name="down" />
+          </button>
+        )}
         {slash.length > 0 && (
           <div className="pop" id="cmd" role="listbox" aria-label="Commands" style={{ position: "absolute", bottom: "calc(100% + 8px)", left: 0, right: 0 }}>
             {slash.map(c => (

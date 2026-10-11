@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createBridge, type Bridge } from "../src/bridge";
+import { createBridge, type Bridge, type BridgeDeps } from "../src/bridge";
 import type { BridgeConfig } from "../src/config";
 
 export const TOKEN = "test-token-0123456789abcdef";
@@ -39,11 +39,11 @@ export function makeConfig(root: string, over: Partial<BridgeConfig> = {}): Brid
   };
 }
 
-export async function harness(over: Partial<BridgeConfig> = {}): Promise<Harness> {
+export async function harness(over: Partial<BridgeConfig> = {}, deps: BridgeDeps = {}): Promise<Harness> {
   const root = mkdtempSync(join(tmpdir(), "pi-bridge-test-"));
   mkdirSync(join(root, "sessions"), { recursive: true });
   const cfg = makeConfig(root, over);
-  const bridge = createBridge(cfg);
+  const bridge = createBridge(cfg, deps);
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: bridge.fetch });
   const base = `http://127.0.0.1:${server.port}`;
   return {

@@ -66,6 +66,7 @@
 .chatx .pill .i{width:14px;height:14px;color:var(--mut)}
 .chatx .ib{width:36px;height:36px;border:0;background:transparent;color:var(--mut);border-radius:10px;display:inline-grid;place-items:center;padding:0;flex:none}
 .chatx .ib:hover{background:var(--surface2);color:var(--text)}
+.chatx .ib.danger:hover{background:var(--err-bg);color:var(--err)}
 .chatx .ib[aria-expanded=true]{background:var(--surface2);color:var(--text)}
 .chatx .thread-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:auto;scrollbar-width:thin}
 .chatx .col{max-width:760px;width:100%;margin:0 auto;padding:28px var(--gut) 32px;min-height:100%;display:flex;flex-direction:column;gap:28px}
@@ -116,7 +117,7 @@
 .chatx .stat-ok::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
 .chatx .stat-run{color:var(--accent-ink);font-size:13px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;flex:none}
 .chatx .out{margin:0;background:var(--surface2);border:0;border-top:1px solid var(--line);border-radius:0;padding:10px 12px 12px;font-size:13px;line-height:1.6;overflow:auto;max-height:360px;white-space:pre;color:var(--text)}
-.chatx .thought{font-size:14px;color:var(--mut);padding:10px 12px 12px 34px;border-top:1px solid var(--line);line-height:1.6}
+.chatx .thought{font-size:14px;color:var(--mut);padding:10px 12px 12px 34px;border-top:1px solid var(--line);line-height:1.6;max-height:min(40vh,300px);overflow-y:auto;overscroll-behavior:contain}
 .chatx .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;max-width:100%}
 .chatx table{border-collapse:collapse;width:100%;min-width:460px;font-size:14px}
 .chatx th, .chatx td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -140,8 +141,11 @@
 .chatx .appr-btns{display:flex;gap:8px;flex-wrap:wrap}
 .chatx .composer-wrap{flex:none;position:relative;background:var(--bg)}
 .chatx .comp-inner{max-width:760px;margin:0 auto;position:relative;padding:8px var(--gut) 12px}
-.chatx .jump{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:20;height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
-.chatx .jump:hover{background:var(--surface2)}
+/* Floating scroll-to-latest: sits just above the composer, right-aligned with it. A dot marks content that arrived while reading up. */
+.chatx .jump-btn{position:absolute;right:0;bottom:calc(100% + 8px);z-index:6;width:40px;height:40px;border-radius:50%;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
+.chatx .jump-btn:hover{background:var(--surface2);color:var(--text)}
+.chatx .jump-btn.has-new{color:var(--text)}
+.chatx .jump-btn.has-new::after{content:"";position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:var(--accent);border:2px solid var(--surface)}
 .chatx .composer{background:var(--surface);border:1px solid var(--ctl-line);border-radius:14px;padding:10px 10px 8px;display:flex;flex-direction:column;gap:6px;transition:border-color .15s}
 .chatx .composer:focus-within{border-color:var(--accent)}
 .chatx .attach-row{display:flex;flex-wrap:wrap;gap:8px;padding:2px 2px 4px}
@@ -307,7 +311,9 @@
 .chatx.phone .composer textarea{font-size:16px;line-height:1.4;padding:8px 13px 4px;min-height:36px}
 .chatx.phone .comp-bottom{flex-wrap:nowrap;justify-content:flex-start;gap:4px;min-height:44px}
 .chatx.phone .comp-left,.chatx.phone .comp-right{gap:4px;min-width:0}
-.chatx.phone .comp-left{flex:none}
+.chatx.phone .comp-left{flex:none;gap:0}
+/* Keep attach and camera visually tight on the phone: the 36px hit boxes leave a wide gap around the 18px glyphs. */
+.chatx.phone .comp-left .ib + .ib{margin-left:-8px}
 .chatx.phone .comp-right{margin-left:auto;flex-wrap:nowrap;justify-content:flex-end}
 .chatx.phone .comp-right .pop-wrap{position:static}
 .chatx.phone .pill{height:44px;padding:0 10px;gap:4px;font-size:13px;color:var(--text)}
@@ -325,7 +331,7 @@
 
 .chatx.phone .pop.model{top:auto;bottom:calc(100% + 8px);left:0;right:0;width:auto;max-height:min(46vh,340px);overflow-y:auto}
 .chatx.phone .opt,.chatx.phone .menu-item,.chatx.phone .cmd-item{min-height:44px}
-.chatx.phone .jump{bottom:calc(100% + 6px)}
+
 
 /* Pi: approvals you can answer, and the task list */
 .chatx .appr-actions{display:flex;gap:10px;margin-top:10px}
@@ -382,3 +388,23 @@
 .chatx .sheet-foot{display:flex;flex-direction:column;gap:8px;padding:12px 16px 16px;border-top:1px solid var(--line)}
 .chatx .btn.lg{min-height:44px;width:100%}
 .chatx .ib.tap{width:44px;height:44px}
+
+/* Pi provider sign-in (/login) */
+.chatx .login-sheet{max-height:85vh}
+.chatx .login-sheet:focus{outline:none}
+.chatx .login-sheet .sheet-body{gap:12px}
+.chatx .auth-search{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:0 10px;min-height:44px}
+.chatx .auth-search .i{color:var(--mut)}
+.chatx .auth-search input{flex:1;min-width:0;border:0;background:transparent;color:var(--text);font-size:15px;outline:none;min-height:42px}
+.chatx .auth-search:focus-within{border-color:var(--accent)}
+.chatx .auth-methods{display:flex;flex-direction:column;gap:8px}
+.chatx .auth-card{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:12px;padding:12px}
+.chatx .auth-url{white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:visible;font-size:12px}
+.chatx .auth-code{font-size:22px;font-weight:700;letter-spacing:2px;text-align:center}
+.chatx .auth-prompt{display:flex;flex-direction:column;gap:8px}
+.chatx .auth-question{margin:0;font-size:14px;font-weight:600}
+.chatx .login-sheet .err-row{margin:0;color:var(--err);font-size:13px}
+.chatx .dir-row .tag{flex:none;padding:0 8px;border-radius:999px;border:1px solid var(--line);color:var(--mut);font-size:11px;line-height:20px}
+
+/* `/yolo` is on: make it impossible to miss that approvals are being auto-answered. */
+.chatx .yolo-badge{flex:none;padding:0 8px;border-radius:999px;border:1px solid var(--err-line);background:var(--err-bg);color:var(--err);font-size:11px;font-weight:700;letter-spacing:.5px;line-height:20px}

@@ -43,6 +43,37 @@ test("deleteSession removes mirror rows and returns attachment paths for file cl
   expect((db.query("SELECT count(*) c FROM chat_messages").get() as any).c).toBe(0);
 });
 
+test("deleteMessage drops one message and returns its file paths; truncateFrom drops a seq range", () => {
+  mk("s1", 1);
+  for (let i = 1; i <= 4; i++) S.insertMessage(db, { id: `m${i}`, sessionId: "s1", seq: i, role: i % 2 ? "user" : "assistant", text: `t${i}`, createdAt: i, status: "complete", attachments: i === 1 ? [
+    { id: "a1", kind: "file", name: "x.txt", mime: "text/plain", size: 3, sha256: "h", path: "/p/x.txt", w: null, h: null },
+  ] : i === 3 ? [
+    { id: "a3", kind: "file", name: "y.txt", mime: "text/plain", size: 3, sha256: "h", path: "/p/y.txt", w: null, h: null },
+  ] : [] });
+  expect(S.getMessageMeta(db, "m2")).toEqual({ sessionId: "s1", seq: 2, role: "assistant", text: "t2" });
+  expect(S.deleteMessage(db, "m2")).toEqual([]);
+  expect(S.getMessageMeta(db, "m2")).toBeNull();
+  expect(S.listAllMessages(db, "s1").map(m => m.seq)).toEqual([1, 3, 4]);
+  // A retry branches at seq 3: that row and everything after it go, with their files.
+  expect(S.truncateFrom(db, "s1", 3)).toEqual(["/p/y.txt"]);
+  expect(S.listAllMessages(db, "s1").map(m => m.seq)).toEqual([1]);
+  expect(S.getMessageMeta(db, "nope")).toBeNull();
+});
+
+test("commands: insert anchors, list is ordered, deleteCommandsFrom drops a tail; lastSeq tracks messages", () => {
+  mk("s1", 1);
+  expect(S.lastSeq(db, "s1")).toBe(0);
+  S.insertMessage(db, { id: "m1", sessionId: "s1", seq: 1, role: "user", text: "hi", createdAt: 1, status: "complete", attachments: [] });
+  expect(S.lastSeq(db, "s1")).toBe(1);
+  const a = S.insertCommand(db, { sessionId: "s1", name: "help", body: "commands", afterSeq: S.lastSeq(db, "s1"), createdAt: 5 });
+  S.insertCommand(db, { sessionId: "s1", name: "model", body: "set", afterSeq: 1, createdAt: 6 });
+  expect(a).toMatchObject({ name: "help", body: "commands", afterSeq: 1, createdAt: 5 });
+  expect(typeof a.id).toBe("number");
+  expect(S.listCommands(db, "s1").map(c => c.name)).toEqual(["help", "model"]);
+  S.deleteCommandsFrom(db, "s1", 1);
+  expect(S.listCommands(db, "s1")).toEqual([]);
+});
+
 test("listMessages: newest page by default, before= paging, ascending order, hasMore, attachments with url", () => {
   mk("s1", 1);
   for (let i = 1; i <= 5; i++) S.insertMessage(db, { id: `m${i}`, sessionId: "s1", seq: i, role: i % 2 ? "user" : "assistant", text: `t${i}`, createdAt: i, status: "complete", attachments: i === 5 ? [

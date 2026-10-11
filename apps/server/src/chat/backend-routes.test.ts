@@ -98,7 +98,7 @@ test("backend is immutable: PATCH cannot change it", async () => {
 test("GET /models merges Pi models with a backend field on every entry; hermes entries say 'hermes'", async () => {
   const models = (await js(await run(req("GET", "/api/chat/models")))).body as { id: string; backend: string; online: boolean }[];
   expect(models.every((m) => m.backend === "hermes" || m.backend === "pi")).toBe(true);
-  expect(models.filter((m) => m.backend === "pi").map((m) => m.id)).toEqual(["deepseek-flash", "deepseek-pro", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
+  expect(models.filter((m) => m.backend === "pi").map((m) => m.id)).toEqual(["deepseek-flash", "deepseek-pro", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "gpt-6-luna"]);
   expect(models.filter((m) => m.backend === "pi").every((m) => m.online === true)).toBe(true);
   expect(models.filter((m) => m.backend === "hermes").length).toBeGreaterThan(0);
   expect(models.filter((m) => m.backend === "hermes").every((m) => m.backend === "hermes")).toBe(true);
@@ -399,4 +399,115 @@ test("one chat's settings never leak into another chat: each run sends that chat
   await js(await run(req("POST", `/api/chat/sessions/${b.id}/send`, fd("two"))));
   await waitIdle(b.id);
   expect(lastStart().settings).toEqual({ tools: null, steeringMode: "one-at-a-time", followUpMode: "one-at-a-time", autoCompaction: true, autoRetry: true });
+});
+
+/* ---------- Pi provider sign-in (/login) ---------- */
+
+type AuthFrame = { event: string; data: any };
+
+function parseAuthFrame(raw: string): AuthFrame | null {
+  let event = "message";
+  const data: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+  }
+  if (data.length === 0) return null;
+  try { return { event, data: JSON.parse(data.join("\n")) }; } catch { return null; }
+}
+
+/** Reads SSE frames from an open response until `until` matches. */
+async function readAuth(res: Response, until: (f: AuthFrame) => boolean): Promise<AuthFrame[]> {
+  const reader = res.body!.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  const out: AuthFrame[] = [];
+  try {
+    while (out.length < 50) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const f = parseAuthFrame(buf.slice(0, idx));
+        buf = buf.slice(idx + 2);
+        if (!f) continue;
+        out.push(f);
+        if (until(f)) return out;
+      }
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  return out;
+}
+
+test("GET /pi/auth/providers passes the bridge's provider list through", async () => {
+  const r = await js(await run(req("GET", "/api/chat/pi/auth/providers")));
+  expect(r.status).toBe(200);
+  expect(r.body.providers.map((p: any) => p.id)).toEqual(["anthropic", "deepseek"]);
+  expect(r.body.providers.find((p: any) => p.id === "anthropic").oauthLabel).toBe("Sign in with Claude");
+});
+
+test("POST /pi/auth/login validates and returns the sign-in id", async () => {
+  expect((await js(await run(req("POST", "/api/chat/pi/auth/login", {})))).status).toBe(400);
+  expect((await js(await run(req("POST", "/api/chat/pi/auth/login", { provider: "anthropic", authType: "x" })))).status).toBe(400);
+  const ok = await js(await run(req("POST", "/api/chat/pi/auth/login", { provider: "anthropic", authType: "oauth" })));
+  expect(ok.status).toBe(201);
+  expect(ok.body).toMatchObject({ provider: "anthropic", providerName: "Anthropic", authType: "oauth" });
+  expect(typeof ok.body.id).toBe("string");
+});
+
+test("a sign-in streams its notices/prompt, and respond completes it", async () => {
+  const { body: started } = await js(await run(req("POST", "/api/chat/pi/auth/login", { provider: "anthropic", authType: "oauth" })));
+  const id = started.id as string;
+  const res = await run(req("GET", `/api/chat/pi/auth/login/${id}/events`));
+  expect(res.headers.get("content-type")).toContain("text/event-stream");
+  const reader = res.body!.getReader();
+  // Keep the same stream open while we answer, so we see the terminal done.
+  const dec = new TextDecoder();
+  let buf = "";
+  const seen: AuthFrame[] = [];
+  const next = async (until: (f: AuthFrame) => boolean): Promise<AuthFrame> => {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("stream ended early");
+      buf += dec.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const f = parseAuthFrame(buf.slice(0, idx));
+        buf = buf.slice(idx + 2);
+        if (!f) continue;
+        seen.push(f);
+        if (until(f)) return f;
+      }
+    }
+  };
+  await next((f) => f.event === "prompt");
+  expect(seen.find((f) => f.event === "auth")!.data).toMatchObject({ type: "auth_url", url: "https://example.com/sign-in" });
+  const prompt = seen.find((f) => f.event === "prompt")!;
+  const answer = await js(await run(req("POST", `/api/chat/pi/auth/login/${id}/respond`, { value: "abc-123", promptId: prompt.data.id })));
+  expect(answer.status).toBe(200);
+  expect(bridge.authAnswers).toEqual([{ id, value: "abc-123", promptId: "p1" }]);
+  const done = await next((f) => f.event === "done");
+  expect(done.data).toMatchObject({ ok: true, error: null });
+  void reader.cancel().catch(() => {});
+});
+
+test("a sign-in can be cancelled", async () => {
+  const { body: started } = await js(await run(req("POST", "/api/chat/pi/auth/login", { provider: "anthropic", authType: "oauth" })));
+  const id = started.id as string;
+  const res = await run(req("GET", `/api/chat/pi/auth/login/${id}/events`));
+  const cancel = await js(await run(req("POST", `/api/chat/pi/auth/login/${id}/cancel`, {})));
+  expect(cancel.status).toBe(200);
+  const frames = await readAuth(res, (f) => f.event === "done");
+  expect(frames.find((f) => f.event === "done")!.data.error).toBe("cancelled");
+});
+
+test("auth routes are 503 without a Pi bridge and need the x-cc header", async () => {
+  const noPi = { ...ctx, pi: undefined };
+  const r = await handleChat(req("GET", "/api/chat/pi/auth/providers"), new URL("http://cc.local/api/chat/pi/auth/providers"), noPi);
+  expect(r.status).toBe(503);
+  const noCsrf = new Request("http://cc.local/api/chat/pi/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: "anthropic", authType: "oauth" }) });
+  expect((await run(noCsrf)).status).toBe(403);
 });

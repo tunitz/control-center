@@ -23,6 +23,31 @@ export type PiConfig = {
   knownTools: string[];
 };
 
+/** Provider sign-in (the chat's `/login`). Mirrors the bridge's login.ts types. */
+export type PiAuthType = "oauth" | "api_key";
+export type PiAuthProvider = {
+  id: string;
+  name: string;
+  authTypes: PiAuthType[];
+  oauthLabel?: string;
+  subscription: boolean;
+  configured: boolean;
+  source?: string;
+};
+export type PiAuthPromptOption = { id: string; label: string; description?: string };
+export type PiAuthPrompt = {
+  id: string;
+  type: "text" | "secret" | "select" | "manual_code";
+  message: string;
+  placeholder?: string;
+  options?: PiAuthPromptOption[];
+};
+export type PiAuthEvent =
+  | { type: "info"; message: string; links?: { url: string; label?: string }[] }
+  | { type: "auth_url"; url: string; instructions?: string }
+  | { type: "device_code"; userCode: string; verificationUri: string; intervalSeconds?: number; expiresInSeconds?: number }
+  | { type: "progress"; message: string };
+
 export const PI_BRIDGE_DEFAULT_URL = "http://127.0.0.1:3050";
 const MODEL_CACHE_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -166,6 +191,47 @@ export class PiClient implements ChatBackend {
     return { tokensBefore: Number(r.data?.tokensBefore) || 0, tokensAfter: Number(r.data?.estimatedTokensAfter) || 0 };
   }
 
+  /** Providers Pi can sign in to, with their auth methods and current status. */
+  async authProviders(): Promise<PiAuthProvider[]> {
+    const r = await this.call("GET", "/auth/providers");
+    const list: unknown[] = Array.isArray(r.providers) ? r.providers : [];
+    return list.filter(isAuthProvider);
+  }
+
+  /** Starts a sign-in; the bridge streams its questions on the returned id's event stream. */
+  async authStart(provider: string, authType: PiAuthType): Promise<{ id: string; provider: string; providerName: string; authType: PiAuthType }> {
+    const r = await this.call("POST", "/auth/login", { provider, authType });
+    if (typeof r.id !== "string" || r.id === "") throw new ChatError(502, "pi bridge returned no sign-in id");
+    return { id: r.id, provider: String(r.provider ?? provider), providerName: String(r.providerName ?? provider), authType };
+  }
+
+  async authRespond(id: string, value: string, promptId?: string): Promise<void> {
+    await this.call("POST", `/auth/login/${encodeURIComponent(id)}/response`, promptId ? { value, promptId } : { value });
+  }
+
+  async authCancel(id: string): Promise<void> {
+    const res = await this.raw("POST", `/auth/login/${encodeURIComponent(id)}/cancel`, {});
+    if (res.status === 404) return;
+    if (!res.ok) throw await this.failure("cancel sign-in", res);
+  }
+
+  /**
+   * Streams a sign-in's questions/notices. A successful `done` also drops the cached model list,
+   * so a freshly signed-in provider's models appear on the next picker load instead of up to 60 s later.
+   */
+  async authEvents(id: string, after: number, signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    const body = await this.open(`/auth/login/${encodeURIComponent(id)}/events?after=${after}`, signal);
+    const dec = new TextDecoder();
+    const scan = new TransformStream<Uint8Array, Uint8Array>({
+      transform: (chunk, controller) => {
+        controller.enqueue(chunk);
+        const text = dec.decode(chunk, { stream: true });
+        if (/event: done\n[^]*?"ok":true/.test(text)) this.cache = null;
+      },
+    });
+    return body.pipeThrough(scan);
+  }
+
   /* ---------- internals ---------- */
 
   private async *frames(
@@ -235,14 +301,20 @@ export class PiClient implements ChatBackend {
 }
 
 /**
- * Pi knows every model of every provider it has a key for (18 from Anthropic alone). The picker
- * shows a short curated set: all DeepSeek models, and Opus, Sonnet and Haiku 5.5 from Anthropic.
+ * The bridge lists every model of every provider Pi has credentials for. Only Anthropic is noisy
+ * (18 models), so the picker trims it to the Opus/Sonnet/Haiku 5.5 set; every other provider Pi
+ * has a key for (including one just added with `/login`) is shown as-is.
  */
 const PI_ANTHROPIC_SHOWN = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
 function curated(m: BridgeModel): boolean {
-  if (m.provider === "deepseek") return true;
   if (m.provider === "anthropic") return PI_ANTHROPIC_SHOWN.has(m.id as string);
-  return false;
+  return true;
+}
+
+function isAuthProvider(v: unknown): v is PiAuthProvider {
+  if (!v || typeof v !== "object") return false;
+  const p = v as Record<string, unknown>;
+  return typeof p.id === "string" && typeof p.name === "string" && Array.isArray(p.authTypes);
 }
 
 function toModelDef(m: BridgeModel): ChatModelDef {
@@ -271,6 +343,26 @@ function splitContent(message: string | ContentPart[]): { text: string; images: 
     }
   }
   return { text: texts.join("\n"), images };
+}
+
+/**
+ * Provider failures arrive as `400 {"type":"error","error":{"message":"..."},...}`. Unwrap that to the
+ * provider's own sentence, and give the Anthropic subscription restriction a next step instead of JSON.
+ */
+export function friendlyPiError(raw: string): string {
+  const text = raw.trim();
+  const m = /^(?:\d{3}\s*)?(\{[\s\S]*\})$/.exec(text);
+  if (!m) return text;
+  let body: any;
+  try { body = JSON.parse(m[1]); } catch { return text; }
+  const detail = typeof body?.error?.message === "string" ? body.error.message
+    : typeof body?.message === "string" ? body.message
+    : null;
+  if (!detail) return text;
+  if (/extra usage/i.test(detail) && /third-party|plan limits/i.test(detail)) {
+    return "Anthropic subscription tokens cannot run third-party apps. Add extra usage at claude.ai/settings/usage, or run /login and pick Anthropic then Sign in with an API key.";
+  }
+  return detail;
 }
 
 const TODO_STATUS = new Set(["pending", "in_progress", "completed"]);
@@ -360,7 +452,7 @@ export function mapPiEvent(event: string, data: any, model: string, st: PiMapSta
       if (stop === "aborted") return [{ type: "done", status: "interrupted", error: null, model }];
       if (stop === "error") {
         const err = typeof data?.errorMessage === "string" && data.errorMessage !== "" ? data.errorMessage : "pi run failed";
-        return [{ type: "done", status: "failed", error: err, model }];
+        return [{ type: "done", status: "failed", error: friendlyPiError(err), model }];
       }
       return [{ type: "done", status: "complete", error: null, model }];
     }

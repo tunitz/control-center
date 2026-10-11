@@ -1,6 +1,6 @@
 // DEV ONLY. In-memory stand-in for /api/chat and the chat run SSE. Installed only when
 // localStorage 'cc-chat-mock' === '1' or the URL has ?chatmock=1. Everything else passes through.
-import type { Attachment, ChatMessage, ChatModel, ChatSession, Effort, RunEvent } from "./types";
+import type { Attachment, ChatMessage, ChatModel, ChatSession, CommandNote, Effort, RunEvent } from "./types";
 
 export function mockEnabled(): boolean {
   try {
@@ -57,6 +57,7 @@ type RunRec = {
 type Store = {
   sessions: ChatSession[];
   messages: Map<string, ChatMessage[]>;
+  commands: Map<string, CommandNote[]>;
   runs: Map<string, RunRec>;
   files: Map<string, Attachment>;
   globalListeners: Set<(d: unknown) => void>;
@@ -115,6 +116,7 @@ function seed(store: Store) {
   const add = (s: ChatSession) => {
     store.sessions.push(s);
     store.messages.set(s.id, []);
+    store.commands.set(s.id, []);
     return s;
   };
   const push = (sid: string, m: ChatMessage) => store.messages.get(sid)!.push(m);
@@ -289,7 +291,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 export function installChatMock(): void {
   if (!mockEnabled() || (globalThis as Record<string, unknown>).__ccChatMock) return;
   (globalThis as Record<string, unknown>).__ccChatMock = true;
-  const store: Store = { sessions: [], messages: new Map(), runs: new Map(), files: new Map(), globalListeners: new Set() };
+  const store: Store = { sessions: [], messages: new Map(), commands: new Map(), runs: new Map(), files: new Map(), globalListeners: new Set() };
   seed(store);
   const realFetch = window.fetch.bind(window);
   const sessionOf = (id: string) => store.sessions.find(s => s.id === id);
@@ -320,6 +322,7 @@ export function installChatMock(): void {
       const s = sess(nid("s-"), "New chat", { ago: 0, model: b.model ?? "claude-sonnet-5-5", effort: b.effort ?? "medium", titleAuto: true });
       store.sessions.push(s);
       store.messages.set(s.id, []);
+      store.commands.set(s.id, []);
       return json(s, 201);
     }
     let m: RegExpExecArray | null;
@@ -339,6 +342,7 @@ export function installChatMock(): void {
         if (s.runState === "running") return json({ error: "run active" }, 409);
         store.sessions = store.sessions.filter(x => x !== s);
         store.messages.delete(s.id);
+        store.commands.delete(s.id);
         return json({ ok: true });
       }
     }
@@ -349,7 +353,48 @@ export function installChatMock(): void {
       const limit = Number(url.searchParams.get("limit") ?? 40);
       const eligible = before ? all.filter(x => x.seq < Number(before)) : all;
       const page = eligible.slice(-limit);
-      return json({ messages: page, hasMore: eligible.length > page.length });
+      return json({ messages: page, hasMore: eligible.length > page.length, commands: store.commands.get(sid) ?? [] });
+    }
+    if ((m = /^\/sessions\/([^/]+)\/commands$/.exec(p)) && method === "POST") {
+      const sid = decodeURIComponent(m[1]);
+      if (!sessionOf(sid)) return json({ error: "not found" }, 404);
+      const b = typeof body === "string" ? JSON.parse(body) : {};
+      const name = String(b.name ?? "").replace(/^\//, "");
+      if (!name) return json({ error: "name is required" }, 400);
+      const afterSeq = (store.messages.get(sid) ?? []).reduce((n, x) => Math.max(n, x.seq), 0);
+      const note: CommandNote = { id: ++counter, name, body: String(b.body ?? ""), afterSeq, createdAt: Date.now() };
+      store.commands.set(sid, [...(store.commands.get(sid) ?? []), note]);
+      return json(note, 201);
+    }
+    if ((m = /^\/sessions\/([^/]+)\/messages\/([^/]+)(\/retry)?$/.exec(p))) {
+      const sid = decodeURIComponent(m[1]);
+      const mid = decodeURIComponent(m[2]);
+      const list = store.messages.get(sid);
+      const target = list?.find(x => x.id === mid);
+      if (!list || !target) return json({ error: "message not found" }, 404);
+      if (m[3] === "/retry") {
+        if (method !== "POST") return json({ error: "not found" }, 404);
+        if (target.role !== "user") return json({ error: "only a user message can be retried" }, 400);
+        const s = sessionOf(sid)!;
+        if (s.runState === "running") return json({ error: "run active" }, 409);
+        // Rebranch: drop the message and everything after it, then run it again.
+        store.messages.set(sid, list.filter(x => x.seq < target.seq));
+        store.commands.set(sid, (store.commands.get(sid) ?? []).filter(c => c.afterSeq < target.seq));
+        const seq = target.seq;
+        const userMessage = msg(sid, seq, "user", target.text, { attachments: target.attachments });
+        const runId = nid("run-");
+        const assistantMessage = msg(sid, seq + 1, "assistant", "", { status: "running", runId, model: s.model });
+        store.messages.get(sid)!.push(userMessage, assistantMessage);
+        startScripted(store, runId, sid, assistantMessage);
+        return json({ runId, userMessage, assistantMessage }, 201);
+      }
+      if (method === "DELETE") {
+        const s = sessionOf(sid)!;
+        if (s.runState === "running") return json({ error: "run active" }, 409);
+        store.messages.set(sid, list.filter(x => x.id !== mid));
+        store.commands.set(sid, (store.commands.get(sid) ?? []).filter(c => c.afterSeq < target.seq));
+        return json({ ok: true });
+      }
     }
     if ((m = /^\/sessions\/([^/]+)\/send$/.exec(p)) && method === "POST") {
       const sid = decodeURIComponent(m[1]);

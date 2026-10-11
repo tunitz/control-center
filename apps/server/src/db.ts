@@ -50,6 +50,9 @@ export const CHAT_SCHEMA = `
     expected INTEGER NOT NULL, since_ms INTEGER NOT NULL, deadline_ms INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS chat_seen (session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
     hermes_msg_id INTEGER NOT NULL, PRIMARY KEY (session_id, hermes_msg_id)) WITHOUT ROWID;
+  CREATE TABLE IF NOT EXISTS chat_commands (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL, name TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL);
+  CREATE INDEX IF NOT EXISTS chat_commands_session ON chat_commands(session_id, seq, id);
   CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_fts USING fts5(message_id UNINDEXED, text);
   CREATE TRIGGER IF NOT EXISTS chat_messages_ai AFTER INSERT ON chat_messages BEGIN
     INSERT INTO chat_messages_fts(message_id, text) VALUES (new.id, new.text); END;

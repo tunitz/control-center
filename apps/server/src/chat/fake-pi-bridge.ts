@@ -43,6 +43,29 @@ type ChatRec = {
 
 export type FakeRequest = { method: string; path: string; auth: string | null; body: any };
 
+export type FakeAuthProvider = {
+  id: string;
+  name: string;
+  authTypes: ("oauth" | "api_key")[];
+  oauthLabel?: string;
+  subscription?: boolean;
+  configured?: boolean;
+  source?: string;
+};
+
+/** One scripted sign-in: notify -> prompt -> (answer) -> done. */
+type AuthRec = {
+  id: string;
+  provider: string;
+  providerName: string;
+  authType: "oauth" | "api_key";
+  seq: number;
+  ring: Frame[];
+  subs: Set<Sub>;
+  answer: ((value: string) => void) | null;
+  done: boolean;
+};
+
 export const FAKE_MODELS: FakeModel[] = [
   { provider: "deepseek", id: "deepseek-flash", name: "DeepSeek V4.1 Flash", reasoning: true },
   { provider: "deepseek", id: "deepseek-pro", name: "DeepSeek V4.1 Pro", reasoning: true },
@@ -63,6 +86,13 @@ export class FakePiBridge {
   readonly chats = new Map<string, ChatRec>();
   readonly requests: FakeRequest[] = [];
   readonly uiResponses: any[] = [];
+  readonly authProviders: FakeAuthProvider[] = [
+    { id: "anthropic", name: "Anthropic", authTypes: ["oauth", "api_key"], oauthLabel: "Sign in with Claude", subscription: true, configured: false },
+    { id: "deepseek", name: "DeepSeek", authTypes: ["api_key"], configured: true, source: "DEEPSEEK_API_KEY" },
+  ];
+  readonly authLogins = new Map<string, AuthRec>();
+  readonly authAnswers: { id: string; value: string; promptId?: string }[] = [];
+  authStarts = 0;
   config: Record<string, any> = { appendSystemPrompt: "", agentsMd: "", defaultTools: null, gate: { extraProtectedPaths: [], extraRisky: [] } };
   modelsCalls = 0;
   /** The next N GET /models calls fail with 500 (for the no-cache-on-failure test). */
@@ -128,6 +158,13 @@ export class FakePiBridge {
       return json(200, { models: this.models });
     }
     if (p === "/config" && method === "GET") return json(200, { ...this.config, knownTools: ["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"] });
+    if (method === "GET" && p === "/auth/providers") return json(200, { providers: this.authProviders });
+    if (method === "POST" && p === "/auth/login") return this.startAuth(body);
+    const am = /^\/auth\/login\/([^/]+)\/(events|response|cancel)$/.exec(p);
+    if (am) {
+      if (method === "GET" && am[2] === "events") return this.authEvents(am[1], url);
+      if (method === "POST" && am[2] !== "events") return this.authAction(am[1], am[2], body);
+    }
     if (method === "GET" && p === "/dirs") return this.listDirs(url.searchParams.get("path"));
     if (method === "POST" && p === "/dirs") return this.makeDir(body);
     if (p === "/config" && method === "PUT") {
@@ -301,6 +338,69 @@ export class FakePiBridge {
       },
     });
     return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8" } });
+  }
+
+  private startAuth(body: any): Response {
+    const provider = this.authProviders.find((p) => p.id === body.provider);
+    if (!provider) return json(400, { error: `unknown provider: ${String(body.provider)}` });
+    if (!provider.authTypes.includes(body.authType)) return json(400, { error: `${provider.name} does not support ${String(body.authType)}` });
+    const id = `login-${++this.authStarts}`;
+    const rec: AuthRec = { id, provider: provider.id, providerName: provider.name, authType: body.authType, seq: 0, ring: [], subs: new Set(), answer: null, done: false };
+    this.authLogins.set(id, rec);
+    this.authEmit(rec, "auth", { type: "auth_url", url: "https://example.com/sign-in", instructions: "Open the page" });
+    this.authEmit(rec, "prompt", { id: "p1", type: "manual_code", message: "Paste the code", placeholder: "code" });
+    rec.answer = () => {
+      this.authEmit(rec, "auth", { type: "progress", message: "Saved" });
+      this.authEmit(rec, "done", { ok: true, error: null, provider: rec.provider, authType: rec.authType });
+    };
+    return json(201, { id, provider: provider.id, providerName: provider.name, authType: body.authType });
+  }
+
+  private authAction(id: string, action: string, body: any): Response {
+    const rec = this.authLogins.get(id);
+    if (!rec) return json(404, { error: "no sign-in with that id" });
+    if (action === "cancel") {
+      rec.done = true;
+      this.authEmit(rec, "done", { ok: false, error: "cancelled", provider: rec.provider, authType: rec.authType });
+      return json(200, { ok: true });
+    }
+    if (rec.done || !rec.answer) return json(409, { error: "this question is no longer waiting" });
+    this.authAnswers.push({ id, value: body.value, promptId: body.promptId });
+    const answer = rec.answer;
+    rec.answer = null;
+    answer(body.value);
+    return json(200, { ok: true });
+  }
+
+  private authEvents(id: string, url: URL): Response {
+    const rec = this.authLogins.get(id);
+    if (!rec) return json(404, { error: "no sign-in with that id" });
+    const after = Number(url.searchParams.get("after") ?? "0");
+    const enc = new TextEncoder();
+    let sub: Sub | undefined;
+    let closed = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        controller.enqueue(enc.encode(": open\n\n"));
+        const write = (f: Frame) => controller.enqueue(enc.encode(`id: ${f.id}\nevent: ${f.event}\ndata: ${JSON.stringify(f.data)}\n\n`));
+        for (const f of rec.ring) if (f.id > after) write(f);
+        if (rec.done) { controller.close(); return; }
+        sub = {
+          send: (f) => { if (!closed) write(f); },
+          close: () => { if (closed) return; closed = true; rec.subs.delete(sub!); try { controller.close(); } catch {} },
+        };
+        rec.subs.add(sub);
+      },
+      cancel: () => { closed = true; if (sub) rec.subs.delete(sub); },
+    });
+    return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8" } });
+  }
+
+  private authEmit(rec: AuthRec, event: string, data: any): void {
+    const f: Frame = { id: ++rec.seq, event, data };
+    rec.ring.push(f);
+    for (const s of [...rec.subs]) s.send(f);
+    if (event === "done") { rec.done = true; for (const s of [...rec.subs]) s.close(); }
   }
 
   private emit(rec: ChatRec, event: string, data: any): void {

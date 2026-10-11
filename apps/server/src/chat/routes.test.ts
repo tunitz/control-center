@@ -1,5 +1,5 @@
 import { test, expect, beforeEach } from "bun:test";
-import { mkdtempSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, existsSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openDb } from "../db";
@@ -126,6 +126,91 @@ test("GET messages: newest page, before paging, 404 unknown, 400 bad before", as
   expect(older.messages.map((m: any) => m.seq)).toEqual([1]);
   expect((await js(await run(req("GET", "/api/chat/sessions/nope/messages")))).status).toBe(404);
   expect((await js(await run(req("GET", "/api/chat/sessions/s1/messages?before=abc")))).status).toBe(400);
+});
+
+test("DELETE message removes one mirror row (and its file); 404 unknown/another session; x-cc enforced", async () => {
+  seed("s1"); seed("s2");
+  const filePath = join(root, "s1", "note.txt");
+  mkdirSync(join(root, "s1"), { recursive: true });
+  writeFileSync(filePath, "hi");
+  S.insertMessage(ctx.db, { id: "m1", sessionId: "s1", seq: 1, role: "user", text: "one", createdAt: 1, status: "complete", attachments: [
+    { id: "a1", kind: "file", name: "note.txt", mime: "text/plain", size: 2, sha256: "h", path: filePath, w: null, h: null },
+  ] });
+  S.insertMessage(ctx.db, { id: "m2", sessionId: "s1", seq: 2, role: "assistant", text: "two", createdAt: 2, status: "complete", attachments: [] });
+  S.insertMessage(ctx.db, { id: "other", sessionId: "s2", seq: 1, role: "user", text: "nope", createdAt: 1, status: "complete", attachments: [] });
+
+  expect((await js(await run(req("DELETE", "/api/chat/sessions/s2/messages/m1")))).status).toBe(404);
+  expect(S.getMessageMeta(ctx.db, "m1")).not.toBeNull();
+  expect((await js(await run(req("DELETE", "/api/chat/sessions/s1/messages/nope")))).status).toBe(404);
+  expect((await js(await run(req("DELETE", "/api/chat/sessions/s1/messages/m1", { cc: false })))).status).toBe(403);
+  expect(await js(await run(req("DELETE", "/api/chat/sessions/s1/messages/m1")))).toEqual({ status: 200, body: { ok: true } });
+  expect(S.getMessageMeta(ctx.db, "m1")).toBeNull();
+  expect(existsSync(filePath)).toBe(false);
+  expect(S.getMessageMeta(ctx.db, "m2")).not.toBeNull();
+});
+
+test("POST retry rebranches: the user message and everything after it are replaced by a fresh turn", async () => {
+  seed("s1");
+  S.insertMessage(ctx.db, { id: "u1", sessionId: "s1", seq: 1, role: "user", text: "first", createdAt: 1, status: "complete", attachments: [] });
+  S.insertMessage(ctx.db, { id: "a1", sessionId: "s1", seq: 2, role: "assistant", text: "old reply", createdAt: 2, status: "complete", attachments: [] });
+  S.insertMessage(ctx.db, { id: "u2", sessionId: "s1", seq: 3, role: "user", text: "try again", createdAt: 3, status: "complete", attachments: [] });
+  S.insertMessage(ctx.db, { id: "a2", sessionId: "s1", seq: 4, role: "assistant", text: "old reply 2", createdAt: 4, status: "complete", attachments: [] });
+
+  const r = await js(await run(req("POST", "/api/chat/sessions/s1/messages/u2/retry", { body: {} })));
+  expect(r.status).toBe(201);
+  expect(r.body.userMessage).toMatchObject({ role: "user", text: "try again", seq: 3 });
+  expect(r.body.assistantMessage).toMatchObject({ role: "assistant", seq: 4, status: "running", runId: r.body.runId });
+  expect(S.listAllMessages(ctx.db, "s1").map(m => [m.seq, m.text, m.id])).toEqual([
+    [1, "first", "u1"], [2, "old reply", "a1"], [3, "try again", r.body.userMessage.id], [4, "", r.body.assistantMessage.id],
+  ]);
+  await waitIdle("s1");
+  expect(S.listAllMessages(ctx.db, "s1").map(m => [m.seq, m.text]).at(-1)).toEqual([4, "Hello world"]);
+
+  expect((await js(await run(req("POST", "/api/chat/sessions/s1/messages/a1/retry", { body: {} })))).status).toBe(400);
+  expect((await js(await run(req("POST", "/api/chat/sessions/s1/messages/nope/retry", { body: {} })))).status).toBe(404);
+});
+
+test("retry rejects an empty message and a live run (409)", async () => {
+  seed("s1");
+  S.insertMessage(ctx.db, { id: "u1", sessionId: "s1", seq: 1, role: "user", text: "   ", createdAt: 1, status: "complete", attachments: [] });
+  expect((await js(await run(req("POST", "/api/chat/sessions/s1/messages/u1/retry", { body: {} })))).status).toBe(400);
+
+  const h = new HeldHermes();
+  ctx = { ...ctx, hermes: h };
+  const send = await js(await run(req("POST", "/api/chat/sessions/s1/send", { body: (() => { const f = new FormData(); f.set("text", "live"); return f; })() })));
+  expect(send.status).toBe(201);
+  expect((await js(await run(req("POST", "/api/chat/sessions/s1/messages/u1/retry", { body: {} })))).status).toBe(409);
+  h.release();
+  await waitIdle("s1");
+});
+
+test("POST commands records a row anchored after the newest message; GET messages returns them", async () => {
+  seed("s1");
+  S.insertMessage(ctx.db, { id: "m1", sessionId: "s1", seq: 1, role: "user", text: "hi", createdAt: 1, status: "complete", attachments: [] });
+  const r = await js(await run(req("POST", "/api/chat/sessions/s1/commands", { body: { name: "/help", body: "list" } })));
+  expect(r.status).toBe(201);
+  expect(r.body).toMatchObject({ name: "help", body: "list", afterSeq: 1 });
+  const page = (await js(await run(req("GET", "/api/chat/sessions/s1/messages")))).body;
+  expect(page.commands).toEqual([r.body]);
+  expect((await js(await run(req("POST", "/api/chat/sessions/s1/commands", { body: { name: "" } })))).status).toBe(400);
+  expect((await js(await run(req("POST", "/api/chat/sessions/s1/commands", { body: { name: "x", body: 5 } })))).status).toBe(400);
+  expect((await js(await run(req("POST", "/api/chat/sessions/nope/commands", { body: { name: "x" } })))).status).toBe(404);
+});
+
+test("deleting or retrying a message drops command rows anchored at or after it", async () => {
+  seed("s1");
+  S.insertMessage(ctx.db, { id: "u1", sessionId: "s1", seq: 1, role: "user", text: "one", createdAt: 1, status: "complete", attachments: [] });
+  S.insertMessage(ctx.db, { id: "a1", sessionId: "s1", seq: 2, role: "assistant", text: "two", createdAt: 2, status: "complete", attachments: [] });
+  S.insertCommand(ctx.db, { sessionId: "s1", name: "help", body: "early", afterSeq: 1, createdAt: 3 });
+  S.insertCommand(ctx.db, { sessionId: "s1", name: "model", body: "late", afterSeq: 2, createdAt: 4 });
+  expect((await js(await run(req("DELETE", "/api/chat/sessions/s1/messages/a1")))).status).toBe(200);
+  expect(S.listCommands(ctx.db, "s1").map(c => c.name)).toEqual(["help"]);
+
+  S.insertCommand(ctx.db, { sessionId: "s1", name: "model", body: "late", afterSeq: 2, createdAt: 5 });
+  const r = await js(await run(req("POST", "/api/chat/sessions/s1/messages/u1/retry", { body: {} })));
+  expect(r.status).toBe(201);
+  expect(S.listCommands(ctx.db, "s1")).toEqual([]);
+  await waitIdle("s1");
 });
 
 test("GET files: image inline with type, file as attachment octet-stream, 404 for unknown or out-of-root paths", async () => {

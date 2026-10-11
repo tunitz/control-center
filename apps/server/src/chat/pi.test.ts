@@ -1,6 +1,6 @@
 import { test, expect, afterEach } from "bun:test";
 import { FakePiBridge } from "./fake-pi-bridge";
-import { PiClient } from "./pi";
+import { friendlyPiError, PiClient } from "./pi";
 import type { HermesFrame } from "./hermes";
 import { ChatError } from "./http";
 
@@ -108,7 +108,7 @@ test("a failed listModels is not cached: the next call asks the bridge again", a
   const pi = new PiClient({ baseUrl: b.url, token: b.token });
   b.failModels = 1;
   await expect(pi.listModels()).rejects.toBeInstanceOf(ChatError);
-  expect((await pi.listModels()).length).toBe(5);
+  expect((await pi.listModels()).length).toBe(6);
 });
 
 test("lockModel applies set_model to the live chat; a refusal is 502", async () => {
@@ -323,12 +323,26 @@ test("thinkingLevels returns the model's levels from the bridge", async () => {
   expect(await pi.thinkingLevels(id, pi.sessionRef(id), "deepseek-flash", "deepseek")).toEqual(["off", "low", "high"]);
 });
 
-test("listModels shows a curated set: DeepSeek, and only Opus, Sonnet and Haiku 5.5 from Anthropic; nothing else", async () => {
+test("listModels trims Anthropic to Opus/Sonnet/Haiku 5.5 and keeps every other provider Pi has a key for", async () => {
   const b = bridge();
   const pi = new PiClient({ baseUrl: b.url, token: b.token });
   const ids = (await pi.listModels()).map((m) => `${m.provider}/${m.id}`);
   expect(ids).toEqual([
     "deepseek/deepseek-flash", "deepseek/deepseek-pro",
     "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5", "anthropic/claude-haiku-5-5",
+    "openai-codex/gpt-6-luna",
   ]);
+});
+
+test("friendlyPiError unwraps a provider error and explains the Anthropic subscription block", () => {
+  // Plain strings are left alone (the fake bridge's "boom: provider down").
+  expect(friendlyPiError("boom: provider down")).toBe("boom: provider down");
+  // A JSON body is reduced to the provider's own message.
+  expect(friendlyPiError('502 {"type":"error","error":{"message":"overloaded"}}')).toBe("overloaded");
+  // The Anthropic third-party restriction gets a concrete next step, not raw JSON.
+  const raw = '400 {"type":"error","error":{"type":"invalid_request_error","message":"Third-party apps now draw from your extra usage, not your plan limits. Add more at claude.ai/settings/usage and keep going."},"request_id":"req_1"}';
+  const msg = friendlyPiError(raw);
+  expect(msg).toContain("claude.ai/settings/usage");
+  expect(msg).toContain("/login");
+  expect(msg).not.toContain("{");
 });

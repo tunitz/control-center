@@ -90,6 +90,38 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
     if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
     return json(method === "GET" ? await ctx.pi.getConfig() : await ctx.pi.putConfig(await readJson(req)));
   }
+  if (p === "/pi/auth/providers" && method === "GET") {
+    if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
+    return json({ providers: await ctx.pi.authProviders() });
+  }
+  if (p === "/pi/auth/login" && method === "POST") {
+    if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
+    const body = await readJson(req);
+    if (typeof body.provider !== "string" || body.provider === "") throw new ChatError(400, "provider is required");
+    if (body.authType !== "oauth" && body.authType !== "api_key") throw new ChatError(400, "authType must be oauth or api_key");
+    return json(await ctx.pi.authStart(body.provider, body.authType), 201);
+  }
+  const am = /^\/pi\/auth\/login\/([^/]+)\/(events|respond|cancel)$/.exec(p);
+  if (am) {
+    if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
+    const id = safeId(am[1]);
+    if (am[2] === "events" && method === "GET") {
+      const after = req.headers.get("last-event-id") ?? url.searchParams.get("after") ?? "0";
+      if (!/^\d+$/.test(after)) throw new ChatError(400, "after must be a non-negative integer");
+      return piAuthEvents(id, Number(after), ctx);
+    }
+    if (am[2] === "respond" && method === "POST") {
+      const body = await readJson(req);
+      if (typeof body.value !== "string") throw new ChatError(400, "value must be a string");
+      const promptId = body.promptId === undefined ? undefined : String(body.promptId);
+      await ctx.pi.authRespond(id, body.value, promptId);
+      return json({ ok: true });
+    }
+    if (am[2] === "cancel" && method === "POST") {
+      await ctx.pi.authCancel(id);
+      return json({ ok: true });
+    }
+  }
   if (p === "/credits" && method === "GET") return creditsRoute(ctx);
 
   if (p === "/sessions" && method === "GET") return listSessionsRoute(url, ctx);
@@ -118,6 +150,17 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
     if (action === "send" && method === "POST") return sendRoute(req, id, ctx);
     if (action === "export" && method === "GET") return exportRoute(id, ctx);
   }
+
+  m = /^\/sessions\/([^/]+)\/messages\/([^/]+)(\/retry)?$/.exec(p);
+  if (m) {
+    const id = safeId(m[1]);
+    const mid = safeId(m[2]);
+    if (!m[3] && method === "DELETE") return deleteMessageRoute(id, mid, ctx);
+    if (m[3] === "/retry" && method === "POST") return retryMessageRoute(id, mid, ctx);
+  }
+
+  m = /^\/sessions\/([^/]+)\/commands$/.exec(p);
+  if (m && method === "POST") return createCommandRoute(req, safeId(m[1]), ctx);
 
   m = /^\/files\/([^/]+)$/.exec(p);
   if (m && method === "GET") return fileRoute(safeId(m[1]), ctx);
@@ -343,6 +386,29 @@ async function piSettingsPatch(req: Request, id: string, ctx: ChatContext): Prom
   return json({ settings: withDefaults(merged) });
 }
 
+/** Proxies the bridge's sign-in SSE, and aborts the upstream fetch when the browser disconnects. */
+async function piAuthEvents(id: string, after: number, ctx: ChatContext): Promise<Response> {
+  const ctl = new AbortController();
+  const upstream = await ctx.pi!.authEvents(id, after, ctl.signal);
+  const reader = upstream.getReader();
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { value, done } = await reader.read();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      } catch (e) {
+        controller.error(e);
+      }
+    },
+    cancel() {
+      ctl.abort();
+      void reader.cancel().catch(() => {});
+    },
+  });
+  return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
+}
+
 async function piCompact(req: Request, id: string, ctx: ChatContext): Promise<Response> {
   const { s, ref, pi } = requirePiChat(ctx, id);
   if (s.runState !== "idle") throw new ChatError(409, "run active");
@@ -373,7 +439,59 @@ function messagesRoute(url: URL, id: string, ctx: ChatContext): Response {
     before: beforeRaw === null ? undefined : Number(beforeRaw),
     limit: limitRaw === null ? 40 : Number(limitRaw),
   });
-  return json(page);
+  return json({ ...page, commands: S.listCommands(ctx.db, id) });
+}
+
+/** Records a local command row (`/help`, `/model`, …) so it survives a reload. Anchored after the newest message. */
+async function createCommandRoute(req: Request, sid: string, ctx: ChatContext): Promise<Response> {
+  requireSession(ctx, sid);
+  const body = await readJson(req);
+  const name = typeof body.name === "string" ? body.name.trim().replace(/^\//, "").slice(0, 40) : "";
+  if (name === "") throw new ChatError(400, "name is required");
+  if (body.body !== undefined && typeof body.body !== "string") throw new ChatError(400, "body must be a string");
+  const text = typeof body.body === "string" ? body.body.slice(0, 8000) : "";
+  return json(S.insertCommand(ctx.db, { sessionId: sid, name, body: text, afterSeq: S.lastSeq(ctx.db, sid), createdAt: ctx.now() }), 201);
+}
+
+/** Removes one mirrored message (and its files). The backend's own history is not touched. */
+function deleteMessageRoute(sid: string, mid: string, ctx: ChatContext): Response {
+  const s = requireSession(ctx, sid);
+  if (s.runState !== "idle") throw new ChatError(409, "run active");
+  const meta = S.getMessageMeta(ctx.db, mid);
+  if (!meta || meta.sessionId !== sid) throw new ChatError(404, "message not found");
+  S.deleteCommandsFrom(ctx.db, sid, meta.seq);
+  for (const p of S.deleteMessage(ctx.db, mid)) rmSync(p, { force: true });
+  return json({ ok: true });
+}
+
+/**
+ * Retry = rebranch. The retried user message and everything after it are dropped, then the message
+ * runs again. The reply that was there before is gone, so the new answer replaces it in the thread.
+ */
+async function retryMessageRoute(sid: string, mid: string, ctx: ChatContext): Promise<Response> {
+  const s = requireSession(ctx, sid);
+  if (s.runState !== "idle") throw new ChatError(409, "run active");
+  const meta = S.getMessageMeta(ctx.db, mid);
+  if (!meta || meta.sessionId !== sid) throw new ChatError(404, "message not found");
+  if (meta.role !== "user") throw new ChatError(400, "only a user message can be retried");
+  const text = meta.text.trim();
+  if (text === "") throw new ChatError(400, "empty message");
+
+  const runs = runsOf(ctx);
+  runs.reserve(sid);
+  let started = false;
+  try {
+    await runs.ensureModel(sid, s.model, s.provider);
+    S.deleteCommandsFrom(ctx.db, sid, meta.seq);
+    for (const p of S.truncateFrom(ctx.db, sid, meta.seq)) rmSync(p, { force: true });
+    const prompt = buildPrompt({ text, attachments: [] });
+    const effort = (await modelReasons(ctx, sid, s.model, s.provider)) ? s.effort : null;
+    const r = runs.begin(sid, { text, message: prompt.message, attachments: [], model: s.model, effort });
+    started = true;
+    return json({ runId: r.runId, userMessage: r.userMessage, assistantMessage: r.assistantMessage }, 201);
+  } finally {
+    if (!started) runs.release(sid);
+  }
 }
 
 function exportRoute(id: string, ctx: ChatContext): Response {
@@ -434,13 +552,7 @@ async function sendRoute(req: Request, id: string, ctx: ChatContext): Promise<Re
     ? await resolveModelFor(ctx, id, modelField) : { model: s.model, provider: s.provider };
   const effort = typeof effortField === "string" && effortField !== "" ? parseEffort(effortField) : s.effort;
   // Effort is a hint, sent only to models that report reasoning.
-  let reasoning = getModelDef(ctx.db, picked.model)?.reasoning === true;
-  if (S.getBackend(ctx.db, id)?.backend === "pi" && ctx.pi) {
-    // Pi chats: reasoning support comes from Pi's own model list, not Hermes's.
-    const piModels = await ctx.pi.listModels().catch(() => []);
-    reasoning = piModels.find(m => m.id === picked.model && m.provider === picked.provider)?.reasoning === true;
-  }
-  const sentEffort = reasoning ? effort : null;
+  const sentEffort = (await modelReasons(ctx, id, picked.model, picked.provider)) ? effort : null;
 
   const { maxBytes } = uploadLimits(ctx.db);
   const blobs: { name: string; bytes: Uint8Array }[] = [];
@@ -486,6 +598,15 @@ async function sendRoute(req: Request, id: string, ctx: ChatContext): Promise<Re
       for (const a of saved) rmSync(a.path, { force: true });
     }
   }
+}
+
+/** Whether a model accepts a reasoning effort. Pi's support comes from Pi's own list, not Hermes's. */
+async function modelReasons(ctx: ChatContext, sid: string, model: string, provider: string): Promise<boolean> {
+  if (S.getBackend(ctx.db, sid)?.backend === "pi" && ctx.pi) {
+    const piModels = await ctx.pi.listModels().catch(() => []);
+    return piModels.find(m => m.id === model && m.provider === provider)?.reasoning === true;
+  }
+  return getModelDef(ctx.db, model)?.reasoning === true;
 }
 
 /** /credits: balance text from the host script, via a tiny read-only endpoint. No model call, no tokens. */

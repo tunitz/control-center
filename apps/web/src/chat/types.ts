@@ -27,7 +27,19 @@ export type ChatMessage = {
   todos?: TodoItem[] | null; status: MessageStatus;
   runId: string | null; model: string | null; attachments: Attachment[]; createdAt: number; error: string | null;
 };
+/** A persistent local slash-command row. `afterSeq` anchors it after that message seq. */
+export type CommandNote = { id: number; name: string; body: string; afterSeq: number; createdAt: number };
 export type ChatConfig = { defaultModel: string; defaultEffort: Effort | null; maxUploadMb: number; contextWindow: Record<string, number> };
 export type RunEvent = { id: number; type: string; data: any };
 export type PiSettings = { tools: string[] | null; steeringMode: "all" | "one-at-a-time"; followUpMode: "all" | "one-at-a-time"; autoCompaction: boolean; autoRetry: boolean };
 export type PiConfig = { appendSystemPrompt: string; agentsMd: string; defaultTools: string[] | null; gate: { extraProtectedPaths: string[]; extraRisky: string[] }; knownTools: string[] };
+export type PiAuthType = "oauth" | "api_key";
+/** A provider the chat's `/login` can sign in to (GET /pi/auth/providers). */
+export type PiAuthProvider = { id: string; name: string; authTypes: PiAuthType[]; oauthLabel?: string; subscription: boolean; configured: boolean; source?: string };
+export type PiAuthPrompt = { id: string; type: "text" | "secret" | "select" | "manual_code"; message: string; placeholder?: string; options?: { id: string; label: string; description?: string }[] };
+/** A sign-in's notice, as streamed by the bridge (event "auth"). */
+export type PiAuthEvent =
+  | { type: "info"; message: string; links?: { url: string; label?: string }[] }
+  | { type: "auth_url"; url: string; instructions?: string }
+  | { type: "device_code"; userCode: string; verificationUri: string; intervalSeconds?: number; expiresInSeconds?: number }
+  | { type: "progress"; message: string };

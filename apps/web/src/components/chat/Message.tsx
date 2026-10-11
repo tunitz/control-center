@@ -105,7 +105,13 @@ function TurnBody({ m, onApprove }: { m: ChatMessage; onApprove?: (runId: string
   return <>{out}</>;
 }
 
-export function UserMessage({ m, onOpenImage }: { m: ChatMessage; onOpenImage: (a: Attachment) => void }) {
+export function UserMessage({ m, onOpenImage, onRetry, onDelete }: {
+  m: ChatMessage; onOpenImage: (a: Attachment) => void;
+  /** Rebranches from here: the message is re-run and the reply after it is replaced. Absent while a run is active. */
+  onRetry?: () => void;
+  /** Deletes this message from the chat. Absent while a run is active. */
+  onDelete?: () => void;
+}) {
   return (
     <div className="msg user">
       <div className="bubble">
@@ -113,9 +119,19 @@ export function UserMessage({ m, onOpenImage }: { m: ChatMessage; onOpenImage: (
         {m.text && <p style={{ whiteSpace: "pre-wrap" }}>{m.text}</p>}
       </div>
       <div className="msg-actions">
+        {onRetry && m.text.trim() && (
+          <button className="ib" type="button" aria-label="Retry from here" title="Retry — replaces the reply after this message" onClick={onRetry}>
+            <Icon name="refresh" className="i sm" />
+          </button>
+        )}
         <button className="ib" type="button" aria-label="Copy message" title="Copy" onClick={() => void copyText(m.text)}>
           <Icon name="copy" className="i sm" />
         </button>
+        {onDelete && (
+          <button className="ib danger" type="button" aria-label="Delete message" title="Delete message" onClick={onDelete}>
+            <Icon name="trash" className="i sm" />
+          </button>
+        )}
       </div>
     </div>
   );

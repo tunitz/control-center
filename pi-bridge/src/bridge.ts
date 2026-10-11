@@ -4,6 +4,12 @@ import { type BridgeConfig } from "./config";
 import { Chat, HttpError, rpcError, type Frame } from "./chat";
 import { listModelsOnce, listSessions } from "./sessions";
 import { chosenCwd, listDirs, makeDir } from "./pi-dirs";
+import { AuthManager, makeDeviceIdLoader, makeRuntimeLoader, type AuthType, type LoadRuntime } from "./login";
+
+export interface BridgeDeps {
+  /** Overrides the Pi SDK runtime loader (tests inject a fake). */
+  loadAuthRuntime?: LoadRuntime;
+}
 
 export interface Bridge {
   fetch(req: Request): Promise<Response>;
@@ -36,8 +42,19 @@ export const ALLOWED_COMMANDS = new Set([
   "set_follow_up_mode",
 ]);
 
-export function createBridge(cfg: BridgeConfig): Bridge {
+export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
   const live = new Map<string, Chat>();
+  const auth = new AuthManager({
+    loadRuntime: deps.loadAuthRuntime ?? makeRuntimeLoader(cfg),
+    getDeviceId: makeDeviceIdLoader(cfg.agentDir),
+    onLogin: () => {
+      // A stored credential only reaches a running Pi process when it is recycled: drop idle chats
+      // so the next message starts a fresh process (the session file keeps the history).
+      for (const chat of [...live.values()]) {
+        if (!chat.busy && !chat.exited) void drop(chat);
+      }
+    },
+  });
   // Exited chats stay readable for a while so a client that connects after process_exit can
   // still replay the tail. They are never accepted for commands.
   const grave = new Map<string, { chat: Chat; timer: ReturnType<typeof setTimeout> }>();
@@ -64,6 +81,7 @@ export function createBridge(cfg: BridgeConfig): Bridge {
     for (const chat of [...live.values()]) {
       if (!chat.busy && now - chat.lastActivity > cfg.idleMs) void drop(chat);
     }
+    auth.prune();
   }, cfg.reapIntervalMs);
   reaper.unref?.();
 
@@ -351,12 +369,40 @@ export function createBridge(cfg: BridgeConfig): Bridge {
       const body = await readBody(req);
       return json(201, makeDir(cfg, body.parent, body.name));
     }
+    if (method === "GET" && path === "/auth/providers") {
+      return json(200, { providers: await auth.providers() });
+    }
+    if (method === "POST" && path === "/auth/login") {
+      const body = await readBody(req);
+      if (typeof body.provider !== "string" || body.provider === "") throw new HttpError(400, "provider is required");
+      if (body.authType !== "oauth" && body.authType !== "api_key") throw new HttpError(400, "authType must be oauth or api_key");
+      const session = await auth.start(body.provider, body.authType as AuthType);
+      return json(201, { id: session.id, provider: session.provider, providerName: session.providerName, authType: session.authType });
+    }
+    if (method === "GET" && (m = /^\/auth\/login\/([^/]+)\/events$/.exec(path))) {
+      const raw = url.searchParams.get("after") ?? "0";
+      if (!/^\d+$/.test(raw)) throw new HttpError(400, "after must be a non-negative integer");
+      return auth.events(requireChatId(m[1]), Number(raw));
+    }
+    if (method === "POST" && (m = /^\/auth\/login\/([^/]+)\/(response|cancel)$/.exec(path))) {
+      const id = requireChatId(m[1]);
+      const body = await readBody(req);
+      if (m[2] === "cancel") {
+        auth.cancel(id);
+        return json(200, { ok: true });
+      }
+      if (typeof body.value !== "string") throw new HttpError(400, "value must be a string");
+      if (body.promptId !== undefined && typeof body.promptId !== "string") throw new HttpError(400, "promptId must be a string");
+      auth.respond(id, body.value, body.promptId);
+      return json(200, { ok: true });
+    }
     if (method === "GET" && path === "/sessions") {
       return json(200, { sessions: await listSessions(cfg) });
     }
     if (method === "GET" && path === "/models") {
-      const chat = [...live.values()].find((c) => !c.exited);
-      const models = await listModelsOnce(cfg, chat ? { send: (c, t) => chat.send(c, t) } : undefined);
+      // Always a fresh short-lived process: a live chat started before a `/login` would report that
+      // provider as unavailable. The server caches the result, so the spawn cost is paid rarely.
+      const models = await listModelsOnce(cfg);
       return json(200, { models });
     }
     if (method === "DELETE" && (m = /^\/chats\/([^/]+)$/.exec(path))) {

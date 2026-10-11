@@ -44,17 +44,26 @@ test("every page command is a listed command; help and unknown text come from th
   expect(unknownText("x")).toBe("Unknown command /x. Type /help to list them.");
 });
 
-test("/compact exists only for Pi chats", () => {
-  expect(parseSlash("/compact")).toEqual({ kind: "unknown", name: "compact" });
-  expect(parseSlash("/compact", "hermes")).toEqual({ kind: "unknown", name: "compact" });
-  expect(parseSlash("/compact focus on code", "pi")).toEqual({ kind: "command", name: "compact", arg: "focus on code" });
-  expect(suggestions("/comp", "pi").map(c => c.name)).toEqual(["compact"]);
-  expect(suggestions("/comp").map(c => c.name)).toEqual([]);
-  expect(suggestions("/", "pi").map(c => c.name)).toContain("compact");
-  expect(suggestions("/", "hermes").map(c => c.name)).not.toContain("compact");
+test("/compact is no longer offered (compaction lives in the Pi options sheet)", () => {
+  expect(parseSlash("/compact", "pi")).toEqual({ kind: "unknown", name: "compact" });
+  expect(suggestions("/comp", "pi").map(c => c.name)).toEqual([]);
+  expect(suggestions("/", "pi").map(c => c.name)).not.toContain("compact");
+  expect(helpText("pi")).not.toContain("/compact");
 });
 
-test("help lists /compact only for Pi", () => {
-  expect(helpText("pi")).toContain("/compact");
-  expect(helpText()).not.toContain("/compact");
+test("/login exists only for Pi chats and takes an optional provider", () => {
+  expect(parseSlash("/login")).toEqual({ kind: "unknown", name: "login" });
+  expect(parseSlash("/login anthropic", "pi")).toEqual({ kind: "command", name: "login", arg: "anthropic" });
+  expect(parseSlash("/login", "pi")).toEqual({ kind: "command", name: "login", arg: "" });
+  expect(suggestions("/log", "pi").map(c => c.name)).toEqual(["login"]);
+  expect(suggestions("/", "hermes").map(c => c.name)).not.toContain("login");
+  expect(helpText("pi")).toContain("/login");
+});
+
+test("/yolo exists only for Pi chats", () => {
+  expect(parseSlash("/yolo")).toEqual({ kind: "unknown", name: "yolo" });
+  expect(parseSlash("/yolo", "pi")).toEqual({ kind: "command", name: "yolo", arg: "" });
+  expect(suggestions("/yo", "pi").map(c => c.name)).toEqual(["yolo"]);
+  expect(suggestions("/", "hermes").map(c => c.name)).not.toContain("yolo");
+  expect(helpText("pi")).toContain("/yolo");
 });

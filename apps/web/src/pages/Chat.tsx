@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import "../chat.css";
 import { chat } from "../chat/api";
 import { PickCancelled, folderTag, sessionCreatePayload } from "../chat/dirs";
 import { navigate } from "../route";
 import { sendEffort } from "../chat/effort";
-import { backendOfKey, effortChoices, keyOf, modelUsable, splitKey, swapBackend, tokenNote, viewModels } from "../chat/pi";
+import { backendOfKey, effortChoices, keyOf, modelUsable, splitKey, swapBackend, viewModels } from "../chat/pi";
 import { installChatMock } from "../chat/mock";
 import { useThread } from "../chat/useThread";
 import { useSessions } from "../chat/useSessions";
@@ -17,6 +17,7 @@ import { AssistantMessage, UserMessage } from "../components/chat/Message";
 import { Sessions } from "../components/chat/Sessions";
 import { PiSheet } from "../components/chat/PiSheet";
 import { FolderSheet } from "../components/chat/FolderSheet";
+import { LoginSheet } from "../components/chat/LoginSheet";
 import { Icon } from "../components/chat/Icon";
 import type { Attachment, Backend, ChatConfig, ChatModel, ChatSession, Effort } from "../chat/types";
 
@@ -53,6 +54,11 @@ export default function Chat({ hash }: { hash: string }) {
   const [rawModels, setModels] = useState<ChatModel[]>([]);
   const models = useMemo(() => viewModels(rawModels), [rawModels]);
   const [piSheet, setPiSheet] = useState(false);
+  /** `/login [provider]`: null = closed, string (may be empty) = the provider ref to preselect. */
+  const [loginAsk, setLoginAsk] = useState<string | null>(null);
+  /** `/yolo`: answer this chat's Pi gate requests with Approve automatically. Session-only, off by default. */
+  const [yolo, setYolo] = useState(false);
+  const autoApproved = useRef<Set<string>>(new Set());
   // Pi chats ask for a working folder before they are created. Resolves with the folder, or null for the default workspace.
   const [folderAsk, setFolderAsk] = useState<{ resolve: (cwd: string | null) => void; reject: (e: Error) => void } | null>(null);
   const askFolder = () => new Promise<string | null>((resolve, reject) => setFolderAsk({ resolve, reject }));
@@ -95,7 +101,7 @@ export default function Chat({ hash }: { hash: string }) {
     if (r.state === "running" && r.sessionId === activeRef.current && r.runId && r.runId !== attachedRef.current) reloadRef.current();
   }), []);
 
-  useEffect(() => { setLiveModel(null); setLiveEffort(null); setMenu(false); setDrawer(false); setPiSheet(false); }, [activeId]);
+  useEffect(() => { setLiveModel(null); setLiveEffort(null); setMenu(false); setDrawer(false); setPiSheet(false); setLoginAsk(null); setYolo(false); autoApproved.current.clear(); }, [activeId]);
 
   // Remember the session on screen so the Chat tab can return to it; drop it if the server says it is gone.
   useEffect(() => {
@@ -133,7 +139,7 @@ export default function Chat({ hash }: { hash: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [unseen, setUnseen] = useState(false);
-  const lastCount = useRef(0);
+  const lastHeight = useRef(0);
   const scrollToEnd = useCallback(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -146,15 +152,19 @@ export default function Chat({ hash }: { hash: string }) {
     setAtBottom(near);
     if (near) setUnseen(false);
   };
+  // Follow the bottom only while we are already there. Scrolling up stops it; new content then
+  // raises the jump button. Height (not message count) is what grows while a reply streams.
   useLayoutEffect(() => {
-    const n = thread.messages.length;
-    const grew = n > lastCount.current;
-    lastCount.current = n;
+    const el = scrollRef.current;
+    if (!el) return;
+    const height = el.scrollHeight;
+    const grew = height > lastHeight.current + 1;
+    lastHeight.current = height;
     if (!grew && !thread.loading) return;
     if (atBottom) scrollToEnd();
     else if (grew) setUnseen(true);
   }, [thread.messages, thread.loading]); // eslint-disable-line react-hooks/exhaustive-deps
-  useLayoutEffect(() => { lastCount.current = 0; setAtBottom(true); }, [activeId]);
+  useLayoutEffect(() => { lastHeight.current = 0; setAtBottom(true); setUnseen(false); }, [activeId]);
 
   const older = async () => {
     const el = scrollRef.current;
@@ -199,34 +209,55 @@ export default function Chat({ hash }: { hash: string }) {
     void sessions.refresh();
   };
 
+  /** Retries the last user message by rebranching: its old reply is replaced. Shared by `/retry` and the retry button. */
+  const retryLast = useCallback(async (): Promise<string> => {
+    if (thread.runId) return "Wait for the running task or stop it first.";
+    const last = [...thread.messages].reverse().find(m => m.role === "user");
+    if (!last || !last.text.trim()) return "No earlier message with text to retry.";
+    await thread.retry(last.id);
+    return "Retried. The reply that followed was replaced.";
+  }, [thread.runId, thread.messages, thread.retry]);
+
   const onSteer = async (text: string): Promise<"ok" | "finished"> => {
     if (!thread.runId) return "finished";
     try { await chat.steerRun(thread.runId, text); return "ok"; }
     catch (e) { if ((e as { status?: number }).status === 409) return "finished"; throw e; }
   };
 
-  const [notes, setNotes] = useState<{ id: number; title: string; body: string }[]>([]);
+  /** Persistent command rows live on the server (`thread.commands`); this only tracks which one is expanded. */
   const [noteOpen, setNoteOpen] = useState<number | null>(null);
-  const noteSeq = useRef(0);
-  useEffect(() => { setNotes([]); setNoteOpen(null); }, [activeId]);
-  const addNote = (title: string, body: string) => {
-    const id = ++noteSeq.current;
-    setNotes(prev => [...prev, { id, title, body }]);
-    setNoteOpen(id);
-    requestAnimationFrame(() => scrollToEnd());
+  useEffect(() => { setNoteOpen(null); }, [activeId]);
+  /** Records a command row on the server so it survives a reload, then reveals it in the thread. */
+  const addNote = async (name: string, body: string) => {
+    try {
+      const cmd = await thread.addCommand(name, body);
+      setNoteOpen(cmd.id);
+      requestAnimationFrame(() => scrollToEnd());
+    } catch (e) {
+      setPageErr((e as Error).message);
+    }
   };
 
-  const onAction = async (name: string, arg: string): Promise<string> => {
-    if (name === "credits") { addNote("/credits", (await chat.credits()).text.split(" | ").join("\n")); return ""; }
+  /** Runs a page command and returns the text to record in the thread. "" means nothing to show. */
+  const runAction = async (name: string, arg: string): Promise<string> => {
+    if (name === "credits") return (await chat.credits()).text.split(" | ").join("\n");
     if (name === "steer") {
       if (!arg) return "Usage: /steer <note for the running task>";
       return (await onSteer(arg)) === "ok" ? "Steer sent to the running task." : "Nothing is running.";
     }
     if (!activeId || !active) return "Open a chat first.";
-    if (name === "compact") {
-      if (active.backend !== "pi") return "Only Pi chats can compact.";
-      if (thread.runId) return "Wait for the running task or stop it first.";
-      return tokenNote(await chat.piCompact(activeId, arg || undefined));
+    if (name === "login") {
+      if (active.backend !== "pi") return "Only Pi chats can sign in to a provider.";
+      setLoginAsk(arg);
+      return "";
+    }
+    if (name === "yolo") {
+      if (active.backend !== "pi") return "Only Pi chats ask for approvals.";
+      const next = !yolo;
+      setYolo(next);
+      return next
+        ? "YOLO is on. Pi runs risky commands in this chat without asking. It stays on until you switch chats, reload, or run /yolo again."
+        : "YOLO is off. Pi asks before risky commands again.";
     }
     if (name === "export") { window.location.href = chat.exportUrl(activeId); return "Downloading the chat."; }
     if (name === "title") {
@@ -246,14 +277,15 @@ export default function Chat({ hash }: { hash: string }) {
       sessions.setList(prev => prev.filter(s => s.id !== activeId)); forgetChat(localStorage, activeId); navigate("#/chat");
       return "Deleted.";
     }
-    if (name === "retry") {
-      if (thread.runId) return "Wait for the running task or stop it first.";
-      const last = [...thread.messages].reverse().find(m => m.role === "user");
-      if (!last || !last.text.trim()) return "No earlier message with text to resend.";
-      await onSend(last.text, []);
-      return "Sent again.";
-    }
+    if (name === "retry") return retryLast();
     return "Unknown command.";
+  };
+
+  /** Every command leaves its own row in the thread, so the chat records what ran and what it did. */
+  const onAction = async (name: string, arg: string): Promise<string> => {
+    const result = await runAction(name, arg);
+    if (result.trim() !== "") void addNote(name, result);
+    return result;
   };
 
   const onModel = async (id: string) => {
@@ -289,6 +321,21 @@ export default function Chat({ hash }: { hash: string }) {
     await chat.approve(runId, approvalId, choice);
   };
 
+  // `/yolo`: as soon as a gate request appears in this chat, approve it. The ref stops repeat sends
+  // while the turn is still waiting for the tool to finish.
+  useEffect(() => {
+    if (!yolo || !thread.runId) return;
+    for (const m of thread.messages) {
+      if (!m.runId) continue;
+      for (const b of m.blocks ?? []) {
+        const a = b.kind === "approval" ? b.approval : null;
+        if (!a?.id || a.status !== "pending" || autoApproved.current.has(a.id)) continue;
+        autoApproved.current.add(a.id);
+        void chat.approve(m.runId, a.id, "approve").catch(() => {});
+      }
+    }
+  }, [yolo, thread.messages, thread.runId]);
+
   const emptyView = !activeId || (!thread.loading && thread.messages.length === 0);
 
   const sidebarProps = {
@@ -311,6 +358,24 @@ export default function Chat({ hash }: { hash: string }) {
     onClose: phone ? () => setDrawer(false) : undefined,
   };
 
+  /** Persistent command rows, grouped like the tool folds so they read as part of the thread. */
+  const noteRows = (list: { id: number; name: string; body: string }[]) =>
+    list.length === 0 ? null : (
+      <div className="fgroup">
+        {list.map(n => (
+          <div className="fold-wrap" key={n.id}>
+            <button type="button" className="fold" aria-expanded={noteOpen === n.id} aria-controls={`note-${n.id}`} onClick={() => setNoteOpen(noteOpen === n.id ? null : n.id)}>
+              <Icon name="chevr" className="chev" />
+              <Icon name="term" className="i sm" />
+              <span className="tname">/{n.name}</span>
+              <span className="stat-ok">local</span>
+            </button>
+            {noteOpen === n.id && <pre className="out" id={`note-${n.id}`} style={{ whiteSpace: "pre-wrap" }}>{n.body}</pre>}
+          </div>
+        ))}
+      </div>
+    );
+
   const title = active?.title || "New chat";
 
   return (
@@ -328,6 +393,7 @@ export default function Chat({ hash }: { hash: string }) {
             </button>
             <h1 className="ttl"><span className="ttl-text">{activeId ? title : "New chat"}</span>{active && folderTag(active.cwd) && <span className="ftag" title={folderTag(active.cwd)!.title}>{folderTag(active.cwd)!.label}</span>}</h1>
             <div className="head-right">
+              {yolo && <span className="yolo-badge" title="Pi runs risky commands in this chat without asking">YOLO</span>}
               {!phone && <div className="pop-wrap">
                 <select className="pill" aria-label="Model" value={modelId} disabled={!models.length} onChange={e => void onModel(e.target.value)}
                   style={{ appearance: "none", paddingRight: 12 }}>
@@ -376,25 +442,24 @@ export default function Chat({ hash }: { hash: string }) {
                 <button className="btn ghost" type="button" style={{ alignSelf: "center" }} onClick={() => void older()}>Load older messages</button>
               )}
 
-              {thread.messages.map(m =>
-                m.role === "user" ? (
-                  <UserMessage key={m.id} m={m} onOpenImage={setLightbox} />
-                ) : (
-                  <AssistantMessage key={m.id} m={m} agent={chatBackend === "pi" ? "Pi" : "Hermes"} onApprove={onApprove} />
-                ),
-              )}
-
-              {notes.map(n => (
-                <div className="fold-wrap" key={n.id}>
-                  <button type="button" className="fold" aria-expanded={noteOpen === n.id} aria-controls={`note-${n.id}`} onClick={() => setNoteOpen(noteOpen === n.id ? null : n.id)}>
-                    <Icon name="chevr" className="chev" />
-                    <Icon name="term" className="i sm" />
-                    <span className="tname">{n.title}</span>
-                    <span className="stat-ok">local</span>
-                  </button>
-                  {noteOpen === n.id && <pre className="out" id={`note-${n.id}`} style={{ whiteSpace: "pre-wrap" }}>{n.body}</pre>}
-                </div>
+              {thread.messages.map(m => (
+                <Fragment key={m.id}>
+                  {m.role === "user" ? (
+                    <UserMessage m={m} onOpenImage={setLightbox}
+                      onRetry={!thread.runId ? () => { void thread.retry(m.id).catch(e => setPageErr((e as Error).message)); } : undefined}
+                      onDelete={!thread.runId ? () => {
+                        if (!window.confirm("Delete this message?")) return;
+                        void thread.remove(m.id).catch(e => setPageErr((e as Error).message));
+                      } : undefined} />
+                  ) : (
+                    <AssistantMessage m={m} agent={chatBackend === "pi" ? "Pi" : "Hermes"} onApprove={onApprove} />
+                  )}
+                  {noteRows(thread.commands.filter(n => n.afterSeq === m.seq))}
+                </Fragment>
               ))}
+
+              {/* Command rows whose anchor message is not loaded (paged out) still render, at the end. */}
+              {noteRows(thread.commands.filter(n => !thread.messages.some(m => m.seq === n.afterSeq)))}
 
               {!thread.runId && (active?.awaiting ?? 0) > 0 && (
                 <div className="fold static" role="status" aria-live="polite">
@@ -404,10 +469,6 @@ export default function Chat({ hash }: { hash: string }) {
               )}
             </div>
           </div>
-
-          {unseen && !atBottom && (
-            <button className="jump" type="button" onClick={scrollToEnd}>Jump to latest</button>
-          )}
 
           <Composer
             phone={phone}
@@ -425,6 +486,7 @@ export default function Chat({ hash }: { hash: string }) {
             onSteer={onSteer}
             onAction={onAction}
             onNote={addNote}
+            jump={{ show: !atBottom, unseen, onJump: scrollToEnd }}
             onStop={() => { thread.stop().catch(e => setPageErr((e as Error).message)); }}
             onNew={() => void newChat()}
             onModel={id => void onModel(id)}
@@ -436,6 +498,7 @@ export default function Chat({ hash }: { hash: string }) {
       {folderAsk && <FolderSheet onPick={cwd => { folderAsk.resolve(cwd); setFolderAsk(null); }} onCancel={closeFolderAsk} />}
 
       {piSheet && activeId && <PiSheet sid={activeId} running={!!thread.runId} onClose={() => setPiSheet(false)} />}
+      {loginAsk !== null && <LoginSheet initial={loginAsk} onClose={() => setLoginAsk(null)} />}
 
       {lightbox && (
         <div role="dialog" aria-modal="true" aria-label={lightbox.name} onClick={() => setLightbox(null)}
