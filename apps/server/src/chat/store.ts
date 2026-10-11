@@ -39,6 +39,30 @@ export type ToolRow = {
   durationMs: number | null;
 };
 
+/**
+ * Token accounting for one assistant message (one run). `input` is the UNCACHED prompt part: with prompt
+ * caching most of the prompt lands in `cacheRead`/`cacheWrite`, so the prompt size is the sum of the three.
+ * Everything past `output` is optional: older rows and Hermes runs carry only some of it.
+ */
+export type TokenUsage = {
+  input: number;
+  output: number;
+  /** Prompt tokens served from the provider's cache, summed over the run's model calls. */
+  cacheRead?: number;
+  /** Prompt tokens written to the cache, summed over the run's model calls. */
+  cacheWrite?: number;
+  /** Prompt size of the LAST model call (input + cacheRead + cacheWrite): the real context in use. Pi only. */
+  context?: number;
+  /** Model calls the run made (each tool round trip is one). */
+  calls?: number;
+  /** Provider-reported cost in USD; absent when the provider reports none. */
+  costUsd?: number;
+  /** Time from sending the run to the first streamed token, in ms. */
+  ttftMs?: number;
+  /** Time from sending the run to its end, in ms. */
+  durationMs?: number;
+};
+
 export type ApprovalStatus = "pending" | "approved" | "denied" | "ended";
 /** A Hermes approval has no id (read-only notice); a Pi approval has an id and can be answered. */
 export type Approval = { command: string | null; note: string; id?: string; options?: string[]; status?: ApprovalStatus };
@@ -68,7 +92,7 @@ export type ChatMessage = {
   tools: ToolRow[];
   /** Ordered body of the turn. Older rows (no blocks_json) read as []. */
   blocks: MessageBlock[];
-  usage: { input: number; output: number } | null;
+  usage: TokenUsage | null;
   /** Pi: last todo list the agent wrote during this turn. null when none. */
   todos: TodoItem[] | null;
   status: "complete" | "failed" | "interrupted" | "running";
@@ -278,7 +302,7 @@ export function insertMessage(
   db: Database,
   m: {
     id: string; sessionId: string; seq: number; role: "user" | "assistant"; text: string;
-    reasoning?: string | null; tools?: ToolRow[]; blocks?: MessageBlock[]; usage?: { input: number; output: number } | null;
+    reasoning?: string | null; tools?: ToolRow[]; blocks?: MessageBlock[]; usage?: TokenUsage | null;
     status: ChatMessage["status"]; runId?: string | null; model?: string | null; error?: string | null;
     createdAt: number; attachments: NewAttachment[];
   },
@@ -359,6 +383,46 @@ export function listAllMessages(db: Database, sessionId: string): ChatMessage[] 
      FROM chat_messages WHERE session_id = ? ORDER BY seq ASC`,
   ).all(sessionId) as MessageRow[];
   return rows.map(r => toMessage(db, r));
+}
+
+export type UsageReport = {
+  /** Sums over every reply in the chat. */
+  totals: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number; calls: number; costUsd: number; replies: number };
+  /** Mean time to first token over the replies that recorded one, ms. null when none did. */
+  avgTtftMs: number | null;
+  /** The newest reply that reported usage: its `context` is the chat's current context size. */
+  last: { context: number | null; ttftMs: number | null; durationMs: number | null } | null;
+};
+
+/** Token totals for a whole chat, read from each assistant message's stored usage. */
+export function sessionUsage(db: Database, sessionId: string): UsageReport {
+  const rows = db.query(
+    "SELECT usage_json FROM chat_messages WHERE session_id = ? AND role = 'assistant' AND usage_json IS NOT NULL ORDER BY seq ASC",
+  ).all(sessionId) as { usage_json: string }[];
+  const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, calls: 0, costUsd: 0, replies: 0 };
+  let ttftSum = 0, ttftN = 0;
+  let last: UsageReport["last"] = null;
+  for (const r of rows) {
+    let u: TokenUsage;
+    try { u = JSON.parse(r.usage_json) as TokenUsage; } catch { continue; }
+    if (!u || typeof u !== "object") continue;
+    const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    totals.input += n(u.input);
+    totals.output += n(u.output);
+    totals.cacheRead += n(u.cacheRead);
+    totals.cacheWrite += n(u.cacheWrite);
+    totals.calls += n(u.calls);
+    totals.costUsd += n(u.costUsd);
+    totals.replies++;
+    if (typeof u.ttftMs === "number") { ttftSum += u.ttftMs; ttftN++; }
+    last = {
+      context: typeof u.context === "number" ? u.context : null,
+      ttftMs: typeof u.ttftMs === "number" ? u.ttftMs : null,
+      durationMs: typeof u.durationMs === "number" ? u.durationMs : null,
+    };
+  }
+  totals.total = totals.input + totals.output + totals.cacheRead + totals.cacheWrite;
+  return { totals, avgTtftMs: ttftN > 0 ? Math.round(ttftSum / ttftN) : null, last };
 }
 
 /** Attachment row with its disk path (server side only; never sent to the browser). */
@@ -454,7 +518,7 @@ export function patchMessage(
   db: Database,
   id: string,
   p: {
-    text?: string; reasoning?: string | null; tools?: ToolRow[]; blocks?: MessageBlock[]; usage?: { input: number; output: number } | null;
+    text?: string; reasoning?: string | null; tools?: ToolRow[]; blocks?: MessageBlock[]; usage?: TokenUsage | null;
     todos?: TodoItem[] | null;
     status?: ChatMessage["status"]; error?: string | null; model?: string | null;
   },

@@ -35,7 +35,8 @@ export type ComposerProps = {
   /** Long command output goes into the thread as a collapsible row, not under the composer. */
   onNote: (title: string, body: string) => void;
   onStop: () => void;
-  onNew: () => void;
+  /** Starts a chat on this agent, or on the open chat's agent when none is named. */
+  onNew: (backend?: Backend) => void;
   onModel: (id: string) => void;
   onEffort: (e: Effort) => void;
   /** Floating "jump to latest" button above the composer, shown while the thread is scrolled up. */
@@ -111,7 +112,13 @@ export function Composer(p: ComposerProps) {
       p.onAction(cmd.name, cmd.arg).catch(e => { setText(keep); setErr((e as Error).message); });
       return true;
     }
-    if (cmd.name === "new") { p.onNew(); setText(""); return true; }
+    if (cmd.name === "new") {
+      const named = cmd.arg.toLowerCase();
+      if (named !== "" && named !== "hermes" && named !== "pi") { setNotice("Use /new, /new hermes or /new pi."); return true; }
+      p.onNew(named === "" ? undefined : (named as Backend));
+      setText("");
+      return true;
+    }
     if (cmd.name === "stop") {
       if (p.running) p.onNote("/stop", "Stopped the running task.");
       else p.onNote("/stop", "Nothing is running.");
@@ -252,8 +259,9 @@ export function Composer(p: ComposerProps) {
                 </button>
               )}
               {meter && (
-                <span className="meter" title={`Context ~${meter.label}`} aria-label={`Context about ${meter.label}`}>
-                  <span className="bar" style={{ width: `${meter.pct}%` }} />
+                <span className="meter" title={`Context ${meter.label}`} aria-label={`Context ${meter.label}`}>
+                  <span className="bar"><span style={{ width: `${meter.pct}%` }} /></span>
+                  <span className="meter-lbl">{meter.label}</span>
                 </span>
               )}
             </div>
@@ -315,7 +323,7 @@ export function Composer(p: ComposerProps) {
           </div>
         </div>
         <div className="comp-foot">
-          <span className={`hint${notice && !err ? " note" : ""}`} role={notice || err ? "status" : undefined}>{err || notice || (files.some(f => f.note === "Text PDFs only") ? "Text PDFs only" : p.phone ? (meter && meter.pct >= 70 ? `Context ~${Math.round(meter.pct)}% full` : "") : "Enter to send · Shift+Enter for a new line")}</span>
+          <span className={`hint${notice && !err ? " note" : ""}`} role={notice || err ? "status" : undefined}>{err || notice || (files.some(f => f.note === "Text PDFs only") ? "Text PDFs only" : p.phone ? (meter ? `Context ${meter.label} (${Math.round(meter.pct)}%)` : "") : "Enter to send · Shift+Enter for a new line")}</span>
         </div>
       </div>
     </div>

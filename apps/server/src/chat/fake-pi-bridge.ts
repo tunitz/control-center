@@ -17,7 +17,7 @@ import { mkdirSync, mkdtempSync, readdirSync, realpathSync, statSync, symlinkSyn
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, sep } from "node:path";
 
-export type FakeModel = { provider: string; id: string; name?: string; reasoning?: boolean; input?: string[] };
+export type FakeModel = { provider: string; id: string; name?: string; reasoning?: boolean; input?: string[]; contextWindow?: number };
 type Frame = { id: number; event: string; data: any };
 type Sub = { send(f: Frame): void; close(): void };
 
@@ -67,7 +67,7 @@ type AuthRec = {
 };
 
 export const FAKE_MODELS: FakeModel[] = [
-  { provider: "deepseek", id: "deepseek-flash", name: "DeepSeek V4.1 Flash", reasoning: true },
+  { provider: "deepseek", id: "deepseek-flash", name: "DeepSeek V4.1 Flash", reasoning: true, contextWindow: 1_000_000 },
   { provider: "deepseek", id: "deepseek-pro", name: "DeepSeek V4.1 Pro", reasoning: true },
   // The real bridge lists every model Pi knows. The server shows only a curated few.
   { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true },

@@ -12,6 +12,8 @@ export type ChatModelDef = {
   canDisableReasoning: boolean;
   vision: boolean;
   local: boolean;
+  /** Tokens the model can hold. Pi reports it per model; Hermes models use `config.contextWindow`. */
+  contextWindow?: number;
 };
 
 export type ChatModel = ChatModelDef & { online: boolean };

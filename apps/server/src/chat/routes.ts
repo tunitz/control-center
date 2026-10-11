@@ -150,10 +150,11 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
     if (m[2] === "pi-compact" && method === "POST") return piCompact(req, id, ctx);
   }
 
-  m = /^\/sessions\/([^/]+)\/(messages|send|export)$/.exec(p);
+  m = /^\/sessions\/([^/]+)\/(messages|send|export|usage)$/.exec(p);
   if (m) {
     const id = safeId(m[1]);
     const action = m[2];
+    if (action === "usage" && method === "GET") { requireSession(ctx, id); return json(S.sessionUsage(ctx.db, id)); }
     if (action === "messages" && method === "GET") return messagesRoute(url, id, ctx);
     if (action === "send" && method === "POST") return sendRoute(req, id, ctx);
     if (action === "export" && method === "GET") return exportRoute(id, ctx);

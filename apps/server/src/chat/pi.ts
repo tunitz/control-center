@@ -76,7 +76,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 
 export type PiClientOptions = { baseUrl: string; token: string; now?: () => number; requestTimeoutMs?: number };
 
-type BridgeModel = { id?: unknown; provider?: unknown; name?: unknown; reasoning?: unknown; input?: unknown };
+type BridgeModel = { id?: unknown; provider?: unknown; name?: unknown; reasoning?: unknown; input?: unknown; contextWindow?: unknown };
 
 export class PiClient implements ChatBackend {
   private readonly base: string;
@@ -382,6 +382,7 @@ function toModelDef(m: BridgeModel): ChatModelDef {
     canDisableReasoning: reasoning,
     vision: Array.isArray(m.input) && m.input.includes("image"),
     local: false,
+    ...(typeof m.contextWindow === "number" && m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
   };
 }
 
@@ -434,9 +435,9 @@ function parseTodos(v: unknown): TodoItem[] | null {
   return out;
 }
 
-/** Per-run mapping state: Pi reports usage per turn, the UI wants one running total. */
-export type PiMapState = { input: number; output: number };
-export const newPiMapState = (): PiMapState => ({ input: 0, output: 0 });
+/** Per-run mapping state: Pi reports usage per model call, the UI wants one running total plus the latest context size. */
+export type PiMapState = { input: number; output: number; cacheRead: number; cacheWrite: number; calls: number; context: number; costUsd: number };
+export const newPiMapState = (): PiMapState => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0, context: 0, costUsd: 0 });
 
 const PREVIEW_MAX = 300;
 const cut = (t: string): string => (t.length > PREVIEW_MAX ? t.slice(0, PREVIEW_MAX - 1) + "\u2026" : t);
@@ -488,9 +489,24 @@ export function mapPiEvent(event: string, data: any, model: string, st: PiMapSta
     case "message_end": {
       const m = data?.message;
       if (m?.role !== "assistant" || typeof m?.usage !== "object" || m.usage === null) return [];
-      st.input += Number(m.usage.input) || 0;
-      st.output += Number(m.usage.output) || 0;
-      return [{ type: "usage", input: st.input, output: st.output }];
+      const u = m.usage;
+      const input = Number(u.input) || 0;
+      const cacheRead = Number(u.cacheRead) || 0;
+      const cacheWrite = Number(u.cacheWrite) || 0;
+      st.input += input;
+      st.output += Number(u.output) || 0;
+      st.cacheRead += cacheRead;
+      st.cacheWrite += cacheWrite;
+      st.calls++;
+      // `input` alone is only the uncached tail; the prompt this call sent is all three. Latest call wins.
+      st.context = input + cacheRead + cacheWrite;
+      st.costUsd += Number(u.cost?.total) || 0;
+      const f: HermesFrame = {
+        type: "usage", input: st.input, output: st.output, cacheRead: st.cacheRead, cacheWrite: st.cacheWrite,
+        context: st.context, calls: st.calls,
+      };
+      if (st.costUsd > 0) f.costUsd = st.costUsd;
+      return [f];
     }
     case "extension_ui_request": {
       if (data?.method !== "confirm" || typeof data?.id !== "string") return [];

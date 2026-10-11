@@ -1,4 +1,4 @@
-import type { Backend, ChatConfig, ChatMessage, ChatModel, ChatSession, CommandNote, Effort, PiAuthProvider, PiAuthType, PiConfig, PiSettings, PiSkill, SessionHit } from "./types";
+import type { Backend, ChatConfig, ChatMessage, ChatModel, ChatSession, CommandNote, Effort, PiAuthProvider, PiAuthType, PiConfig, PiSettings, PiSkill, SessionHit, UsageReport } from "./types";
 
 /** GET /api/chat/pi/dirs: subfolders of `path` (root is the home folder, parent null there). */
 export type PiDirList = { path: string; parent: string | null; entries: { name: string; path: string }[] };
@@ -76,6 +76,7 @@ export const chat = {
     chatReq<{ ok: true }>("POST", `/pi/auth/login/${encodeURIComponent(id)}/respond`, promptId ? { value, promptId } : { value }),
   piAuthCancel: (id: string) => chatReq<{ ok: true }>("POST", `/pi/auth/login/${encodeURIComponent(id)}/cancel`, {}),
   piAuthEventsUrl: (id: string, after = 0) => `/api/chat/pi/auth/login/${encodeURIComponent(id)}/events?after=${after}`,
+  sessionUsage: (id: string) => chatReq<UsageReport>("GET", `/sessions/${encodeURIComponent(id)}/usage`),
   credits: () => chatReq<{ text: string }>("GET", "/credits"),
   exportUrl: (id: string) => `/api/chat/sessions/${encodeURIComponent(id)}/export`,
 };

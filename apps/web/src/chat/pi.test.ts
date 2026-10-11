@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { backendLabel, keyOf, splitKey, viewModels, backendOfKey, modelUsable, effortChoices, todoSummary, tokenNote, sheetErrorText, swapBackend } from "./pi";
+import { backendLabel, keyOf, splitKey, viewModels, backendOfKey, modelUsable, effortChoices, todoSummary, tokenNote, sheetErrorText, swapBackend, defaultModelFor, newChoices, defaultBackend } from "./pi";
 import type { ChatModel } from "./types";
 
 const M = (over: Partial<ChatModel>): ChatModel => ({ id: "m", provider: "p", label: "M", reasoning: true, canDisableReasoning: true, vision: false, local: false, online: true, ...over });
@@ -111,5 +111,43 @@ describe("backendLabel", () => {
     expect(backendLabel("pi")).toBe("Pi");
     expect(backendLabel("hermes")).toBe("Hermes");
     expect(backendLabel(undefined)).toBe("Hermes");
+  });
+});
+
+describe("new chat defaults", () => {
+  const m = (id: string, backend: "hermes" | "pi", online = true) =>
+    ({ id, provider: "p", label: id, reasoning: false, canDisableReasoning: false, vision: false, local: false, online, backend }) as any;
+  const models = [m("claude-sonnet-5-5", "hermes"), m("deepseek-flash", "hermes"), m("pi:claude-sonnet-5-5", "pi"), m("pi:deepseek-flash", "pi")];
+
+  test("new chat: Hermes starts on its default model, Pi on the configured new-chat model", () => {
+    const cfg = { defaultModel: "claude-sonnet-5-5", newChatModel: "pi:claude-sonnet-5-5" };
+    expect(defaultModelFor("hermes", models, cfg)!.id).toBe("claude-sonnet-5-5");
+    expect(defaultModelFor("pi", models, cfg)!.id).toBe("pi:claude-sonnet-5-5");
+  });
+
+  test("new chat: a configured model that is missing or offline falls back to the first online one", () => {
+    const cfg = { defaultModel: "gone", newChatModel: "pi:nope" };
+    expect(defaultModelFor("hermes", models, cfg)!.id).toBe("claude-sonnet-5-5");
+    expect(defaultModelFor("pi", models, cfg)!.id).toBe("pi:claude-sonnet-5-5");
+    const offline = [m("a", "hermes", false), m("b", "hermes"), m("pi:c", "pi", false)];
+    expect(defaultModelFor("hermes", offline, null)!.id).toBe("b");
+    expect(defaultModelFor("pi", offline, null)).toBeNull();
+  });
+
+  test("new chat: a new-chat model of the other agent is not used", () => {
+    const cfg = { defaultModel: "claude-sonnet-5-5", newChatModel: "pi:deepseek-flash" };
+    expect(defaultModelFor("hermes", models, cfg)!.id).toBe("claude-sonnet-5-5");
+    expect(defaultModelFor("pi", models, cfg)!.id).toBe("pi:deepseek-flash");
+  });
+
+  test("newChoices lists Hermes then Pi, each with its model (null when the agent has none)", () => {
+    const c = newChoices(models.filter(x => x.backend === "hermes"), { defaultModel: "deepseek-flash" });
+    expect(c.map(x => [x.backend, x.label, x.model?.id ?? null])).toEqual([["hermes", "Hermes", "deepseek-flash"], ["pi", "Pi", null]]);
+  });
+
+  test("defaultBackend follows the configured new-chat model, else Hermes", () => {
+    expect(defaultBackend(models, { defaultModel: "claude-sonnet-5-5", newChatModel: "pi:claude-sonnet-5-5" })).toBe("pi");
+    expect(defaultBackend(models, { defaultModel: "claude-sonnet-5-5" })).toBe("hermes");
+    expect(defaultBackend([], null)).toBe("hermes");
   });
 });

@@ -398,3 +398,37 @@ test("createChatContext runs restart recovery at construction", () => {
   expect(S.getMessage(db, "a9")!.status).toBe("interrupted");
   expect(S.getSession(db, "s1")!.runState).toBe("idle");
 });
+
+test("run timing: first token and duration are measured and merged into the stored usage", async () => {
+  let clock = 5000;
+  const m = new RunManager({ db, hermes, now: () => clock, emit: () => {}, keepaliveMs: 20 });
+  m.reserve("s1");
+  const r = m.begin("s1", { text: "hi", message: "hi", attachments: [], model: "claude-sonnet-5-5", effort: null });
+  await tick();
+  clock = 5400; hermes.last.push(delta("Hi")); await tick();
+  clock = 5900;
+  hermes.last.push({ type: "usage", input: 3, output: 2, cacheRead: 100, cacheWrite: 0, context: 103, calls: 1 });
+  hermes.last.push(done("complete")); hermes.last.end();
+  await m.waitDone(r.runId);
+  expect(S.getMessage(db, r.assistantMessage.id)!.usage).toEqual({ input: 3, output: 2, cacheRead: 100, cacheWrite: 0, context: 103, calls: 1, ttftMs: 400, durationMs: 900 });
+});
+
+test("a run that streamed text but reported no usage still records its timing; a silent failure stores none", async () => {
+  let clock = 1000;
+  const m = new RunManager({ db, hermes, now: () => clock, emit: () => {}, keepaliveMs: 20 });
+  m.reserve("s1");
+  const a = m.begin("s1", { text: "a", message: "a", attachments: [], model: "claude-sonnet-5-5", effort: null });
+  await tick();
+  clock = 1250; hermes.last.push({ type: "reasoning", text: "hm" }); await tick();
+  clock = 2000; hermes.last.push(done("complete")); hermes.last.end();
+  await m.waitDone(a.runId);
+  expect(S.getMessage(db, a.assistantMessage.id)!.usage).toEqual({ input: 0, output: 0, ttftMs: 250, durationMs: 1000 });
+
+  m.reserve("s1");
+  const b = m.begin("s1", { text: "b", message: "b", attachments: [], model: "claude-sonnet-5-5", effort: null });
+  await tick();
+  hermes.last.push(done("failed", "boom")); hermes.last.end();
+  await m.waitDone(b.runId);
+  expect(S.getMessage(db, b.assistantMessage.id)!.usage).toBeNull();
+});
+

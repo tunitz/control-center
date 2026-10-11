@@ -412,3 +412,15 @@ describe("HttpHermes", () => {
     for (const e of errs) expect(e.message).not.toContain(KEY);
   });
 });
+
+describe("run.completed usage", () => {
+  test("keeps Hermes cache read/write tokens next to input and output", () => {
+    const st = newParseState();
+    expect(parseFrame("run.completed", { usage: { input_tokens: 100, output_tokens: 7, total_tokens: 9100, cache_read_tokens: 8000, cache_write_tokens: 1000 } }, st))
+      .toEqual({ type: "usage", input: 100, output: 7, cacheRead: 8000, cacheWrite: 1000 });
+  });
+  test("without cache counters the frame stays input/output only", () => {
+    expect(parseFrame("run.completed", { usage: { input_tokens: 5, output_tokens: 1 } }, newParseState()))
+      .toEqual({ type: "usage", input: 5, output: 1 });
+  });
+});

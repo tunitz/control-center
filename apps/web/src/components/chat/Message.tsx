@@ -1,13 +1,13 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
 import { ApprovalCard } from "./Approval";
 import { Todos } from "./Todos";
 import { copyText } from "../../clipboard";
-import { fmtTokens } from "../../chat/context";
+import { usageRows, usageSummary } from "../../chat/usage";
 import { isAbnormal, showReasoning } from "../../chat/reduce";
 import { toolDetail, toolStatus, toolTarget } from "../../chat/tool";
-import type { Approval, Attachment, ChatMessage, MessageBlock, ToolRow } from "../../chat/types";
+import type { Approval, Attachment, ChatMessage, MessageBlock, TokenUsage, ToolRow } from "../../chat/types";
 
 const fmtSize = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
 const fmtTime = (t: number) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -137,6 +137,24 @@ export function UserMessage({ m, onOpenImage, onRetry, onDelete }: {
   );
 }
 
+/** The token line under a reply. Tap it for the full breakdown: uncached input, cache read/write, output, timing. */
+function UsageRow({ id, u }: { id: string; u: TokenUsage }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="usage-wrap">
+      <button type="button" className="usage usage-btn" aria-expanded={open} aria-controls={`usage-${id}`} title="Token details" onClick={() => setOpen(o => !o)}>
+        {usageSummary(u).map(part => <span key={part}>{part}</span>)}
+        <Icon name="chevr" className="chev" />
+      </button>
+      {open && (
+        <dl className="usage-grid" id={`usage-${id}`}>
+          {usageRows(u).map(r => <Fragment key={r.label}><dt>{r.label}</dt><dd>{r.value}</dd></Fragment>)}
+        </dl>
+      )}
+    </div>
+  );
+}
+
 export function AssistantMessage({ m, agent = "Hermes", onApprove }: {
   m: ChatMessage; agent?: string;
   /** Answers a Pi approval for this message's run. */
@@ -192,12 +210,7 @@ export function AssistantMessage({ m, agent = "Hermes", onApprove }: {
           </button>
         </div>
       )}
-      {m.usage && (
-        <div className="usage">
-          <span>{fmtTokens(m.usage.input)} in</span>
-          <span>{fmtTokens(m.usage.output)} out</span>
-        </div>
-      )}
+      {m.usage && <UsageRow id={m.id} u={m.usage} />}
     </div>
   );
 }

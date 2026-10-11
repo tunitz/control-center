@@ -10,6 +10,14 @@
 .chatx .i.sm{width:14px;height:14px}
 .chatx .side{background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0}
 .chatx .side-top{padding:16px 14px 10px;display:flex;flex-direction:column;gap:10px}
+.chatx .new-wrap{position:relative;display:flex;flex-direction:column}
+.chatx .new-wrap>.btn{width:100%;justify-content:center}
+.chatx .new-menu{top:calc(100% + 6px);left:0;right:0;min-width:0;padding:6px;display:flex;flex-direction:column;gap:2px}
+.chatx .new-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;min-height:52px;padding:8px 12px;border:0;border-radius:10px;background:transparent;color:var(--text);text-align:left}
+.chatx .new-item:hover:not(:disabled),.chatx .new-item:focus-visible{background:var(--surface2)}
+.chatx .new-item:disabled{color:var(--mut);cursor:default}
+.chatx .new-name{font-weight:600;font-size:14px}
+.chatx .new-sub{font-size:13px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .chatx .btn{min-height:36px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text);display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:500;white-space:nowrap;font-size:14px}
 .chatx .btn:hover{background:var(--surface2)}
 .chatx .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
@@ -95,6 +103,15 @@
 .chatx .body code{background:var(--surface2);border-radius:6px;padding:1px 6px;font-size:13px}
 .chatx .usage{font-size:13px;color:var(--mut);font-variant-numeric:tabular-nums;display:flex;gap:4px;flex-wrap:wrap}
 .chatx .usage span+span::before{content:"·";margin-right:8px}
+.chatx .usage-wrap{display:flex;flex-direction:column;gap:6px;min-width:0}
+.chatx .usage-btn{background:none;border:0;padding:4px 0;margin:0;font:inherit;text-align:left;cursor:pointer;align-items:center;min-height:32px;border-radius:8px}
+.chatx .usage-btn:hover{color:var(--text)}
+.chatx .usage-btn .chev{width:12px;height:12px;flex:none;margin-left:2px;transition:transform .15s}
+.chatx .usage-btn[aria-expanded=true] .chev{transform:rotate(90deg)}
+.chatx .usage-grid{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 16px;margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font-size:13px;font-variant-numeric:tabular-nums}
+.chatx .usage-grid dt{color:var(--mut)}
+.chatx .usage-grid dd{margin:0;text-align:right;overflow-wrap:anywhere}
+.chatx.phone .usage-btn{min-height:44px}
 .chatx .asst .msg-actions{margin-left:-8px;margin-top:-4px}
 .chatx .caret{display:inline-block;width:2px;height:1.05em;background:var(--text);vertical-align:-2px;margin-left:2px;animation:blink 1s steps(2,start) infinite}
 @keyframes blink{to{visibility:hidden}}
@@ -325,7 +342,7 @@
 .chatx.phone .ptrig{min-height:44px;padding:0 2px}
 .chatx.phone .effort{display:none}
 .chatx.phone .comp-foot{padding:4px 8px 0}
-/* Phone: no meter bar (unlabeled, confusing). The footer says "Context N% full" once usage passes 70%. */
+/* Phone: no meter bar; the footer line under the composer carries the figure ("Context 553k / 1M (55%)"). */
 .chatx.phone .composer .meter{display:none}
 @media (max-width:339px){.chatx.phone .comp-bottom,.chatx.phone .comp-right{flex-wrap:wrap}}
 

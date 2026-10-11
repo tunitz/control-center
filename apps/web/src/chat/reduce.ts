@@ -1,4 +1,4 @@
-import type { Approval, ApprovalStatus, ChatMessage, MessageBlock, RunEvent, ToolRow } from "./types";
+import type { Approval, ApprovalStatus, ChatMessage, MessageBlock, RunEvent, TokenUsage, ToolRow } from "./types";
 
 export type RunView = { message: ChatMessage; lastId: number; done: boolean };
 
@@ -67,7 +67,7 @@ export function applyEvent(view: RunView, ev: RunEvent): RunView {
       return { ...v, message: { ...m, todos } };
     }
     case "usage":
-      return { ...v, message: { ...m, usage: { input: Number(d.input) || 0, output: Number(d.output) || 0 } } };
+      return { ...v, message: { ...m, usage: parseUsage(d) } };
     case "done":
       return {
         ...v,
@@ -91,4 +91,14 @@ export function showReasoning(m: ChatMessage): boolean {
 /** Failed and interrupted turns are never presented as normal replies. */
 export function isAbnormal(m: ChatMessage): boolean {
   return m.status === "failed" || m.status === "interrupted";
+}
+
+/** A `usage` event's payload as a TokenUsage: the two core counters always, the rest only when numeric. */
+export function parseUsage(d: Record<string, unknown>): TokenUsage {
+  const u: TokenUsage = { input: Number(d.input) || 0, output: Number(d.output) || 0 };
+  for (const k of ["cacheRead", "cacheWrite", "context", "calls", "costUsd", "ttftMs", "durationMs"] as const) {
+    const n = d[k];
+    if (typeof n === "number" && Number.isFinite(n)) u[k] = n;
+  }
+  return u;
 }

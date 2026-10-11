@@ -140,3 +140,27 @@ test("yolo persists on the session and reads back", () => {
   S.updateSession(db, "y1", { yolo: false }, 3);
   expect(S.getYolo(db, "y1")).toBe(false);
 });
+
+test("sessionUsage sums every reply, keeps the newest context, and averages first-token time", () => {
+  mk("u1", 1);
+  const add = (id: string, seq: number, role: "user" | "assistant", usage: S.TokenUsage | null) =>
+    S.insertMessage(db, { id, sessionId: "u1", seq, role, text: id, createdAt: seq, status: "complete", usage, attachments: [] });
+  add("m1", 1, "user", null);
+  add("m2", 2, "assistant", { input: 2, output: 800, cacheRead: 500_000, cacheWrite: 4_000, context: 504_002, calls: 3, costUsd: 0.5, ttftMs: 1000, durationMs: 9000 });
+  add("m3", 3, "user", null);
+  add("m4", 4, "assistant", { input: 4, output: 200, cacheRead: 510_000, cacheWrite: 0, context: 510_004, calls: 1, ttftMs: 3000, durationMs: 4000 });
+  add("m5", 5, "assistant", null);
+  expect(S.sessionUsage(db, "u1")).toEqual({
+    totals: { input: 6, output: 1000, cacheRead: 1_010_000, cacheWrite: 4_000, total: 1_015_006, calls: 4, costUsd: 0.5, replies: 2 },
+    avgTtftMs: 2000,
+    last: { context: 510_004, ttftMs: 3000, durationMs: 4000 },
+  });
+});
+
+test("sessionUsage on a chat with no usage, and on rows from before the extra fields existed", () => {
+  mk("u2", 1);
+  expect(S.sessionUsage(db, "u2")).toEqual({ totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, calls: 0, costUsd: 0, replies: 0 }, avgTtftMs: null, last: null });
+  S.insertMessage(db, { id: "o1", sessionId: "u2", seq: 1, role: "assistant", text: "x", createdAt: 1, status: "complete", usage: { input: 10, output: 5 }, attachments: [] });
+  expect(S.sessionUsage(db, "u2")).toMatchObject({ totals: { input: 10, output: 5, total: 15, replies: 1 }, avgTtftMs: null, last: { context: null, ttftMs: null, durationMs: null } });
+});
+

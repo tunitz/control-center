@@ -1,7 +1,7 @@
 import type { Effort } from "./types";
 
 export const COMMANDS = [
-  { name: "new", desc: "Start a new chat" },
+  { name: "new", desc: "Start a new chat (/new hermes or /new pi)" },
   { name: "model", desc: "Switch model" },
   { name: "reasoning", desc: "Set reasoning effort" },
   { name: "stop", desc: "Stop the running task" },
@@ -13,11 +13,12 @@ export const COMMANDS = [
   { name: "delete", desc: "Delete this chat" },
   { name: "steer", desc: "Send a note to the running task" },
   { name: "credits", desc: "Show account balances and usage limits" },
+  { name: "usage", desc: "Show token usage for this chat" },
   { name: "help", desc: "List commands" },
 ] as const;
 
 /** Commands the page handles (they need the active chat); the rest the composer handles itself. */
-export const PAGE_COMMANDS = ["retry", "title", "export", "pin", "archive", "delete", "steer", "credits", "login", "yolo"] as const;
+export const PAGE_COMMANDS = ["retry", "title", "export", "pin", "archive", "delete", "steer", "credits", "usage", "login", "yolo"] as const;
 
 /** Commands that exist only for one backend. */
 export const PI_COMMANDS = [

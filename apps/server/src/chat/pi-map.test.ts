@@ -57,8 +57,33 @@ test("a long tool output preview is cut", () => {
 
 test("assistant message_end -> usage, cumulative over the turns of a run", () => {
   const st = newPiMapState();
-  expect(map(st, "message_end", assistantEnd({ input: 1199, output: 86 }))).toEqual([{ type: "usage", input: 1199, output: 86 }]);
-  expect(map(st, "message_end", assistantEnd({ input: 1300, output: 40 }))).toEqual([{ type: "usage", input: 2499, output: 126 }]);
+  expect(map(st, "message_end", assistantEnd({ input: 1199, output: 86 }))).toEqual([
+    { type: "usage", input: 1199, output: 86, cacheRead: 0, cacheWrite: 0, context: 1199, calls: 1 },
+  ]);
+  expect(map(st, "message_end", assistantEnd({ input: 1300, output: 40 }))).toEqual([
+    { type: "usage", input: 2499, output: 126, cacheRead: 0, cacheWrite: 0, context: 1300, calls: 2 },
+  ]);
+});
+
+test("cached prompt tokens count toward the context: input is only the uncached tail", () => {
+  // Real numbers from a claude-bridge chat: 2 uncached input tokens, 548,772 read from cache, 3,884 written.
+  const st = newPiMapState();
+  const [f] = map(st, "message_end", assistantEnd({ input: 2, output: 829, cacheRead: 548_772, cacheWrite: 3_884 }));
+  expect(f).toMatchObject({ type: "usage", input: 2, output: 829, cacheRead: 548_772, cacheWrite: 3_884, context: 552_658, calls: 1 });
+});
+
+test("context is the LAST call's prompt, while cache traffic and cost add up over the run", () => {
+  const st = newPiMapState();
+  map(st, "message_end", assistantEnd({ input: 10, output: 5, cacheRead: 1000, cacheWrite: 200 }));
+  const first = { ...assistantEnd({ input: 4, output: 6, cacheRead: 1500, cacheWrite: 0 }) };
+  first.message.usage = { ...first.message.usage, cost: { total: 0.25 } } as never;
+  const [f] = map(st, "message_end", first);
+  expect(f).toMatchObject({ input: 14, output: 11, cacheRead: 2500, cacheWrite: 200, context: 1504, calls: 2, costUsd: 0.25 });
+});
+
+test("a provider that reports no cost leaves costUsd off the frame", () => {
+  const [f] = map(newPiMapState(), "message_end", assistantEnd({ input: 5, output: 1 }));
+  expect(f).not.toHaveProperty("costUsd");
 });
 
 test("user and system message_end produce nothing", () => {

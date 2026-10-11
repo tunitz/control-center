@@ -461,3 +461,14 @@ test("GET /credits is 502 when the host endpoint is down or fails", async () => 
     expect((await r2.json()).error).toContain("no key");
   } finally { bad.stop(true); }
 });
+
+test("GET /sessions/:id/usage returns the chat's token totals; 404 for an unknown chat", async () => {
+  seed("s1");
+  S.insertMessage(ctx.db, { id: "a1", sessionId: "s1", seq: 1, role: "assistant", text: "x", createdAt: 1, status: "complete", usage: { input: 3, output: 4, cacheRead: 100, context: 103 }, attachments: [] });
+  const r = await js(await run(req("GET", "/api/chat/sessions/s1/usage")));
+  expect(r.status).toBe(200);
+  expect(r.body.totals).toMatchObject({ input: 3, output: 4, cacheRead: 100, total: 107, replies: 1 });
+  expect(r.body.last.context).toBe(103);
+  expect((await js(await run(req("GET", "/api/chat/sessions/nope/usage")))).status).toBe(404);
+});
+

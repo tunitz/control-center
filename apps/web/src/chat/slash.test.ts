@@ -16,7 +16,7 @@ test("unknown slash word is reported, not sent as a command", () => {
 });
 
 test("suggestions filter by prefix and stop after the first space", () => {
-  expect(suggestions("/").map(c => c.name)).toEqual(["new", "model", "reasoning", "stop", "retry", "title", "export", "pin", "archive", "delete", "steer", "credits", "help"]);
+  expect(suggestions("/").map(c => c.name)).toEqual(["new", "model", "reasoning", "stop", "retry", "title", "export", "pin", "archive", "delete", "steer", "credits", "usage", "help"]);
   expect(suggestions("/mo").map(c => c.name)).toEqual(["model"]);
   expect(suggestions("/stop now")).toEqual([]);
   expect(suggestions("hi")).toEqual([]);
@@ -66,4 +66,12 @@ test("/yolo exists only for Pi chats", () => {
   expect(suggestions("/yo", "pi").map(c => c.name)).toEqual(["yolo"]);
   expect(suggestions("/", "hermes").map(c => c.name)).not.toContain("yolo");
   expect(helpText("pi")).toContain("/yolo");
+});
+
+test("/usage is a page command for both backends", () => {
+  expect(parseSlash("/usage")).toEqual({ kind: "command", name: "usage", arg: "" });
+  expect(parseSlash("/usage", "pi")).toEqual({ kind: "command", name: "usage", arg: "" });
+  expect(PAGE_COMMANDS).toContain("usage");
+  expect(suggestions("/us").map(c => c.name)).toEqual(["usage"]);
+  expect(helpText()).toContain("/usage");
 });

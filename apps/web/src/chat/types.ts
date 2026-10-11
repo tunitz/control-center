@@ -1,7 +1,7 @@
 // Mirrors docs/chat-contract.md. Change only via the contract owner.
 export type Effort = "off" | "low" | "medium" | "high";
 export type Backend = "hermes" | "pi";
-export type ChatModel = { id: string; provider: string; label: string; reasoning: boolean; canDisableReasoning: boolean; vision: boolean; local: boolean; online: boolean; backend?: Backend };
+export type ChatModel = { id: string; provider: string; label: string; reasoning: boolean; canDisableReasoning: boolean; vision: boolean; local: boolean; online: boolean; backend?: Backend; contextWindow?: number };
 export type ChatSession = {
   id: string; title: string; titleAuto: boolean; model: string; provider: string; effort: Effort | null;
   pinned: boolean; archived: boolean; createdAt: number; updatedAt: number;
@@ -12,6 +12,20 @@ export type SessionHit = ChatSession & { snippet: string };
 export type Attachment = { id: string; kind: "image" | "file"; name: string; mime: string; size: number; w: number | null; h: number | null; url: string };
 export type TodoItem = { id: string; content: string; status: "pending" | "in_progress" | "completed" };
 export type ToolRow = { id: string; name: string; args: Record<string, unknown> | null; preview: string | null; status: "running" | "ok" | "failed"; durationMs: number | null };
+/**
+ * Token accounting for one reply. `input` is only the UNCACHED part of the prompt; with prompt caching most of it
+ * is `cacheRead`/`cacheWrite`. `context` is the prompt size of the reply's last model call (Pi only).
+ */
+export type TokenUsage = {
+  input: number; output: number; cacheRead?: number; cacheWrite?: number; context?: number;
+  calls?: number; costUsd?: number; ttftMs?: number; durationMs?: number;
+};
+/** GET /sessions/:id/usage: token totals over the whole chat. */
+export type UsageReport = {
+  totals: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number; calls: number; costUsd: number; replies: number };
+  avgTtftMs: number | null;
+  last: { context: number | null; ttftMs: number | null; durationMs: number | null } | null;
+};
 export type MessageStatus = "complete" | "failed" | "interrupted" | "running";
 export type ApprovalStatus = "pending" | "approved" | "denied" | "ended";
 /** A Hermes approval is a read-only notice (no id). A Pi approval has an id and can be answered. */
@@ -23,7 +37,7 @@ export type MessageBlock =
   | { kind: "approval"; approval: Approval };
 export type ChatMessage = {
   id: string; seq: number; role: "user" | "assistant"; text: string; reasoning: string | null;
-  tools: ToolRow[]; blocks?: MessageBlock[] | null; usage: { input: number; output: number } | null;
+  tools: ToolRow[]; blocks?: MessageBlock[] | null; usage: TokenUsage | null;
   todos?: TodoItem[] | null; status: MessageStatus;
   runId: string | null; model: string | null; attachments: Attachment[]; createdAt: number; error: string | null;
 };

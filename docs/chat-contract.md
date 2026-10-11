@@ -6,12 +6,17 @@ Timestamps are epoch milliseconds. IDs are strings.
 ## Types
 ```ts
 type Effort = "off" | "low" | "medium" | "high";
-type ChatModel = { id: string; provider: string; label: string; reasoning: boolean; canDisableReasoning: boolean; vision: boolean; local: boolean; online: boolean; backend?: "hermes" | "pi" };
+type ChatModel = { id: string; provider: string; label: string; reasoning: boolean; canDisableReasoning: boolean; vision: boolean; local: boolean; online: boolean; backend?: "hermes" | "pi"; contextWindow?: number };
 type ChatSession = { id: string; title: string; titleAuto: boolean; model: string; provider: string; effort: Effort | null;
   pinned: boolean; archived: boolean; createdAt: number; updatedAt: number;
   runState: "idle" | "running" | "needs_approval"; runId: string | null; unread: boolean; preview: string; awaiting: number; yolo: boolean };
 type Attachment = { id: string; kind: "image" | "file"; name: string; mime: string; size: number; w: number | null; h: number | null; url: string /* /api/chat/files/<id> */ };
 type ToolRow = { id: string; name: string; args: Record<string, unknown> | null; preview: string | null; status: "running" | "ok" | "failed"; durationMs: number | null };
+/** Token accounting for one reply. `input` is only the UNCACHED part of the prompt; with prompt caching the rest is
+ *  `cacheRead`/`cacheWrite`, so the prompt size is the sum of the three. Everything after `output` is optional. */
+type TokenUsage = { input: number; output: number; cacheRead?: number; cacheWrite?: number;
+  context?: number /* prompt size of the reply's LAST model call; Pi only */; calls?: number; costUsd?: number;
+  ttftMs?: number /* time to first token */; durationMs?: number };
 type ApprovalStatus = "pending" | "approved" | "denied" | "ended";
 /** A Hermes approval is a read-only notice (no id); a Pi approval has an id and can be answered. */
 type Approval = { command: string | null; note: string; id?: string; options?: string[]; status?: ApprovalStatus };
@@ -21,7 +26,7 @@ type MessageBlock =
   | { kind: "tool"; id: string }
   | { kind: "approval"; approval: Approval };
 type ChatMessage = { id: string; seq: number; role: "user" | "assistant"; text: string; reasoning: string | null;
-  tools: ToolRow[]; blocks: MessageBlock[]; usage: { input: number; output: number } | null; status: "complete" | "failed" | "interrupted" | "running";
+  tools: ToolRow[]; blocks: MessageBlock[]; usage: TokenUsage | null; status: "complete" | "failed" | "interrupted" | "running";
   runId: string | null; model: string | null; attachments: Attachment[]; createdAt: number; error: string | null };
 /** A persistent local slash-command row (`/help`, `/model`, …). `afterSeq` anchors it after that message seq. */
 type CommandNote = { id: number; name: string; body: string; afterSeq: number; createdAt: number };
@@ -47,11 +52,12 @@ type CommandNote = { id: number; name: string; body: string; afterSeq: number; c
   - `tool.started` `{ id, name, args, preview }`
   - `tool.completed` `{ id, ok: boolean, durationMs, preview }`
   - `approval` `{ command: string | null, note: string, id?: string, options?: string[] }`. Pi carries `id`/`options` so the card can be answered; Hermes carries neither and stays a read-only notice.
-  - `usage` `{ input, output }`
+  - `usage` a `TokenUsage` (cumulative over the run's model calls). Pi sends every field it has: cache read/write, `context` (the last call's prompt, cache included), `calls` and `costUsd`. Hermes sends `input`/`output` and, when it reports them, `cacheRead`/`cacheWrite`. `ttftMs` and `durationMs` are measured by the server (run start to first text/reasoning/tool token, and to the end) and are merged into the stored message at the end of the run, so they appear after the reload that follows `done`.
   - `done` `{ status: "complete" | "failed" | "interrupted", error: string | null, model: string | null }`
 - `POST /runs/:runId/stop` -> `{ ok: true }`
 - `POST /runs/:runId/approval` `{ id, choice: "approve" | "deny" }` -> `{ ok: true }` (Pi only). When the session's `yolo` is on, the run manager answers the request itself the moment it arrives; enabling `yolo` while a request is pending answers it immediately. Because this lives in the run manager, it holds while the app is closed.
 - `POST /runs/:runId/steer` `{ message }` -> `{ ok: true }` or 409 `{ error: "run finished" }`
+- `GET /sessions/:id/usage` -> `{ totals: { input, output, cacheRead, cacheWrite, total, calls, costUsd, replies }, avgTtftMs: number | null, last: { context, ttftMs, durationMs } | null }`. Token totals summed over every reply in the chat; `last` is the newest reply that reported usage, and its `context` is the chat's current context size (null for Hermes). The web's `/usage` command prints it.
 - `GET /files/:id` -> bytes. Headers: correct content-type for images, `application/octet-stream` + `Content-Disposition: attachment` otherwise, `X-Content-Type-Options: nosniff`, `Cache-Control: private, max-age=3600`.
 - `GET /sessions/:id/export` -> `text/markdown` attachment.
 - Global `GET /api/events` (existing SSE) additionally emits `chat.run` `{ sessionId, runId, state: "running" | "idle" | "needs_approval", awaiting }`.

@@ -67,3 +67,31 @@ export function swapBackend(picked: ChatModel, chatBackend: Backend | null, chat
 
 /** The agent's name for tags and headers. Sessions from before the field existed are Hermes chats. */
 export const backendLabel = (b: Backend | undefined): string => (b === "pi" ? "Pi" : "Hermes");
+
+/** One row of the New chat menu: an agent and the model a chat on it starts with. */
+export type NewChoice = { backend: Backend; label: string; model: ChatModel | null };
+
+/**
+ * The model a new chat on `backend` starts with, so nobody has to pick one first. The configured new-chat model
+ * wins when it belongs to that agent, then Hermes's default model; otherwise the first model that is online.
+ * null when the agent has nothing usable (the Pi bridge is down, no Pi provider is signed in).
+ */
+export function defaultModelFor(backend: Backend, models: ChatModel[], cfg: { defaultModel: string; newChatModel?: string | null } | null): ChatModel | null {
+  const usable = models.filter(m => (m.backend ?? "hermes") === backend && m.online);
+  const named = backend === "hermes" ? [cfg?.newChatModel, cfg?.defaultModel] : [cfg?.newChatModel];
+  for (const id of named) {
+    const hit = id ? usable.find(m => m.id === id) : undefined;
+    if (hit) return hit;
+  }
+  return usable[0] ?? null;
+}
+
+export function newChoices(models: ChatModel[], cfg: { defaultModel: string; newChatModel?: string | null } | null): NewChoice[] {
+  return (["hermes", "pi"] as const).map(b => ({ backend: b, label: backendLabel(b), model: defaultModelFor(b, models, cfg) }));
+}
+
+/** The agent `/new` and the empty composer use: the open chat's, else the one the configured default model belongs to. */
+export function defaultBackend(models: ChatModel[], cfg: { defaultModel: string; newChatModel?: string | null } | null): Backend {
+  const first = cfg?.newChatModel ? models.find(m => m.id === cfg.newChatModel) : undefined;
+  return first?.backend ?? "hermes";
+}

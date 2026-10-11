@@ -4,13 +4,14 @@ import { chat } from "../chat/api";
 import { PickCancelled, folderTag, sessionCreatePayload } from "../chat/dirs";
 import { navigate } from "../route";
 import { sendEffort } from "../chat/effort";
-import { backendOfKey, effortChoices, keyOf, modelUsable, splitKey, swapBackend, viewModels } from "../chat/pi";
+import { backendLabel, backendOfKey, defaultBackend, defaultModelFor, effortChoices, keyOf, modelUsable, newChoices, splitKey, swapBackend, viewModels } from "../chat/pi";
 import { installChatMock } from "../chat/mock";
 import { useThread } from "../chat/useThread";
 import { useSessions } from "../chat/useSessions";
 import { useVisualViewportHeight } from "../chat/viewport";
 import { openChatRunEvents, type GlobalRun } from "../chat/sse";
 import { estimateContextTokens } from "../chat/context";
+import { usageReportText } from "../chat/usage";
 import { forgetChat, rememberChat } from "../chat/last";
 import { Composer } from "../components/chat/Composer";
 import { AssistantMessage, UserMessage } from "../components/chat/Message";
@@ -118,8 +119,9 @@ export default function Chat({ hash }: { hash: string }) {
   const modelId = liveModel ?? (active ? keyOf(active.backend, active.model) : startModel ?? models[0]?.id ?? "");
   const effort = liveEffort ?? active?.effort ?? config?.defaultEffort ?? null;
   const modelRec = models.find(m => m.id === modelId);
-  const ctxInput = estimateContextTokens(thread.messages);
-  const ctxWindow = backendOfKey(modelId) === "pi" ? undefined : config?.contextWindow[modelId];
+  const ctxInput = estimateContextTokens(thread.messages, chatBackend ?? backendOfKey(modelId));
+  // Pi lists each model's window itself; Hermes models use the server's table.
+  const ctxWindow = backendOfKey(modelId) === "pi" ? modelRec?.contextWindow : config?.contextWindow[modelId];
 
   // Pi reports which thinking levels the current model supports; ask while the chat is idle.
   useEffect(() => {
@@ -178,17 +180,24 @@ export default function Chat({ hash }: { hash: string }) {
     navigate(`#/chat/${encodeURIComponent(id)}`);
   };
 
-  /** A new chat takes the backend of the selected model; Hermes is the default. Pi asks for a working folder first. */
-  const createChat = async (): Promise<ChatSession> => {
-    const { backend, id } = splitKey(modelId);
+  /** A new chat takes the backend of the model it is given (the picker's by default). Pi asks for a working folder first. */
+  const createChat = async (key = modelId, effortToUse: Effort | null | undefined = effortFor()): Promise<ChatSession> => {
+    const { backend, id } = splitKey(key);
     const cwd = backend === "pi" ? await askFolder() : null;
-    return chat.createSession(sessionCreatePayload({ model: id || undefined, effort: effortFor(), backend, cwd }));
+    return chat.createSession(sessionCreatePayload({ model: id || undefined, effort: effortToUse, backend, cwd }));
   };
 
-  const newChat = async () => {
+  /**
+   * Starts a chat on `backend` (default: the open chat's agent, else the configured default's) with that agent's
+   * default model, so nothing has to be picked first. The server applies its default thinking level.
+   */
+  const newChat = async (backend?: Backend) => {
     setDrawer(false);
+    const target = backend ?? chatBackend ?? defaultBackend(models, config);
+    const model = defaultModelFor(target, models, config);
+    if (!model) { setPageErr(`${backendLabel(target)} has no model available right now.`); return; }
     try {
-      const s: ChatSession = await createChat();
+      const s: ChatSession = await createChat(model.id, undefined);
       sessions.setList(prev => [s, ...prev]);
       navigate(`#/chat/${encodeURIComponent(s.id)}`);
     } catch (e) { if (!(e instanceof PickCancelled)) setPageErr((e as Error).message); }
@@ -246,6 +255,7 @@ export default function Chat({ hash }: { hash: string }) {
       return (await onSteer(arg)) === "ok" ? "Steer sent to the running task." : "Nothing is running.";
     }
     if (!activeId || !active) return "Open a chat first.";
+    if (name === "usage") return usageReportText(await chat.sessionUsage(activeId), ctxWindow);
     if (name === "login") {
       if (active.backend !== "pi") return "Only Pi chats can sign in to a provider.";
       setLoginAsk(arg);
@@ -332,7 +342,8 @@ export default function Chat({ hash }: { hash: string }) {
     onQuery: setQuery,
     onToggleArchived: () => setArchived(a => !a),
     onOpen: openSession,
-    onNew: newChat,
+    onNew: (b: Backend) => void newChat(b),
+    newChoices: newChoices(models, config),
     onChanged: () => void sessions.refresh(),
     onPatch: sessions.patch,
     onDeleted: (id: string) => {
@@ -474,7 +485,7 @@ export default function Chat({ hash }: { hash: string }) {
             onNote={addNote}
             jump={{ show: !atBottom, unseen, onJump: scrollToEnd }}
             onStop={() => { thread.stop().catch(e => setPageErr((e as Error).message)); }}
-            onNew={() => void newChat()}
+            onNew={b => void newChat(b)}
             onModel={id => void onModel(id)}
             onEffort={e => void onEffort(e)}
           />

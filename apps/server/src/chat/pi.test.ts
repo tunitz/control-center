@@ -91,7 +91,7 @@ test("listModels maps Pi models to ChatModelDef and caches them for 60 s", async
   const pi = new PiClient({ baseUrl: b.url, token: b.token, now: () => clock });
   const calls = b.modelsCalls;
   expect((await pi.listModels()).slice(0, 2)).toEqual([
-    { id: "deepseek-flash", provider: "deepseek", label: "DeepSeek V4.1 Flash", reasoning: true, canDisableReasoning: true, vision: false, local: false },
+    { id: "deepseek-flash", provider: "deepseek", label: "DeepSeek V4.1 Flash", reasoning: true, canDisableReasoning: true, vision: false, local: false, contextWindow: 1_000_000 },
     { id: "deepseek-pro", provider: "deepseek", label: "DeepSeek V4.1 Pro", reasoning: true, canDisableReasoning: true, vision: false, local: false },
   ]);
   expect(b.modelsCalls).toBe(calls + 1);

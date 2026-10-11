@@ -356,6 +356,16 @@ export function installChatMock(): void {
       const page = eligible.slice(-limit);
       return json({ messages: page, hasMore: eligible.length > page.length, commands: store.commands.get(sid) ?? [] });
     }
+    if ((m = /^\/sessions\/([^/]+)\/usage$/.exec(p)) && method === "GET") {
+      const list = store.messages.get(decodeURIComponent(m[1])) ?? [];
+      const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, calls: 0, costUsd: 0, replies: 0 };
+      for (const x of list) {
+        if (!x.usage) continue;
+        totals.input += x.usage.input; totals.output += x.usage.output; totals.replies++;
+      }
+      totals.total = totals.input + totals.output;
+      return json({ totals, avgTtftMs: null, last: totals.replies ? { context: null, ttftMs: null, durationMs: null } : null });
+    }
     if ((m = /^\/sessions\/([^/]+)\/commands$/.exec(p)) && method === "POST") {
       const sid = decodeURIComponent(m[1]);
       if (!sessionOf(sid)) return json({ error: "not found" }, 404);

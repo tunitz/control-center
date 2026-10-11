@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { chat } from "../../chat/api";
 import { groupSessions } from "../../chat/sessions";
-import { backendLabel } from "../../chat/pi";
-import type { ChatSession, SessionHit } from "../../chat/types";
+import { backendLabel, type NewChoice } from "../../chat/pi";
+import { useDismiss } from "../../lib/useDismiss";
+import type { Backend, ChatSession, SessionHit } from "../../chat/types";
 import { folderTag } from "../../chat/dirs";
 
 type Row = ChatSession | SessionHit;
@@ -16,7 +17,10 @@ export type SessionsProps = {
   onQuery: (q: string) => void;
   onToggleArchived: () => void;
   onOpen: (id: string) => void;
-  onNew: () => void;
+  /** Starts a chat on this agent with its default model. */
+  onNew: (backend: Backend) => void;
+  /** The agents the New chat menu offers, each with the model a new chat starts with. */
+  newChoices: NewChoice[];
   onChanged: () => void;
   onPatch: (id: string, p: Partial<ChatSession>) => void;
   onDeleted: (id: string) => void;
@@ -31,6 +35,9 @@ export function Sessions(p: SessionsProps) {
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
+  const newRef = useRef<HTMLDivElement>(null);
+  useDismiss(newOpen, newRef, () => setNewOpen(false));
 
   const act = async (fn: () => Promise<unknown>) => {
     setMenu(null);
@@ -48,9 +55,22 @@ export function Sessions(p: SessionsProps) {
         </div>
       )}
       <div className="side-top">
-        <button className="btn primary" type="button" onClick={p.onNew}>
-          <Icon name="plus" className="i sm" />New chat
-        </button>
+        <div className="new-wrap" ref={newRef}>
+          <button className="btn primary" type="button" aria-haspopup="menu" aria-expanded={newOpen} onClick={() => setNewOpen(o => !o)}>
+            <Icon name="plus" className="i sm" />New chat<Icon name="chev" className="i sm" />
+          </button>
+          {newOpen && (
+            <div className="pop new-menu" role="menu" aria-label="Start a chat with">
+              {p.newChoices.map(c => (
+                <button key={c.backend} className="new-item" type="button" role="menuitem" disabled={!c.model}
+                  onClick={() => { setNewOpen(false); p.onNew(c.backend); }}>
+                  <span className="new-name">{c.label}</span>
+                  <span className="new-sub">{c.model ? `${c.model.provider} · ${c.model.label}` : "No model available"}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <label className="search">
           <Icon name="search" className="i sm" />
           <input type="search" placeholder="Search all chats" aria-label="Search all chats" value={p.query} onChange={e => p.onQuery(e.target.value)} />

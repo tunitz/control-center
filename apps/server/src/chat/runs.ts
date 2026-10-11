@@ -11,7 +11,7 @@ import type { ChatBackend } from "./backend";
 import type { PiClient } from "./pi";
 import { ChatError } from "./http";
 import * as S from "./store";
-import type { Approval, MessageBlock, NewAttachment, ToolRow, Effort, ChatMessage } from "./store";
+import type { Approval, MessageBlock, NewAttachment, ToolRow, Effort, ChatMessage, TokenUsage } from "./store";
 import { autoTitle } from "./title";
 
 export const MAX_ACTIVE_RUNS = 3;
@@ -46,7 +46,9 @@ type RunRec = {
   tools: ToolRow[];
   /** Ordered body of the turn (text, tool rows, approvals), persisted with the message. */
   blocks: MessageBlock[];
-  usage: { input: number; output: number } | null;
+  usage: TokenUsage | null;
+  /** When the first token (text, reasoning or tool call) arrived; the run's time-to-first-token is this minus startedAt. */
+  firstTokenAt: number | null;
   todos: TodoItem[] | null;
   hermesRunId: string | null;
   stopRequested: boolean;
@@ -170,7 +172,7 @@ export class RunManager {
     let resolveDone!: () => void;
     const rec: RunRec = {
       runId, sessionId, assistantId, model: input.model, userText: input.text, startedAt: now, firstTurn,
-      text: "", reasoning: null, tools: [], blocks: [], usage: null, todos: null, hermesRunId: null, stopRequested: false,
+      text: "", reasoning: null, tools: [], blocks: [], usage: null, firstTokenAt: null, todos: null, hermesRunId: null, stopRequested: false,
       finished: false, needsApproval: false, approvalId: null, seq: 0, events: [], listeners: new Set(),
       started: new Promise<void>(r => (resolveStarted = r)), resolveStarted,
       done: new Promise<void>(r => (resolveDone = r)), resolveDone,
@@ -344,6 +346,7 @@ export class RunManager {
       S.setRunState(this.db, rec.sessionId, "running", rec.runId, this.now());
       this.emitRun(rec.sessionId, rec.runId, "running");
     }
+    if (rec.firstTokenAt === null && (f.type === "delta" || f.type === "reasoning" || f.type === "tool.started")) rec.firstTokenAt = this.now();
     switch (f.type) {
       case "run.started":
         return;
@@ -398,11 +401,13 @@ export class RunManager {
         this.persist(rec);
         this.addEvent(rec, "todo", { todos: f.todos });
         return;
-      case "usage":
-        rec.usage = { input: f.input, output: f.output };
+      case "usage": {
+        const { type: _t, ...usage } = f;
+        rec.usage = usage;
         this.persist(rec);
-        this.addEvent(rec, "usage", { input: f.input, output: f.output });
+        this.addEvent(rec, "usage", usage);
         return;
+      }
       case "done":
         this.finish(rec, f.status, f.error, f.model);
         return;
@@ -418,6 +423,12 @@ export class RunManager {
     }
     const err = final === "failed" ? (error ?? "run failed") : null;
     const finalModel = model ?? rec.model;
+    // Timing is measured here, not reported by the backend, so it exists for Hermes and Pi alike.
+    const endedAt = this.now();
+    const ttftMs = rec.firstTokenAt !== null ? Math.max(0, rec.firstTokenAt - rec.startedAt) : undefined;
+    if (rec.usage || ttftMs !== undefined) {
+      rec.usage = { ...(rec.usage ?? { input: 0, output: 0 }), ...(ttftMs !== undefined ? { ttftMs } : {}), durationMs: Math.max(0, endedAt - rec.startedAt) };
+    }
     S.patchMessage(this.db, rec.assistantId, {
       text: rec.text, reasoning: rec.reasoning, tools: rec.tools, blocks: rec.blocks, usage: rec.usage, todos: rec.todos,
       status: final, error: err, model: finalModel,

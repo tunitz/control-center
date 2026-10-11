@@ -21,7 +21,7 @@ export type HermesFrame =
   | { type: "tool.started"; id: string; name: string; args: Record<string, unknown> | null; preview: string | null }
   | { type: "tool.completed"; id: string; ok: boolean; durationMs: number | null; preview: string | null }
   | { type: "approval"; command: string | null; note: string; id?: string; options?: string[] }
-  | { type: "usage"; input: number; output: number }
+  | { type: "usage"; input: number; output: number; cacheRead?: number; cacheWrite?: number; context?: number; calls?: number; costUsd?: number }
   | { type: "todo"; todos: TodoItem[] }
   | { type: "done"; status: "complete" | "failed" | "interrupted"; error: string | null; model: string | null };
 
@@ -150,7 +150,14 @@ export function parseFrame(event: string, data: unknown, st: ParseState): Hermes
       const usage = (d.usage ?? {}) as Obj;
       const input = num(usage.input_tokens);
       const output = num(usage.output_tokens);
-      return input === null || output === null ? null : { type: "usage", input, output };
+      if (input === null || output === null) return null;
+      const f: HermesFrame = { type: "usage", input, output };
+      // Hermes counts cache traffic separately; keep it so "in" is not mistaken for the whole prompt.
+      const cacheRead = num(usage.cache_read_tokens);
+      const cacheWrite = num(usage.cache_write_tokens);
+      if (cacheRead !== null) f.cacheRead = cacheRead;
+      if (cacheWrite !== null) f.cacheWrite = cacheWrite;
+      return f;
     }
     case "error":
     case "run.failed": {
