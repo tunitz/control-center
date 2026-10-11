@@ -26,8 +26,8 @@ test("list: pinned first then updatedAt desc; archived filter", () => {
 
 test("updateSession: title sets titleAuto=false; model change does not touch model_locked", () => {
   mk("s1", 1);
-  const s = S.updateSession(db, "s1", { title: "Renamed", model: "deepseek-v4-pro", provider: "deepseek", effort: "high" }, 5)!;
-  expect(s).toMatchObject({ title: "Renamed", titleAuto: false, model: "deepseek-v4-pro", provider: "deepseek", effort: "high", updatedAt: 5 });
+  const s = S.updateSession(db, "s1", { title: "Renamed", model: "deepseek-flash", provider: "deepseek", effort: "high" }, 5)!;
+  expect(s).toMatchObject({ title: "Renamed", titleAuto: false, model: "deepseek-flash", provider: "deepseek", effort: "high", updatedAt: 5 });
   expect((db.query("SELECT model_locked FROM chat_sessions WHERE id='s1'").get() as any).model_locked).toBeNull();
   expect(S.updateSession(db, "nope", { pinned: true }, 1)).toBeNull();
 });

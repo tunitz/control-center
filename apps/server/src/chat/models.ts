@@ -19,7 +19,7 @@ export type ChatModel = ChatModelDef & { online: boolean };
 export const DEFAULT_MODELS: ChatModelDef[] = [
   { id: "claude-sonnet-5-5", provider: "anthropic", label: "Claude Sonnet 5.5", reasoning: true, canDisableReasoning: true, vision: true, local: false },
   { id: "claude-haiku-5-5", provider: "anthropic", label: "Claude Haiku 5.5", reasoning: false, canDisableReasoning: false, vision: true, local: false },
-  { id: "deepseek-v4-pro", provider: "deepseek", label: "DeepSeek V4 Pro", reasoning: true, canDisableReasoning: true, vision: false, local: false },
+  { id: "deepseek-flash", provider: "deepseek", label: "DeepSeek Flash", reasoning: true, canDisableReasoning: true, vision: false, local: false },
   { id: "gpt-6-luna", provider: "openai-codex", label: "GPT-6 Luna", reasoning: true, canDisableReasoning: true, vision: true, local: false },
   { id: "local-llama", provider: "custom:local-llama", label: "Local Llama", reasoning: false, canDisableReasoning: false, vision: false, local: true },
 ];
@@ -27,7 +27,7 @@ export const DEFAULT_MODELS: ChatModelDef[] = [
 export const CONTEXT_WINDOW: Record<string, number> = {
   "claude-sonnet-5-5": 200000,
   "claude-haiku-5-5": 200000,
-  "deepseek-v4-pro": 128000,
+  "deepseek-flash": 1000000,
   "gpt-6-luna": 200000,
   "local-llama": 32768,
 };

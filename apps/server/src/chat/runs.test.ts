@@ -326,14 +326,14 @@ test("ensureModel locks only when the stored locked model differs", async () => 
   await mgr.ensureModel("s1", "claude-sonnet-5-5", "anthropic");
   await mgr.ensureModel("s1", "claude-sonnet-5-5", "anthropic");
   expect(hermes.locks).toEqual([{ id: "s1", model: "claude-sonnet-5-5", provider: "anthropic" }]);
-  await mgr.ensureModel("s1", "deepseek-v4-pro", "deepseek");
+  await mgr.ensureModel("s1", "deepseek-flash", "deepseek");
   expect(hermes.locks.length).toBe(2);
-  expect(S.getLockedModel(db, "s1")).toBe("deepseek-v4-pro");
+  expect(S.getLockedModel(db, "s1")).toBe("deepseek-flash");
 });
 
 test("ensureModel: a Hermes lock failure is a 502 and the locked model is not updated", async () => {
   hermes.lockModel = async () => { throw new ChatError(502, "hermes model lock failed (500)"); };
-  await expect(mgr.ensureModel("s1", "deepseek-v4-pro", "deepseek")).rejects.toMatchObject({ status: 502 });
+  await expect(mgr.ensureModel("s1", "deepseek-flash", "deepseek")).rejects.toMatchObject({ status: 502 });
   expect(S.getLockedModel(db, "s1")).toBeNull();
 });
 

@@ -56,10 +56,10 @@ test("x-cc is enforced on every non-GET route (403)", async () => {
 });
 
 test("POST /sessions creates the Hermes session, locks model, mirrors row", async () => {
-  const r = await js(await run(req("POST", "/api/chat/sessions", { body: { model: "deepseek-v4-pro", effort: "low" } })));
+  const r = await js(await run(req("POST", "/api/chat/sessions", { body: { model: "deepseek-flash", effort: "low" } })));
   expect(r.status).toBe(201);
-  expect(r.body).toMatchObject({ id: "fake-1", model: "deepseek-v4-pro", provider: "deepseek", effort: "low", title: "New chat", titleAuto: true, runState: "idle" });
-  expect(fake.locks).toEqual([{ id: "fake-1", model: "deepseek-v4-pro", provider: "deepseek" }]);
+  expect(r.body).toMatchObject({ id: "fake-1", model: "deepseek-flash", provider: "deepseek", effort: "low", title: "New chat", titleAuto: true, runState: "idle" });
+  expect(fake.locks).toEqual([{ id: "fake-1", model: "deepseek-flash", provider: "deepseek" }]);
   const d = await js(await run(req("POST", "/api/chat/sessions", {})));
   expect(d.body.model).toBe("claude-sonnet-5-5");
 });
@@ -232,10 +232,10 @@ test("send: 201 with runId and both messages; files stored; title and assistant 
 
 test("send: model differing from the locked model is locked in Hermes; same model is not", async () => {
   seed("s1");
-  expect((await js(await run(req("POST", "/api/chat/sessions/s1/send", { body: (() => { const f = new FormData(); f.set("text", "a"); f.set("model", "deepseek-v4-pro"); return f; })() })))).status).toBe(201);
+  expect((await js(await run(req("POST", "/api/chat/sessions/s1/send", { body: (() => { const f = new FormData(); f.set("text", "a"); f.set("model", "deepseek-flash"); return f; })() })))).status).toBe(201);
   await waitIdle("s1");
-  expect(fake.locks).toEqual([{ id: "s1", model: "deepseek-v4-pro", provider: "deepseek" }]);
-  expect(S.getSession(ctx.db, "s1")).toMatchObject({ model: "deepseek-v4-pro", provider: "deepseek" });
+  expect(fake.locks).toEqual([{ id: "s1", model: "deepseek-flash", provider: "deepseek" }]);
+  expect(S.getSession(ctx.db, "s1")).toMatchObject({ model: "deepseek-flash", provider: "deepseek" });
   expect((await js(await run(req("POST", "/api/chat/sessions/s1/send", { body: (() => { const f = new FormData(); f.set("text", "b"); return f; })() })))).status).toBe(201);
   await waitIdle("s1");
   expect(fake.locks.length).toBe(1);
@@ -244,7 +244,7 @@ test("send: model differing from the locked model is locked in Hermes; same mode
 test("send: a Hermes lock failure is 502, releases the run slot and writes no files", async () => {
   seed("s1");
   fake.lockFails = true;
-  const f = new FormData(); f.set("text", "hi"); f.set("model", "deepseek-v4-pro"); f.append("files", new File(["abc"], "a.txt", { type: "text/plain" }));
+  const f = new FormData(); f.set("text", "hi"); f.set("model", "deepseek-flash"); f.append("files", new File(["abc"], "a.txt", { type: "text/plain" }));
   const r = await js(await run(req("POST", "/api/chat/sessions/s1/send", { body: f })));
   expect(r.status).toBe(502);
   expect(existsSync(join(root, "s1"))).toBe(false);
