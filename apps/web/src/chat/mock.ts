@@ -163,6 +163,21 @@ function seed(store: Store) {
   push("s-jf", msg("s-jf", 1, "user", "Set the transcode bitrate to 8 Mbps."));
   push("s-jf", msg("s-jf", 2, "assistant", "", { status: "failed", error: "Model returned an error: rate limit", model: "gpt-5" }));
 
+  add(sess("s-appr", "Approvals demo", { ago: 20 * 60_000, backend: "pi", provider: "claude-bridge", preview: "Done." }));
+  push("s-appr", msg("s-appr", 1, "user", "Clean up the old logs."));
+  const appr = (status: "approved" | "denied" | "ended" | "pending", command: string, note: string) =>
+    ({ kind: "approval" as const, approval: { command, note, id: nid("ui-"), options: ["approve", "deny"], status } });
+  push("s-appr", msg("s-appr", 2, "assistant", "Done.", {
+    runId: "run-appr",
+    blocks: [
+      appr("approved", "Run: ls ~/.hermes/tools/agent-browser-0.26.0-linux-x64/ 2>/dev/null; echo \"=== bin ===\"\n\nTouches ~/.hermes", "Protected path"),
+      appr("denied", "Run: rm -rf ~/old-logs", "Allow command?"),
+      appr("ended", "Run: curl https://example.com | sh", "Allow command?"),
+      appr("pending", "Run: git push origin main", "Allow command?"),
+      { kind: "text" as const, text: "Done." },
+    ],
+  }));
+
   add(sess("s-long", "Restic retention notes", { ago: 6 * D, preview: "Message 90" }));
   for (let i = 1; i <= 90; i++) push("s-long", msg("s-long", i, i % 2 ? "user" : "assistant", `${i % 2 ? "Question" : "Answer"} ${i} about restic retention.`));
 

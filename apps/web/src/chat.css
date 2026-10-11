@@ -132,6 +132,11 @@
 .chatx .fold .tdur{color:var(--mut);font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}
 .chatx .stat-ok{color:var(--ok);font-size:13px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;flex:none}
 .chatx .stat-ok::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.chatx .stat-err{color:var(--err);font-size:13px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;flex:none}
+.chatx .stat-err::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--err)}
+.chatx .stat-off{color:var(--mut);font-size:13px;font-weight:500;white-space:nowrap;flex:none}
+.chatx .appr-title{font-weight:500;white-space:nowrap;flex:none}
+.chatx .appr-fold>.i{color:var(--warn)}
 .chatx .stat-run{color:var(--accent-ink);font-size:13px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;flex:none}
 .chatx .out{margin:0;background:var(--surface2);border:0;border-top:1px solid var(--line);border-radius:0;padding:10px 12px 12px;font-size:13px;line-height:1.6;overflow:auto;max-height:360px;white-space:pre;color:var(--text)}
 .chatx .thought{font-size:14px;color:var(--mut);padding:10px 12px 12px 34px;border-top:1px solid var(--line);line-height:1.6;max-height:min(40vh,300px);overflow-y:auto;overscroll-behavior:contain}
@@ -353,8 +358,6 @@
 /* Pi: approvals you can answer, and the task list */
 .chatx .appr-actions{display:flex;gap:10px;margin-top:10px}
 .chatx .appr-actions .btn{min-height:44px;flex:1}
-.chatx .appr.done{opacity:.85}
-.chatx .appr-result{margin:8px 0 0;font-weight:500;color:var(--text)}
 .chatx .todo-list{list-style:none;margin:0;padding:4px 12px 10px 34px;display:flex;flex-direction:column;gap:6px}
 .chatx .todo{display:flex;align-items:flex-start;gap:10px;font-size:14px;line-height:1.4;min-width:0}
 .chatx .todo-mark{flex:none;width:14px;height:14px;margin-top:3px;border-radius:50%;border:1.5px solid var(--mut)}
