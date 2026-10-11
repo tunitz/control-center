@@ -204,3 +204,67 @@ describe("a start that does not name the tools keeps the running tools", () => {
     expect((await api(h, "POST", "/chats/k-7/start", { settings: { tools: "read" } })).status).toBe(400);
   });
 });
+
+describe("Claude Code bridge", () => {
+  const envKeysOf = async (id: string): Promise<string[]> => (await api(h, "POST", `/chats/${id}/command`, { name: "get_state" })).json.data.envKeys;
+  const extArg = (argv: string[]) => { const i = argv.indexOf("-e"); return i >= 0 ? argv[i + 1] : undefined; };
+  const installExtension = () => writeFileSync(h.cfg.claudeBridgeExtension, "export default () => {}\n");
+
+  test("defaults off, writes the flag, rejects a non-boolean, and reports the extension", async () => {
+    expect((await api(h, "GET", "/config")).json.claudeBridge).toBe(false);
+    expect((await api(h, "GET", "/config")).json.claudeCode).toMatchObject({ extension: false });
+    expect((await put({ claudeBridge: true })).status).toBe(200);
+    expect((await api(h, "GET", "/config")).json.claudeBridge).toBe(true);
+    expect(JSON.parse(readFileSync(join(h.cfg.agentDir, "cc-config.json"), "utf8")).claudeBridge).toBe(true);
+    expect((await put({ claudeBridge: "yes" })).status).toBe(400);
+    expect((await api(h, "GET", "/config")).json.claudeBridge).toBe(true);
+  });
+
+  test("enabled with the extension present: -e is loaded and ANTHROPIC_* stays out of Pi's env", async () => {
+    installExtension();
+    expect((await api(h, "GET", "/config")).json.claudeCode.extension).toBe(true);
+    await put({ claudeBridge: true });
+    await api(h, "POST", "/chats/cb-1/start", {});
+    expect(extArg(await argvOf("cb-1"))).toBe(h.cfg.claudeBridgeExtension);
+    const env = await envKeysOf("cb-1");
+    expect(env).not.toContain("ANTHROPIC_OAUTH_TOKEN");
+    expect(env).not.toContain("ANTHROPIC_API_KEY");
+    expect(env).toContain("DEEPSEEK_API_KEY");
+  });
+
+  test("disabled: no -e and ANTHROPIC_OAUTH_TOKEN still reaches Pi", async () => {
+    await api(h, "POST", "/chats/cb-2/start", {});
+    expect(extArg(await argvOf("cb-2"))).toBeUndefined();
+    expect(await envKeysOf("cb-2")).toContain("ANTHROPIC_OAUTH_TOKEN");
+  });
+
+  test("toggling restarts an idle chat with the new flags", async () => {
+    installExtension();
+    const a = await api(h, "POST", "/chats/cb-3/start", {});
+    await put({ claudeBridge: true });
+    const b = await api(h, "POST", "/chats/cb-3/start", {});
+    expect(b.json.state.pid).not.toBe(a.json.state.pid);
+    expect(b.json.sessionFile).toBe(a.json.sessionFile);
+    expect(extArg(await argvOf("cb-3"))).toBe(h.cfg.claudeBridgeExtension);
+    expect(await envKeysOf("cb-3")).not.toContain("ANTHROPIC_OAUTH_TOKEN");
+  });
+
+  test("enabled but the extension is missing: no -e, and the Anthropic env is left alone", async () => {
+    await put({ claudeBridge: true });
+    await api(h, "POST", "/chats/cb-4/start", {});
+    expect(extArg(await argvOf("cb-4"))).toBeUndefined();
+    expect(await envKeysOf("cb-4")).toContain("ANTHROPIC_OAUTH_TOKEN");
+  });
+
+  test("browser: defaults off, writes the flag, loads the extension with -e when present", async () => {
+    expect((await api(h, "GET", "/config")).json.browser).toBe(false);
+    expect((await api(h, "GET", "/config")).json.browserStatus).toMatchObject({ extension: false });
+    writeFileSync(h.cfg.browserExtension, "export default () => {}\n");
+    expect((await api(h, "GET", "/config")).json.browserStatus.extension).toBe(true);
+    expect((await put({ browser: true })).status).toBe(200);
+    await api(h, "POST", "/chats/br-1/start", {});
+    expect((await argvOf("br-1")).filter((a) => a === "-e").length).toBe(1);
+    expect(await argvOf("br-1")).toContain(h.cfg.browserExtension);
+    expect((await put({ browser: "yes" })).status).toBe(400);
+  });
+});

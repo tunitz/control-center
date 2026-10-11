@@ -6,7 +6,7 @@ export type ChatSession = {
   id: string; title: string; titleAuto: boolean; model: string; provider: string; effort: Effort | null;
   pinned: boolean; archived: boolean; createdAt: number; updatedAt: number;
   runState: "idle" | "running" | "needs_approval"; runId: string | null; unread: boolean; preview: string; awaiting: number;
-  backend?: Backend; cwd: string | null;
+  backend?: Backend; cwd: string | null; yolo: boolean;
 };
 export type SessionHit = ChatSession & { snippet: string };
 export type Attachment = { id: string; kind: "image" | "file"; name: string; mime: string; size: number; w: number | null; h: number | null; url: string };
@@ -32,7 +32,7 @@ export type CommandNote = { id: number; name: string; body: string; afterSeq: nu
 export type ChatConfig = { defaultModel: string; defaultEffort: Effort | null; maxUploadMb: number; contextWindow: Record<string, number> };
 export type RunEvent = { id: number; type: string; data: any };
 export type PiSettings = { tools: string[] | null; steeringMode: "all" | "one-at-a-time"; followUpMode: "all" | "one-at-a-time"; autoCompaction: boolean; autoRetry: boolean };
-export type PiConfig = { appendSystemPrompt: string; agentsMd: string; defaultTools: string[] | null; gate: { extraProtectedPaths: string[]; extraRisky: string[] }; knownTools: string[] };
+export type PiConfig = { appendSystemPrompt: string; agentsMd: string; defaultTools: string[] | null; gate: { extraProtectedPaths: string[]; extraRisky: string[] }; knownTools: string[]; claudeBridge: boolean; claudeCode: { found: boolean; path: string | null; extension: boolean }; browser: boolean; browserStatus: { extension: boolean; agent: boolean; chromium: boolean } };
 /** A Pi skill (global or project) with its enable/disable state. Mirrors the server's PiSkill. */
 export type PiSkill = { name: string; description: string; scope: "global" | "project"; path: string; dir: string; cwd: string | null; enabled: boolean };
 export type PiAuthType = "oauth" | "api_key";

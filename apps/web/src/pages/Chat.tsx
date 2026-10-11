@@ -56,9 +56,6 @@ export default function Chat({ hash }: { hash: string }) {
   const [piSheet, setPiSheet] = useState(false);
   /** `/login [provider]`: null = closed, string (may be empty) = the provider ref to preselect. */
   const [loginAsk, setLoginAsk] = useState<string | null>(null);
-  /** `/yolo`: answer this chat's Pi gate requests with Approve automatically. Session-only, off by default. */
-  const [yolo, setYolo] = useState(false);
-  const autoApproved = useRef<Set<string>>(new Set());
   // Pi chats ask for a working folder before they are created. Resolves with the folder, or null for the default workspace.
   const [folderAsk, setFolderAsk] = useState<{ resolve: (cwd: string | null) => void; reject: (e: Error) => void } | null>(null);
   const askFolder = () => new Promise<string | null>((resolve, reject) => setFolderAsk({ resolve, reject }));
@@ -101,7 +98,7 @@ export default function Chat({ hash }: { hash: string }) {
     if (r.state === "running" && r.sessionId === activeRef.current && r.runId && r.runId !== attachedRef.current) reloadRef.current();
   }), []);
 
-  useEffect(() => { setLiveModel(null); setLiveEffort(null); setMenu(false); setDrawer(false); setPiSheet(false); setLoginAsk(null); setYolo(false); autoApproved.current.clear(); }, [activeId]);
+  useEffect(() => { setLiveModel(null); setLiveEffort(null); setMenu(false); setDrawer(false); setPiSheet(false); setLoginAsk(null); }, [activeId]);
 
   // Remember the session on screen so the Chat tab can return to it; drop it if the server says it is gone.
   useEffect(() => {
@@ -253,10 +250,11 @@ export default function Chat({ hash }: { hash: string }) {
     }
     if (name === "yolo") {
       if (active.backend !== "pi") return "Only Pi chats ask for approvals.";
-      const next = !yolo;
-      setYolo(next);
+      const next = !active.yolo;
+      await chat.patchSession(activeId!, { yolo: next });
+      sessions.patch(activeId!, { yolo: next });
       return next
-        ? "YOLO is on. Pi runs risky commands in this chat without asking. It stays on until you switch chats, reload, or run /yolo again."
+        ? "YOLO is on. Pi runs risky commands in this chat without asking, even while the app is closed. Run /yolo again to turn it off."
         : "YOLO is off. Pi asks before risky commands again.";
     }
     if (name === "export") { window.location.href = chat.exportUrl(activeId); return "Downloading the chat."; }
@@ -321,21 +319,6 @@ export default function Chat({ hash }: { hash: string }) {
     await chat.approve(runId, approvalId, choice);
   };
 
-  // `/yolo`: as soon as a gate request appears in this chat, approve it. The ref stops repeat sends
-  // while the turn is still waiting for the tool to finish.
-  useEffect(() => {
-    if (!yolo || !thread.runId) return;
-    for (const m of thread.messages) {
-      if (!m.runId) continue;
-      for (const b of m.blocks ?? []) {
-        const a = b.kind === "approval" ? b.approval : null;
-        if (!a?.id || a.status !== "pending" || autoApproved.current.has(a.id)) continue;
-        autoApproved.current.add(a.id);
-        void chat.approve(m.runId, a.id, "approve").catch(() => {});
-      }
-    }
-  }, [yolo, thread.messages, thread.runId]);
-
   const emptyView = !activeId || (!thread.loading && thread.messages.length === 0);
 
   const sidebarProps = {
@@ -393,7 +376,7 @@ export default function Chat({ hash }: { hash: string }) {
             </button>
             <h1 className="ttl"><span className="ttl-text">{activeId ? title : "New chat"}</span>{active && folderTag(active.cwd) && <span className="ftag" title={folderTag(active.cwd)!.title}>{folderTag(active.cwd)!.label}</span>}</h1>
             <div className="head-right">
-              {yolo && <span className="yolo-badge" title="Pi runs risky commands in this chat without asking">YOLO</span>}
+              {active?.yolo && <span className="yolo-badge" title="Pi runs risky commands in this chat without asking, even while the app is closed">YOLO</span>}
               {!phone && <div className="pop-wrap">
                 <select className="pill" aria-label="Model" value={modelId} disabled={!models.length} onChange={e => void onModel(e.target.value)}
                   style={{ appearance: "none", paddingRight: 12 }}>

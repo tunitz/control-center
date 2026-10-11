@@ -12,7 +12,7 @@ test("createSession returns the contract shape with ms timestamps and idle run s
   const s = mk("s1", 1000);
   expect(s).toEqual({
     id: "s1", title: "New chat", titleAuto: true, model: "claude-sonnet-5-5", provider: "anthropic", effort: null, cwd: null,
-    pinned: false, archived: false, createdAt: 1000, updatedAt: 1000, runState: "idle", runId: null, unread: false, preview: "", awaiting: 0,
+    pinned: false, archived: false, createdAt: 1000, updatedAt: 1000, runState: "idle", runId: null, unread: false, preview: "", awaiting: 0, yolo: false,
   });
 });
 
@@ -128,4 +128,15 @@ test("listPiCwds returns distinct Pi working folders only", () => {
   S.createSession(db, { id: "p3", model: "m", provider: "p", effort: null, now: 1, backend: "pi", cwd: "/a" });
   S.createSession(db, { id: "h1", model: "m", provider: "p", effort: null, now: 1 });
   expect(S.listPiCwds(db)).toEqual(["/a", "/b"]);
+});
+
+test("yolo persists on the session and reads back", () => {
+  mk("y1", 1);
+  expect(S.getYolo(db, "y1")).toBe(false);
+  expect(S.getSession(db, "y1")!.yolo).toBe(false);
+  S.updateSession(db, "y1", { yolo: true }, 2);
+  expect(S.getYolo(db, "y1")).toBe(true);
+  expect(S.getSession(db, "y1")!.yolo).toBe(true);
+  S.updateSession(db, "y1", { yolo: false }, 3);
+  expect(S.getYolo(db, "y1")).toBe(false);
 });

@@ -11,13 +11,15 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
   const [tools, setTools] = useState<string[] | null>(null);
   const [paths, setPaths] = useState<string[]>([]);
   const [risky, setRisky] = useState<string[]>([]);
+  const [claudeBridge, setClaudeBridge] = useState(false);
+  const [browser, setBrowser] = useState(false);
   const [newPath, setNewPath] = useState("");
   const [newRisky, setNewRisky] = useState("");
   const [err, setErr] = useState("");
 
   const apply = (c: PiConfig) => {
     setCfg(c); setPrompt(c.appendSystemPrompt); setNotes(c.agentsMd); setTools(c.defaultTools);
-    setPaths(c.gate.extraProtectedPaths); setRisky(c.gate.extraRisky);
+    setPaths(c.gate.extraProtectedPaths); setRisky(c.gate.extraRisky); setClaudeBridge(c.claudeBridge); setBrowser(c.browser);
   };
   useEffect(() => {
     chat.piConfig().then(c => { apply(c); setState("ready"); })
@@ -25,7 +27,7 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
   }, []);
 
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  const dirty = !!cfg && (prompt !== cfg.appendSystemPrompt || notes !== cfg.agentsMd || !same(tools, cfg.defaultTools) || !same(paths, cfg.gate.extraProtectedPaths) || !same(risky, cfg.gate.extraRisky));
+  const dirty = !!cfg && (prompt !== cfg.appendSystemPrompt || notes !== cfg.agentsMd || !same(tools, cfg.defaultTools) || !same(paths, cfg.gate.extraProtectedPaths) || !same(risky, cfg.gate.extraRisky) || claudeBridge !== cfg.claudeBridge || browser !== cfg.browser);
 
   const save = async () => {
     if (!cfg) return;
@@ -35,6 +37,8 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
     if (notes !== cfg.agentsMd) patch.agentsMd = notes;
     if (!same(tools, cfg.defaultTools)) patch.defaultTools = tools;
     if (!same(paths, cfg.gate.extraProtectedPaths) || !same(risky, cfg.gate.extraRisky)) patch.gate = { extraProtectedPaths: paths, extraRisky: risky };
+    if (claudeBridge !== cfg.claudeBridge) patch.claudeBridge = claudeBridge;
+    if (browser !== cfg.browser) patch.browser = browser;
     try { apply(await chat.putPiConfig(patch)); onMsg("Pi settings saved. They apply on the next message."); }
     catch (e) { setErr((e as Error).message); }
   };
@@ -77,6 +81,23 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
             </div>
             <p className="muted">A chat can override this from its own Pi options.</p>
           </fieldset>
+
+          <h4 style={{ margin: "16px 0 4px" }}>Claude subscription</h4>
+          <label className="pi-chk"><input type="checkbox" checked={claudeBridge} onChange={e => setClaudeBridge(e.target.checked)} />Run Claude models through Claude Code</label>
+          <p className="muted">
+            Loads the pi-claude-bridge extension and keeps the Anthropic environment variables away from Pi, so Claude Code signs in with its own subscription login. Use the claude-bridge models in the picker.
+            {claudeBridge && !cfg.claudeCode.extension && " The pi-claude-bridge extension was not found."}
+            {claudeBridge && cfg.claudeCode.extension && !cfg.claudeCode.found && " Claude Code was not found. Install it and sign in once with the claude command."}
+          </p>
+
+          <h4 style={{ margin: "16px 0 4px" }}>Browser tools</h4>
+          <label className="pi-chk"><input type="checkbox" checked={browser} onChange={e => setBrowser(e.target.checked)} />Give Pi browser tools</label>
+          <p className="muted">
+            Adds browser_navigate, browser_snapshot, browser_click, browser_type and friends to Pi chats, backed by the agent-browser CLI and a local Chromium.
+            {browser && !cfg.browserStatus.extension && " The cc-browser extension was not found."}
+            {browser && cfg.browserStatus.extension && !cfg.browserStatus.agent && " The agent-browser CLI was not found. Install agent-browser or point CC_BROWSER_BIN at it."}
+            {browser && cfg.browserStatus.extension && cfg.browserStatus.agent && !cfg.browserStatus.chromium && " No bundled Chromium was found; agent-browser will auto-detect one (it may need system libraries)."}
+          </p>
 
           <h4 style={{ margin: "16px 0 4px" }}>Extra approval rules</h4>
           <p className="muted">Pi already asks before risky commands and before touching secrets. Rules here make it ask more often, never less.</p>

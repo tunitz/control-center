@@ -21,6 +21,14 @@ export type PiConfig = {
   defaultTools: string[] | null;
   gate: { extraProtectedPaths: string[]; extraRisky: string[] };
   knownTools: string[];
+  /** Run Claude models through Claude Code (the pi-claude-bridge extension) instead of Pi's Anthropic client. */
+  claudeBridge: boolean;
+  /** Whether the Claude Code CLI and the claude-bridge extension are present. */
+  claudeCode: { found: boolean; path: string | null; extension: boolean };
+  /** Register the cc-browser tools for Pi chats. */
+  browser: boolean;
+  /** Whether the browser extension, the agent-browser CLI and a Chromium are present. */
+  browserStatus: { extension: boolean; agent: boolean; chromium: boolean };
 };
 
 /** A Pi skill (global or project) with its enable/disable state. Mirrors the bridge's skills.ts. */

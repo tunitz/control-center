@@ -6,7 +6,7 @@
 //   <agent>/cc-gate.json      { extraProtectedPaths, extraRisky }  (stricter-only; see cc-gate.ts)
 // Every file is written atomically (temp + rename) with mode 600.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HttpError } from "./chat";
 
@@ -25,9 +25,44 @@ export interface PiConfig {
   agentsMd: string;
   defaultTools: string[] | null;
   gate: GateRules;
+  /** Run Claude models through Claude Code (the pi-claude-bridge extension) instead of Pi's own Anthropic client. */
+  claudeBridge: boolean;
+  /** Register the cc-browser tools (browser_navigate, browser_snapshot, …) for Pi chats. */
+  browser: boolean;
 }
 
 const file = (dir: string, name: string) => join(dir, name);
+
+/** Claude Code discovery for the Claude-bridge toggle: is the CLI installed, and is the extension present. */
+export type ClaudeCodeStatus = { found: boolean; path: string | null; extension: boolean };
+
+const CLAUDE_PREFIXES = ["~/.local/bin", "~/.claude/local", "~/.npm-global/bin", "~/.bun/bin", "~/.volta/bin", "/usr/local/bin", "/opt/homebrew/bin"];
+
+/** First `claude`/`claude-code` executable on PATH or in a known install prefix, else null. */
+export function findClaudeCode(): string | null {
+  const home = process.env.HOME ?? "";
+  const dirs = (process.env.PATH ?? "").split(":").filter(Boolean)
+    .concat(CLAUDE_PREFIXES.map((p) => p.replace(/^~/, home)));
+  const seen = new Set<string>();
+  for (const dir of dirs) {
+    for (const name of ["claude", "claude-code"]) {
+      const p = join(dir, name);
+      if (seen.has(p)) continue;
+      seen.add(p);
+      try {
+        if (existsSync(p) && statSync(p).isFile()) return p;
+      } catch {
+        /* unreadable dir */
+      }
+    }
+  }
+  return null;
+}
+
+export function claudeCodeStatus(claudeBridgeExtension: string): ClaudeCodeStatus {
+  const path = findClaudeCode();
+  return { found: path !== null, path, extension: existsSync(claudeBridgeExtension) };
+}
 
 function readText(path: string): string {
   try {
@@ -57,6 +92,8 @@ export function readConfig(agentDir: string): PiConfig {
     agentsMd: readText(file(agentDir, "AGENTS.md")),
     defaultTools: Array.isArray(cc.defaultTools) && tools.length > 0 ? tools : null,
     gate: { extraProtectedPaths: strList(gate.extraProtectedPaths), extraRisky: strList(gate.extraRisky) },
+    claudeBridge: cc.claudeBridge === true,
+    browser: cc.browser === true,
   };
 }
 
@@ -138,7 +175,13 @@ export function applyConfigPatch(agentDir: string, body: unknown): PiConfig {
     if (k === "appendSystemPrompt") next.appendSystemPrompt = parseText(v, k);
     else if (k === "agentsMd") next.agentsMd = parseText(v, k);
     else if (k === "defaultTools") next.defaultTools = v === null ? null : parseTools(v, k);
-    else if (k === "gate") next.gate = parseGate(v, cur.gate);
+    else if (k === "claudeBridge") {
+      if (typeof v !== "boolean") throw new HttpError(400, "claudeBridge must be a boolean");
+      next.claudeBridge = v;
+    } else if (k === "browser") {
+      if (typeof v !== "boolean") throw new HttpError(400, "browser must be a boolean");
+      next.browser = v;
+    } else if (k === "gate") next.gate = parseGate(v, cur.gate);
     else throw new HttpError(400, `unknown config key: ${k}`);
   }
   if (touched === 0) throw new HttpError(400, "no config given");
@@ -146,7 +189,7 @@ export function applyConfigPatch(agentDir: string, body: unknown): PiConfig {
   mkdirSync(agentDir, { recursive: true });
   writeOrRemove(file(agentDir, "APPEND_SYSTEM.md"), next.appendSystemPrompt);
   writeOrRemove(file(agentDir, "AGENTS.md"), next.agentsMd);
-  writeAtomic(file(agentDir, "cc-config.json"), JSON.stringify({ defaultTools: next.defaultTools }, null, 2));
+  writeAtomic(file(agentDir, "cc-config.json"), JSON.stringify({ defaultTools: next.defaultTools, claudeBridge: next.claudeBridge, browser: next.browser }, null, 2));
   writeAtomic(file(agentDir, "cc-gate.json"), JSON.stringify(next.gate, null, 2));
   return next;
 }

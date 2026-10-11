@@ -9,5 +9,5 @@
     "types": ["bun"]
   },
   "include": ["src", "test", "extensions"],
-  "exclude": ["extensions/cc-todo.ts"]
+  "exclude": ["extensions/cc-todo.ts", "extensions/browser.ts"]
 }

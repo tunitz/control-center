@@ -1,11 +1,13 @@
 import { join } from "node:path";
-import { applyConfigPatch, fingerprint, KNOWN_TOOLS, parseTools, readConfig } from "./pi-config";
+import { existsSync } from "node:fs";
+import { applyConfigPatch, claudeCodeStatus, fingerprint, KNOWN_TOOLS, parseTools, readConfig } from "./pi-config";
 import { tokenMatches, bearerFrom } from "./auth";
 import { type BridgeConfig } from "./config";
 import { Chat, HttpError, rpcError, type Frame } from "./chat";
 import { listModelsOnce, listSessions } from "./sessions";
 import { chosenCwd, listDirs, makeDir } from "./pi-dirs";
 import { listSkills, parseDisabled, skillLaunch, writeSkillsConfig } from "./skills";
+import { resolveAgentBrowser, resolveChromium } from "./browser";
 import { AuthManager, makeDeviceIdLoader, makeRuntimeLoader, type AuthType, type LoadRuntime } from "./login";
 
 export interface BridgeDeps {
@@ -88,6 +90,18 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
   reaper.unref?.();
 
   const json = (status: number, body: unknown) => Response.json(body, { status });
+
+  /** The global config plus the Claude Code bridge status, so the UI can warn when a prerequisite is missing. */
+  const configBody = () => ({
+    ...readConfig(cfg.agentDir),
+    knownTools: KNOWN_TOOLS,
+    claudeCode: claudeCodeStatus(cfg.claudeBridgeExtension),
+    browserStatus: {
+      extension: existsSync(cfg.browserExtension),
+      agent: resolveAgentBrowser(process.env, cfg.homeDir) !== null,
+      chromium: resolveChromium(process.env, cfg.homeDir) !== null,
+    },
+  });
 
   function requireChatId(id: string): string {
     if (!CHAT_ID.test(id)) throw new HttpError(400, "invalid chat id");
@@ -203,7 +217,15 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
       : running && liveChat ? liveChat.launchTools : readConfig(cfg.agentDir).defaultTools;
     // Skills are read at startup too, so the disabled set is part of the launch key: a toggle restarts.
     const skills = skillLaunch(cfg, cwd ?? join(cfg.workspaceRoot, id));
-    const key = JSON.stringify([tools, fingerprint(cfg.agentDir), skills]);
+    // Claude Code bridge: load the extension and keep ANTHROPIC_* out of Pi's env. Only when the
+    // extension is actually present, so a half-configured toggle never strands a chat without auth.
+    const cc = readConfig(cfg.agentDir);
+    const useClaudeBridge = cc.claudeBridge && existsSync(cfg.claudeBridgeExtension);
+    const useBrowser = cc.browser && existsSync(cfg.browserExtension);
+    const extensions: string[] = [];
+    if (useClaudeBridge) extensions.push(cfg.claudeBridgeExtension);
+    if (useBrowser) extensions.push(cfg.browserExtension);
+    const key = JSON.stringify([tools, fingerprint(cfg.agentDir), skills, useClaudeBridge, useBrowser]);
 
     let resumeFrom = sessionPath;
     if (existing) {
@@ -233,7 +255,7 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
     chat.chosenCwd = cwd;
     live.set(id, chat); // reserve the slot before any await
     try {
-      chat.launch(resumeFrom, tools, key, skills);
+      chat.launch(resumeFrom, tools, key, skills, { hideAnthropic: useClaudeBridge, extensions });
       await chat.ready;
       await applySettings(chat, model, thinking, settings);
     } catch (e) {
@@ -359,12 +381,13 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
 
     let m: RegExpExecArray | null;
     if (path === "/config" && method === "GET") {
-      return json(200, { ...readConfig(cfg.agentDir), knownTools: KNOWN_TOOLS });
+      return json(200, configBody());
     }
     if (path === "/config" && method === "PUT") {
       let body: unknown;
       try { body = await req.json(); } catch { throw new HttpError(400, "body must be JSON"); }
-      return json(200, { ...applyConfigPatch(cfg.agentDir, body), knownTools: KNOWN_TOOLS });
+      applyConfigPatch(cfg.agentDir, body);
+      return json(200, configBody());
     }
     if (path === "/skills" && method === "GET") {
       return json(200, { skills: listSkills(cfg, url.searchParams.getAll("cwd")) });

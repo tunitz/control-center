@@ -82,6 +82,7 @@ function sess(id: string, title: string, o: Partial<ChatSession> & { ago: number
     unread: false,
     preview: "",
     cwd: null,
+    yolo: false,
     ...rest,
   };
 }
@@ -335,7 +336,7 @@ export function installChatMock(): void {
           s.title = b.title;
           s.titleAuto = false;
         }
-        for (const k of ["pinned", "archived", "model", "effort"] as const) if (k in b) (s as unknown as Record<string, unknown>)[k] = b[k];
+        for (const k of ["pinned", "archived", "model", "effort", "yolo"] as const) if (k in b) (s as unknown as Record<string, unknown>)[k] = b[k];
         return json(s);
       }
       if (method === "DELETE") {

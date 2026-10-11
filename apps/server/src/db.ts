@@ -20,6 +20,7 @@ function migrateChatSessions(db: Database) {
   if (!have.has("backend_ref")) db.exec("ALTER TABLE chat_sessions ADD COLUMN backend_ref TEXT");
   if (!have.has("pi_settings_json")) db.exec("ALTER TABLE chat_sessions ADD COLUMN pi_settings_json TEXT");
   if (!have.has("cwd")) db.exec("ALTER TABLE chat_sessions ADD COLUMN cwd TEXT");
+  if (!have.has("yolo")) db.exec("ALTER TABLE chat_sessions ADD COLUMN yolo INTEGER NOT NULL DEFAULT 0");
 }
 
 /** Adds todos_json (Pi's last todo list) and blocks_json (ordered turn body) to an existing chat_messages table. */
@@ -35,7 +36,7 @@ export const CHAT_SCHEMA = `
     model TEXT NOT NULL, provider TEXT NOT NULL DEFAULT '', model_locked TEXT, effort TEXT, pinned INTEGER NOT NULL DEFAULT 0,
     archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
     run_state TEXT NOT NULL DEFAULT 'idle', run_id TEXT, unread INTEGER NOT NULL DEFAULT 0,
-    backend TEXT NOT NULL DEFAULT 'hermes', backend_ref TEXT, pi_settings_json TEXT);
+    backend TEXT NOT NULL DEFAULT 'hermes', backend_ref TEXT, pi_settings_json TEXT, yolo INTEGER NOT NULL DEFAULT 0);
   CREATE INDEX IF NOT EXISTS chat_sessions_list ON chat_sessions(archived, pinned, updated_at);
   CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
     seq INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', reasoning TEXT, tools_json TEXT, usage_json TEXT,

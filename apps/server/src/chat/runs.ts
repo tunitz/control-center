@@ -278,6 +278,21 @@ export class RunManager {
     await client.respondApproval(rec.hermesRunId, approvalId, approve);
   }
 
+  /** YOLO enabled mid-approval: approve the run's pending Pi request, if there is one. */
+  async approvePending(sessionId: string): Promise<boolean> {
+    for (const rec of this.runs.values()) {
+      if (rec.sessionId === sessionId && !rec.finished && rec.needsApproval && rec.approvalId !== null) {
+        try {
+          await this.respondApproval(rec.runId, rec.approvalId, true);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+    }
+    return false;
+  }
+
   /** Forwards a steer to Hermes. 409 'run finished' once the run is over. */
   async steer(runId: string, message: string): Promise<void> {
     const rec = this.runs.get(runId);
@@ -372,6 +387,10 @@ export class RunManager {
         this.persist(rec);
         this.addEvent(rec, "approval", { command: f.command, note: f.note, ...(f.id ? { id: f.id, options: f.options ?? ["approve", "deny"] } : {}) });
         this.emitRun(rec.sessionId, rec.runId, "needs_approval");
+        // `/yolo`: approve from the server, so it holds with no browser attached and works while the app is closed.
+        if (f.id && S.getYolo(this.db, rec.sessionId)) {
+          void this.respondApproval(rec.runId, f.id, true).catch(() => {});
+        }
         return;
       }
       case "todo":

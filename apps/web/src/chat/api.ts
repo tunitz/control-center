@@ -31,7 +31,7 @@ export const chat = {
   createSession: (o: { model?: string; effort?: Effort | null; backend?: Backend; cwd?: string }) => chatReq<ChatSession>("POST", "/sessions", o),
   piDirs: (path?: string) => chatReq<PiDirList>("GET", `/pi/dirs${path ? `?path=${encodeURIComponent(path)}` : ""}`),
   piMkdir: (parent: string, name: string) => chatReq<{ path: string; name: string }>("POST", "/pi/dirs", { parent, name }),
-  patchSession: (id: string, patch: Partial<Pick<ChatSession, "title" | "pinned" | "archived" | "model" | "effort">>) =>
+  patchSession: (id: string, patch: Partial<Pick<ChatSession, "title" | "pinned" | "archived" | "model" | "effort" | "yolo">>) =>
     chatReq<ChatSession>("PATCH", `/sessions/${encodeURIComponent(id)}`, patch),
   deleteSession: (id: string) => chatReq<{ ok: true }>("DELETE", `/sessions/${encodeURIComponent(id)}`),
   messages: (id: string, before?: number) => {

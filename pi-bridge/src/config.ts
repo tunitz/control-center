@@ -15,6 +15,10 @@ export interface BridgeConfig {
   /** Claude subscription token or API key for Pi's Anthropic provider. Passed to Pi only. */
   anthropicOAuthToken?: string;
   anthropicApiKey?: string;
+  /** Entry point of the pi-claude-bridge extension, loaded with `-e` when the Claude Code bridge is on. */
+  claudeBridgeExtension: string;
+  /** Entry point of the cc-browser extension, loaded with `-e` when the browser tools are on. */
+  browserExtension: string;
   maxLive: number;
   idleMs: number;
   reapIntervalMs: number;
@@ -51,6 +55,8 @@ export function loadConfig(env: Env = process.env): BridgeConfig {
     deepseekApiKey: env.DEEPSEEK_API_KEY || undefined,
     anthropicOAuthToken: env.ANTHROPIC_OAUTH_TOKEN || undefined,
     anthropicApiKey: env.ANTHROPIC_API_KEY || undefined,
+    claudeBridgeExtension: env.PI_BRIDGE_CLAUDE_BRIDGE_EXTENSION ?? join(home, ".pi/agent/npm/node_modules/pi-claude-bridge/src/index.ts"),
+    browserExtension: env.PI_BRIDGE_BROWSER_EXTENSION ?? join(import.meta.dir, "..", "extensions", "browser.ts"),
     maxLive: num(env, "PI_BRIDGE_MAX_LIVE", 3),
     idleMs: num(env, "PI_BRIDGE_IDLE_MS", 10 * 60_000),
     reapIntervalMs: num(env, "PI_BRIDGE_REAP_MS", 30_000),

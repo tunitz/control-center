@@ -26,6 +26,8 @@ export type ChatSession = {
   runId: string | null;
   unread: boolean;
   preview: string;
+  /** Auto-approve this chat's Pi gate requests (the `/yolo` command). Server-side, so it works while the app is closed. */
+  yolo: boolean;
 };
 
 export type ToolRow = {
@@ -91,13 +93,13 @@ export type NewAttachment = {
 
 const PREVIEW_SQL = "(SELECT substr(m.text, 1, 140) FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.seq DESC LIMIT 1)";
 const SESSION_COLS = `s.id, s.title, s.title_auto, s.model, s.provider, s.cwd, s.effort, s.pinned, s.archived,
-  s.created_at, s.updated_at, s.run_state, s.run_id, s.unread, ${PREVIEW_SQL} AS preview,
+  s.created_at, s.updated_at, s.run_state, s.run_id, s.unread, s.yolo, ${PREVIEW_SQL} AS preview,
   COALESCE((SELECT a.expected FROM chat_await a WHERE a.session_id = s.id), 0) AS awaiting`;
 
 type SessionRow = {
   id: string; title: string; title_auto: number; model: string; provider: string; cwd: string | null; effort: string | null;
   pinned: number; archived: number; created_at: number; updated_at: number; run_state: string;
-  run_id: string | null; unread: number; preview: string | null; awaiting: number;
+  run_id: string | null; unread: number; preview: string | null; awaiting: number; yolo: number;
 };
 
 function toSession(r: SessionRow): ChatSession {
@@ -118,6 +120,7 @@ function toSession(r: SessionRow): ChatSession {
     unread: r.unread === 1,
     preview: (r.preview ?? "").slice(0, 140),
     awaiting: r.awaiting,
+    yolo: r.yolo === 1,
   };
 }
 
@@ -178,7 +181,7 @@ export function updateSession(
   db: Database,
   id: string,
   patch: {
-    title?: string; pinned?: boolean; archived?: boolean; model?: string; provider?: string; effort?: Effort | null;
+    title?: string; pinned?: boolean; archived?: boolean; model?: string; provider?: string; effort?: Effort | null; yolo?: boolean;
   },
   now: number,
 ): ChatSession | null {
@@ -191,10 +194,17 @@ export function updateSession(
   if (patch.model !== undefined) { sets.push("model = ?"); params.push(patch.model); }
   if (patch.provider !== undefined) { sets.push("provider = ?"); params.push(patch.provider); }
   if (patch.effort !== undefined) { sets.push("effort = ?"); params.push(patch.effort); }
+  if (patch.yolo !== undefined) { sets.push("yolo = ?"); params.push(patch.yolo ? 1 : 0); }
   sets.push("updated_at = ?");
   params.push(now, id);
   db.query(`UPDATE chat_sessions SET ${sets.join(", ")} WHERE id = ?`).run(...params);
   return getSession(db, id);
+}
+
+/** Auto-approve this session's Pi gate requests (the `/yolo` command). */
+export function getYolo(db: Database, id: string): boolean {
+  const r = db.query("SELECT yolo FROM chat_sessions WHERE id = ?").get(id) as { yolo: number } | null;
+  return r?.yolo === 1;
 }
 
 /** Deletes mirror rows (messages, attachments and FTS cascade). Returns attachment file paths, or null if missing. */

@@ -212,6 +212,31 @@ test("approval on a Hermes run is refused (Hermes approvals stay read-only)", as
   await waitIdle(s.id);
 });
 
+test("YOLO: a Pi gate request is approved server-side with no browser", async () => {
+  const { body: s } = await js(await run(req("POST", "/api/chat/sessions", { backend: "pi", model: "deepseek-pro" })));
+  expect((await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { yolo: true })))).body.yolo).toBe(true);
+  const sent = await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("GATE please"))));
+  await waitIdle(s.id);
+  expect(bridge.uiResponses).toEqual([{ id: "ui-1", confirmed: true }]);
+  const m = S.getMessage(ctx.db, sent.body.assistantMessage.id)!;
+  expect(m.tools[0]).toMatchObject({ name: "bash", status: "ok" });
+  expect(S.getSession(ctx.db, s.id)!.runState).toBe("idle");
+});
+
+test("YOLO enabled while a gate request is pending answers it", async () => {
+  const { s, sent } = await gateRun();
+  expect(S.getSession(ctx.db, s.id)!.runState).toBe("needs_approval");
+  expect((await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { yolo: true })))).status).toBe(200);
+  await waitIdle(s.id);
+  expect(bridge.uiResponses).toEqual([{ id: "ui-1", confirmed: true }]);
+  expect(S.getMessage(ctx.db, sent.assistantMessage.id)!.tools[0]).toMatchObject({ name: "bash", status: "ok" });
+});
+
+test("PATCH yolo rejects a non-boolean", async () => {
+  const { body: s } = await js(await run(req("POST", "/api/chat/sessions", { backend: "pi", model: "deepseek-pro" })));
+  expect((await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { yolo: "yes" })))).status).toBe(400);
+});
+
 test("a Pi todo_write is streamed as a todo event and persisted on the assistant message", async () => {
   const { body: s } = await js(await run(req("POST", "/api/chat/sessions", { backend: "pi", model: "deepseek-pro" })));
   const sent = await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("TODO please"))));

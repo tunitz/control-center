@@ -57,12 +57,13 @@ export class Chat {
     this.lastActivity = Date.now();
   }
 
-  launch(sessionPath?: string, tools?: string[] | null, key = "", skills?: { suppress: boolean; enabled: string[] } | null): void {
+  launch(sessionPath?: string, tools?: string[] | null, key = "", skills?: { suppress: boolean; enabled: string[] } | null, opts: { hideAnthropic?: boolean; extensions?: string[] } = {}): void {
     this.launchKey = key;
     this.launchTools = tools && tools.length > 0 ? tools : null;
     const args = ["--mode", "rpc", "--session-dir", this.cfg.sessionDir];
     if (sessionPath) args.push("--session", sessionPath);
     if (tools && tools.length > 0) args.push("--tools", tools.join(","));
+    for (const ext of opts.extensions ?? []) args.push("-e", ext);
     // A disabled skill means Pi's own discovery is off; the enabled ones are named explicitly.
     if (skills?.suppress) {
       args.push("--no-skills");
@@ -72,7 +73,7 @@ export class Chat {
     this.proc = new PiProcess(this.cfg, this.cwd, args, {
       onEvent: (obj) => this.onPiEvent(obj),
       onExit: (code) => this.onExit(code),
-    });
+    }, { hideAnthropic: opts.hideAnthropic });
     this.ready = this.rawState().then((st) => {
       this.sessionFile = typeof st.sessionFile === "string" ? st.sessionFile : undefined;
     });

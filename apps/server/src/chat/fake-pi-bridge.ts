@@ -93,7 +93,7 @@ export class FakePiBridge {
   readonly authLogins = new Map<string, AuthRec>();
   readonly authAnswers: { id: string; value: string; promptId?: string }[] = [];
   authStarts = 0;
-  config: Record<string, any> = { appendSystemPrompt: "", agentsMd: "", defaultTools: null, gate: { extraProtectedPaths: [], extraRisky: [] } };
+  config: Record<string, any> = { appendSystemPrompt: "", agentsMd: "", defaultTools: null, gate: { extraProtectedPaths: [], extraRisky: [] }, claudeBridge: false, browser: false };
   modelsCalls = 0;
   /** The next N GET /models calls fail with 500 (for the no-cache-on-failure test). */
   failModels = 0;
@@ -166,7 +166,7 @@ export class FakePiBridge {
       if (this.failModels > 0) { this.failModels--; return json(500, { error: "internal error" }); }
       return json(200, { models: this.models });
     }
-    if (p === "/config" && method === "GET") return json(200, { ...this.config, knownTools: ["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"] });
+    if (p === "/config" && method === "GET") return json(200, { ...this.config, knownTools: ["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"], claudeCode: { found: false, path: null, extension: true }, browserStatus: { extension: true, agent: false, chromium: false } });
     if (p === "/skills" && method === "GET") return json(200, { skills: this.skills });
     if (p === "/skills" && method === "PUT") {
       const disabled = Array.isArray(body?.disabled) ? body.disabled : null;
@@ -189,7 +189,7 @@ export class FakePiBridge {
         return json(400, { error: "defaultTools: unknown tool rm" });
       }
       this.config = { ...this.config, ...body };
-      return json(200, { ...this.config, knownTools: [] });
+      return json(200, { ...this.config, knownTools: [], claudeCode: { found: false, path: null, extension: true }, browserStatus: { extension: true, agent: false, chromium: false } });
     }
     let m = /^\/chats\/([^/]+)\/(start|prompt|steer|abort|command|ui_response)$/.exec(p);
     if (method === "POST" && m) return this.post(m[1], m[2], body);

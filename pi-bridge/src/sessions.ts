@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { BridgeConfig } from "./config";
+import { readConfig } from "./pi-config";
 import { PiProcess } from "./pi-process";
 
 export interface SessionSummary {
@@ -129,10 +130,14 @@ export async function listModelsOnce(cfg: BridgeConfig, live?: { send(cmd: any, 
   }
   let done: () => void = () => {};
   const exited = new Promise<void>((r) => (done = r));
-  const proc = new PiProcess(cfg, join(cfg.workspaceRoot, "_models"), ["--mode", "rpc", "--no-session", "--session-dir", cfg.sessionDir], {
+  const args = ["--mode", "rpc", "--no-session", "--session-dir", cfg.sessionDir];
+  // The Claude-bridge models only exist when its extension is loaded, so the probe loads it too.
+  const claudeBridge = readConfig(cfg.agentDir).claudeBridge && existsSync(cfg.claudeBridgeExtension);
+  if (claudeBridge) args.push("-e", cfg.claudeBridgeExtension);
+  const proc = new PiProcess(cfg, join(cfg.workspaceRoot, "_models"), args, {
     onEvent: () => {},
     onExit: () => done(),
-  });
+  }, { hideAnthropic: claudeBridge });
   try {
     const resp = await proc.send({ type: "get_available_models" }, cfg.commandTimeoutMs);
     if (!resp.success) throw new Error(resp.error ?? "get_available_models failed");

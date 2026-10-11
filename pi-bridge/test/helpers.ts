@@ -26,6 +26,8 @@ export function makeConfig(root: string, over: Partial<BridgeConfig> = {}): Brid
     workspaceRoot: join(root, "ws"),
     homeDir: join(root, "home"),
     piPackageDir: join(root, "no-sdk-here"),
+    claudeBridgeExtension: join(root, "claude-bridge.ts"),
+    browserExtension: join(root, "browser-ext.ts"),
     deepseekApiKey: "sk-test-not-a-real-key",
     anthropicOAuthToken: "test-oauth-token",
     anthropicApiKey: undefined,

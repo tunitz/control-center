@@ -363,7 +363,13 @@ async function patchSessionRoute(req: Request, id: string, ctx: ChatContext): Pr
     patch.provider = r.provider;
   }
   if (body.effort !== undefined) patch.effort = parseEffort(body.effort);
+  if (body.yolo !== undefined) {
+    if (typeof body.yolo !== "boolean") throw new ChatError(400, "yolo must be a boolean");
+    patch.yolo = body.yolo;
+  }
   const updated = S.updateSession(ctx.db, id, patch, ctx.now());
+  // Enabling YOLO while a gate request is pending answers it right away.
+  if (body.yolo === true) await runsOf(ctx).approvePending(id);
   return json(withBackend(ctx, updated!));
 }
 

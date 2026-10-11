@@ -23,7 +23,7 @@ export class PiProcess {
   private seq = 0;
   private closed = false;
 
-  constructor(cfg: BridgeConfig, cwd: string, args: string[], handlers: PiHandlers) {
+  constructor(cfg: BridgeConfig, cwd: string, args: string[], handlers: PiHandlers, opts: { hideAnthropic?: boolean } = {}) {
     mkdirSync(cwd, { recursive: true });
     const cmd = cfg.piBin.endsWith(".ts") ? [process.execPath, cfg.piBin, ...args] : [cfg.piBin, ...args];
     // Only what Pi needs. CC_* and PI_BRIDGE_TOKEN are never passed on.
@@ -33,8 +33,12 @@ export class PiProcess {
       PI_CODING_AGENT_DIR: cfg.agentDir,
     };
     if (cfg.deepseekApiKey) env.DEEPSEEK_API_KEY = cfg.deepseekApiKey;
-    if (cfg.anthropicOAuthToken) env.ANTHROPIC_OAUTH_TOKEN = cfg.anthropicOAuthToken;
-    if (cfg.anthropicApiKey) env.ANTHROPIC_API_KEY = cfg.anthropicApiKey;
+    // Claude Code hits its own auth error when ANTHROPIC_* overrides are exported (pi-claude-bridge
+    // issue #107), so the Claude-bridge mode leaves them out and lets it use its ~/.claude login.
+    if (!opts.hideAnthropic) {
+      if (cfg.anthropicOAuthToken) env.ANTHROPIC_OAUTH_TOKEN = cfg.anthropicOAuthToken;
+      if (cfg.anthropicApiKey) env.ANTHROPIC_API_KEY = cfg.anthropicApiKey;
+    }
 
     this.proc = Bun.spawn(cmd, { cwd, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     this.pid = this.proc.pid;

@@ -9,7 +9,7 @@ type Effort = "off" | "low" | "medium" | "high";
 type ChatModel = { id: string; provider: string; label: string; reasoning: boolean; canDisableReasoning: boolean; vision: boolean; local: boolean; online: boolean; backend?: "hermes" | "pi" };
 type ChatSession = { id: string; title: string; titleAuto: boolean; model: string; provider: string; effort: Effort | null;
   pinned: boolean; archived: boolean; createdAt: number; updatedAt: number;
-  runState: "idle" | "running" | "needs_approval"; runId: string | null; unread: boolean; preview: string; awaiting: number };
+  runState: "idle" | "running" | "needs_approval"; runId: string | null; unread: boolean; preview: string; awaiting: number; yolo: boolean };
 type Attachment = { id: string; kind: "image" | "file"; name: string; mime: string; size: number; w: number | null; h: number | null; url: string /* /api/chat/files/<id> */ };
 type ToolRow = { id: string; name: string; args: Record<string, unknown> | null; preview: string | null; status: "running" | "ok" | "failed"; durationMs: number | null };
 type ApprovalStatus = "pending" | "approved" | "denied" | "ended";
@@ -33,7 +33,7 @@ type CommandNote = { id: number; name: string; body: string; afterSeq: number; c
 - `GET /config` -> `{ defaultModel: string; defaultEffort: Effort | null; maxUploadMb: number; contextWindow: Record<modelId, number> }`.
 - `GET /sessions?q=&archived=0|1` -> `ChatSession[]` sorted pinned first then `updatedAt` desc. `q` searches title + message text via FTS and returns `{...ChatSession, snippet: string}`.
 - `POST /sessions` `{ model?: string; effort?: Effort|null; backend?: "hermes" | "pi" }` -> `ChatSession` (creates the Hermes session, source `api_server`, locks the model). `backend` defaults to `"hermes"`. `backend: "pi"` requires `model` (a Pi model id from `GET /models`), creates a Pi chat on the bridge, and stores its session file. 503 when no Pi bridge is configured. `backend` is immutable after creation: a PATCH carrying `backend` is 400.
-- `PATCH /sessions/:id` any of `{ title, pinned, archived, model, effort }` -> `ChatSession`. A `title` change sets `titleAuto=false`. A `model` change is locked in Hermes at the next send.
+- `PATCH /sessions/:id` any of `{ title, pinned, archived, model, effort, yolo }` -> `ChatSession`. A `title` change sets `titleAuto=false`. A `model` change is locked in Hermes at the next send. `yolo` (boolean) is the chat's auto-approve flag: while it is on, the server approves every Pi gate request for that session, so `/yolo` keeps working with no browser attached.
 - `DELETE /sessions/:id` -> `{ ok: true }` (deletes the Hermes session, mirror rows, and files). Refused with 409 when a run is active.
 - `GET /sessions/:id/messages?before=<seq>&limit=40` -> `{ messages: ChatMessage[] /* ascending seq */; hasMore: boolean; commands: CommandNote[] }`. Newest page when `before` is absent; `commands` is every command row of the session (oldest first), independent of the message page.
 - `POST /sessions/:id/commands` `{ name, body? }` -> `201 CommandNote`. Records a local command row in the thread. `name` has a leading `/` stripped and is capped at 40 chars; `body` is capped at 8000. The row is anchored after the newest message at the time of the call. 404 unknown session, 400 missing name.
@@ -50,6 +50,7 @@ type CommandNote = { id: number; name: string; body: string; afterSeq: number; c
   - `usage` `{ input, output }`
   - `done` `{ status: "complete" | "failed" | "interrupted", error: string | null, model: string | null }`
 - `POST /runs/:runId/stop` -> `{ ok: true }`
+- `POST /runs/:runId/approval` `{ id, choice: "approve" | "deny" }` -> `{ ok: true }` (Pi only). When the session's `yolo` is on, the run manager answers the request itself the moment it arrives; enabling `yolo` while a request is pending answers it immediately. Because this lives in the run manager, it holds while the app is closed.
 - `POST /runs/:runId/steer` `{ message }` -> `{ ok: true }` or 409 `{ error: "run finished" }`
 - `GET /files/:id` -> bytes. Headers: correct content-type for images, `application/octet-stream` + `Content-Disposition: attachment` otherwise, `X-Content-Type-Options: nosniff`, `Cache-Control: private, max-age=3600`.
 - `GET /sessions/:id/export` -> `text/markdown` attachment.
@@ -77,8 +78,10 @@ Pi chats only (`backend: "pi"`); Hermes chats get 400.
 
 Global, shared by every Pi chat; stored by the bridge as files in Pi's agent dir. It takes effect on a chat's next message: the bridge restarts that chat's Pi process (same session file, history kept) when the config or the chat's tools changed since launch. A change while the chat has an active run is refused (409 `run active`).
 
-- `GET /api/chat/pi-config` -> `{ appendSystemPrompt, agentsMd, defaultTools: string[] | null, gate: { extraProtectedPaths: string[], extraRisky: string[] }, knownTools: string[] }`.
-- `PUT /api/chat/pi-config` with any subset of `appendSystemPrompt` (text, 32 000 chars max, "" removes it), `agentsMd` (same), `defaultTools` (known names, `null` = Pi default), `gate`. Bridge validation errors come back as 400 with the message; 503 when no bridge is configured.
+- `GET /api/chat/pi-config` -> `{ appendSystemPrompt, agentsMd, defaultTools: string[] | null, gate: { extraProtectedPaths: string[], extraRisky: string[] }, knownTools: string[], claudeBridge: boolean, claudeCode: { found: boolean, path: string | null, extension: boolean }, browser: boolean, browserStatus: { extension: boolean, agent: boolean, chromium: boolean } }`.
+- `PUT /api/chat/pi-config` with any subset of `appendSystemPrompt` (text, 32 000 chars max, "" removes it), `agentsMd` (same), `defaultTools` (known names, `null` = Pi default), `claudeBridge` (boolean), `browser` (boolean), `gate`. Bridge validation errors come back as 400 with the message; 503 when no bridge is configured.
+- `claudeBridge` runs the `claude-bridge/*` models through Claude Code (the pi-claude-bridge extension) instead of Pi's own Anthropic client: the bridge loads the extension with `-e` and keeps `ANTHROPIC_API_KEY`/`ANTHROPIC_OAUTH_TOKEN` out of the Pi child's env, so Claude Code signs in with its own `~/.claude` login. `claudeCode` reports whether the CLI and the extension were found. The toggle only takes effect when the extension file exists; the setting lands on the next start (idle chats restart).
+- `browser` registers the cc-browser tools (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_press`, `browser_scroll`, `browser_back`, `browser_screenshot`, `browser_close`) for Pi chats. The bridge loads the browser extension with `-e`; each command shells out to the `agent-browser` CLI in one session per chat. `browserStatus` reports whether the extension, the CLI and a Chromium were found. Same next-start rule as `claudeBridge`.
 - `gate` can only add rules: `extraProtectedPaths` (paths under the home directory, no `..`) and `extraRisky` (patterns that must compile). Loosening keys are rejected.
 - Per-chat `tools` (`string[] | null`) is part of `pi-settings` (GET/PATCH) and overrides `defaultTools`; `null` removes the override.
 - Pi's own config files (prompt, notes, gate and tool config, extensions) are on the gate's protected list, so a Pi chat cannot rewrite its own rules.
