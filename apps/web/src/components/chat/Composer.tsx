@@ -231,9 +231,9 @@ export function Composer(p: ComposerProps) {
             {p.phone && efforts.length > 0 && (
               <TextMenu
                 ariaLabel="Thinking level"
-                trigger={`Think: ${effortLabel(p.effort ?? efforts[0])}`}
+                trigger={`Think: ${p.effort ? effortLabel(p.effort) : "Default"}`}
                 items={effortMenuItems(model).map(i => ({ value: i.value, label: i.label }))}
-                value={p.effort ?? efforts[0]}
+                value={p.effort ?? ""}
                 open={effortOpen}
                 onOpenChange={setEffortOpen}
                 onSelect={v => p.onEffort(v as Effort)}
