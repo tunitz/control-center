@@ -5,7 +5,21 @@ export const COMMANDS = [
   { name: "model", desc: "Switch model" },
   { name: "reasoning", desc: "Set reasoning effort" },
   { name: "stop", desc: "Stop the running task" },
+  { name: "retry", desc: "Send your last message again" },
+  { name: "title", desc: "Rename this chat" },
+  { name: "export", desc: "Download this chat as markdown" },
+  { name: "pin", desc: "Pin or unpin this chat" },
+  { name: "archive", desc: "Archive or restore this chat" },
+  { name: "delete", desc: "Delete this chat" },
+  { name: "steer", desc: "Send a note to the running task" },
+  { name: "help", desc: "List commands" },
 ] as const;
+
+/** Commands the page handles (they need the active chat); the rest the composer handles itself. */
+export const PAGE_COMMANDS = ["retry", "title", "export", "pin", "archive", "delete", "steer"] as const;
+
+export const helpText = () => COMMANDS.map(c => `/${c.name} ${c.desc.toLowerCase()}`).join(" · ");
+export const unknownText = (name: string) => `Unknown command /${name}. Type /help to list them.`;
 
 export type Parsed = { kind: "command"; name: string; arg: string } | { kind: "unknown"; name: string } | null;
 

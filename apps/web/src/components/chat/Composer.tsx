@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { Icon } from "./Icon";
 import { ACCEPTED_TYPES, MAX_BYTES, prepareImage } from "../../chat/imaging";
-import { effortOptions, parseEffort, parseSlash, suggestions, type Parsed } from "../../chat/slash";
+import { PAGE_COMMANDS, effortOptions, helpText, parseEffort, parseSlash, suggestions, unknownText, type Parsed } from "../../chat/slash";
 import { contextMeter } from "../../chat/context";
 import { shortModelLabel } from "./label";
 import { TextMenu } from "./TextMenu";
@@ -25,6 +25,8 @@ export type ComposerProps = {
   maxUploadMb: number;
   onSend: (text: string, files: File[]) => Promise<void>;
   onSteer: (text: string) => Promise<"ok" | "finished">;
+  /** Page-level slash commands (retry, title, export, pin, archive, delete). Returns a short notice. */
+  onAction: (name: string, arg: string) => Promise<string>;
   onStop: () => void;
   onNew: () => void;
   onModel: (id: string) => void;
@@ -84,7 +86,14 @@ export function Composer(p: ComposerProps) {
   };
 
   const runCommand = (cmd: Exclude<Parsed, null>) => {
-    if (cmd.kind === "unknown") { setNotice(`Unknown command /${cmd.name}. Try /new, /model, /reasoning or /stop.`); return true; }
+    if (cmd.kind === "unknown") { setNotice(unknownText(cmd.name)); return true; }
+    if (cmd.name === "help") { setNotice(helpText()); setText(""); return true; }
+    if ((PAGE_COMMANDS as readonly string[]).includes(cmd.name)) {
+      const keep = text;
+      setText("");
+      p.onAction(cmd.name, cmd.arg).then(msg => setNotice(msg)).catch(e => { setText(keep); setErr((e as Error).message); });
+      return true;
+    }
     if (cmd.name === "new") { p.onNew(); setText(""); return true; }
     if (cmd.name === "stop") { if (p.running) p.onStop(); else setNotice("Nothing is running."); setText(""); return true; }
     if (cmd.name === "model") {

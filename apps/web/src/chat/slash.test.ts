@@ -16,7 +16,7 @@ test("unknown slash word is reported, not sent as a command", () => {
 });
 
 test("suggestions filter by prefix and stop after the first space", () => {
-  expect(suggestions("/").map(c => c.name)).toEqual(["new", "model", "reasoning", "stop"]);
+  expect(suggestions("/").map(c => c.name)).toEqual(["new", "model", "reasoning", "stop", "retry", "title", "export", "pin", "archive", "delete", "steer", "help"]);
   expect(suggestions("/mo").map(c => c.name)).toEqual(["model"]);
   expect(suggestions("/stop now")).toEqual([]);
   expect(suggestions("hi")).toEqual([]);
@@ -34,4 +34,12 @@ test("effort options follow reasoning flags", () => {
   expect(effortOptions({ ...base, reasoning: true, canDisableReasoning: true })).toEqual(["off", "low", "medium", "high"]);
   expect(effortOptions({ ...base, reasoning: true, canDisableReasoning: false })).toEqual(["low", "medium", "high"]);
   expect(effortOptions(undefined)).toEqual([]);
+});
+
+import { PAGE_COMMANDS, COMMANDS, helpText, unknownText } from "./slash";
+test("every page command is a listed command; help and unknown text come from the list", () => {
+  for (const n of PAGE_COMMANDS) expect(COMMANDS.some(c => c.name === n)).toBe(true);
+  for (const c of COMMANDS) expect(helpText()).toContain(`/${c.name}`);
+  expect(parseSlash("/retry")).toEqual({ kind: "command", name: "retry", arg: "" });
+  expect(unknownText("x")).toBe("Unknown command /x. Type /help to list them.");
 });

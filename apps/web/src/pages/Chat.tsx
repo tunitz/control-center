@@ -172,6 +172,40 @@ export default function Chat({ hash }: { hash: string }) {
     catch (e) { if ((e as { status?: number }).status === 409) return "finished"; throw e; }
   };
 
+  const onAction = async (name: string, arg: string): Promise<string> => {
+    if (name === "steer") {
+      if (!arg) return "Usage: /steer <note for the running task>";
+      return (await onSteer(arg)) === "ok" ? "Steer sent to the running task." : "Nothing is running.";
+    }
+    if (!activeId || !active) return "Open a chat first.";
+    if (name === "export") { window.location.href = chat.exportUrl(activeId); return "Downloading the chat."; }
+    if (name === "title") {
+      if (!arg) return "Usage: /title <new name>";
+      await chat.patchSession(activeId, { title: arg }); sessions.patch(activeId, { title: arg, titleAuto: false }); return "Renamed.";
+    }
+    if (name === "pin") { await chat.patchSession(activeId, { pinned: !active.pinned }); sessions.patch(activeId, { pinned: !active.pinned }); return active.pinned ? "Unpinned." : "Pinned."; }
+    if (name === "archive") {
+      await chat.patchSession(activeId, { archived: !active.archived }); void sessions.refresh();
+      if (!active.archived) navigate("#/chat");
+      return active.archived ? "Restored." : "Archived.";
+    }
+    if (name === "delete") {
+      if (thread.runId) return "Stop the running task first.";
+      if (!window.confirm(`Delete "${active.title || "this chat"}"? This cannot be undone.`)) return "Not deleted.";
+      await chat.deleteSession(activeId);
+      sessions.setList(prev => prev.filter(s => s.id !== activeId)); forgetChat(localStorage, activeId); navigate("#/chat");
+      return "Deleted.";
+    }
+    if (name === "retry") {
+      if (thread.runId) return "Wait for the running task or stop it first.";
+      const last = [...thread.messages].reverse().find(m => m.role === "user");
+      if (!last || !last.text.trim()) return "No earlier message with text to resend.";
+      await onSend(last.text, []);
+      return "Sent again.";
+    }
+    return "Unknown command.";
+  };
+
   const onModel = async (id: string) => {
     setLiveModel(id);
     if (activeId) {
@@ -303,6 +337,7 @@ export default function Chat({ hash }: { hash: string }) {
             maxUploadMb={config?.maxUploadMb ?? 25}
             onSend={onSend}
             onSteer={onSteer}
+            onAction={onAction}
             onStop={() => { thread.stop().catch(e => setPageErr((e as Error).message)); }}
             onNew={() => void newChat()}
             onModel={id => void onModel(id)}
