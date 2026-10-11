@@ -57,3 +57,13 @@ Pi chats only (`backend: "pi"`); Hermes chats get 400.
 - `PATCH /api/chat/sessions/:id/pi-settings` with any subset of those four keys -> `{ settings }`. Unknown keys, wrong types and an empty body are 400; 409 `run active` during a run. Applied by Pi at the start of the next run.
 - `POST /api/chat/sessions/:id/pi-compact` `{ instructions? }` -> `{ tokensBefore, tokensAfter }`. 409 during a run; 502 with Pi's message when there is nothing to compact.
 - The chat's `effort` is sent to Pi as its thinking level when the model reports reasoning.
+
+## Pi configuration (additive)
+
+Global, shared by every Pi chat; stored by the bridge as files in Pi's agent dir. It takes effect on a chat's next message: the bridge restarts that chat's Pi process (same session file, history kept) when the config or the chat's tools changed since launch. A change while the chat has an active run is refused (409 `run active`).
+
+- `GET /api/chat/pi-config` -> `{ appendSystemPrompt, agentsMd, defaultTools: string[] | null, gate: { extraProtectedPaths: string[], extraRisky: string[] }, knownTools: string[] }`.
+- `PUT /api/chat/pi-config` with any subset of `appendSystemPrompt` (text, 32 000 chars max, "" removes it), `agentsMd` (same), `defaultTools` (known names, `null` = Pi default), `gate`. Bridge validation errors come back as 400 with the message; 503 when no bridge is configured.
+- `gate` can only add rules: `extraProtectedPaths` (paths under the home directory, no `..`) and `extraRisky` (patterns that must compile). Loosening keys are rejected.
+- Per-chat `tools` (`string[] | null`) is part of `pi-settings` (GET/PATCH) and overrides `defaultTools`; `null` removes the override.
+- Pi's own config files (prompt, notes, gate and tool config, extensions) are on the gate's protected list, so a Pi chat cannot rewrite its own rules.

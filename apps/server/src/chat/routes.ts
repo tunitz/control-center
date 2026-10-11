@@ -17,7 +17,7 @@ import { buildSessionDir, fileHeaders, inspectFile, MAX_FILES, MAX_BODY_BYTES, s
 import { assertImageSize, buildPrompt, type PromptAttachment } from "./prompt";
 import { RunManager, recoverRuns } from "./runs";
 import { DelegationWatcher } from "./watcher";
-import { parsePiSettingsPatch, withDefaults } from "./pi-settings";
+import { mergeSettings, parsePiSettingsPatch, withDefaults } from "./pi-settings";
 
 export type ChatContext = {
   db: Database;
@@ -86,6 +86,10 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
 
   if (p === "/models" && method === "GET") return json(await mergedModels(ctx));
   if (p === "/config" && method === "GET") return json(getConfig(ctx.db));
+  if (p === "/pi-config" && (method === "GET" || method === "PUT")) {
+    if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
+    return json(method === "GET" ? await ctx.pi.getConfig() : await ctx.pi.putConfig(await readJson(req)));
+  }
   if (p === "/credits" && method === "GET") return creditsRoute(ctx);
 
   if (p === "/sessions" && method === "GET") return listSessionsRoute(url, ctx);
@@ -301,7 +305,7 @@ async function piSettingsPatch(req: Request, id: string, ctx: ChatContext): Prom
   const { s } = requirePiChat(ctx, id);
   const patch = parsePiSettingsPatch(await readJson(req));
   if (s.runState !== "idle") throw new ChatError(409, "run active");
-  const merged = { ...S.getPiSettings(ctx.db, id), ...patch };
+  const merged = mergeSettings(S.getPiSettings(ctx.db, id), patch);
   S.setPiSettings(ctx.db, id, merged);
   return json({ settings: withDefaults(merged) });
 }

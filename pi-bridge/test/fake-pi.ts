@@ -180,6 +180,7 @@ async function handle(cmd: any) {
         pendingMessageCount: 0,
         pid: process.pid,
         envKeys: Object.keys(process.env).sort(),
+        argv: args,
       });
       return;
     case "set_model": {

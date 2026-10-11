@@ -137,7 +137,7 @@ Every task ends: `bun run typecheck` + `bun test apps/server apps/web/src` green
 
 ### Workstream C — settings
 
-**T6 Settings model and apply path.** Slice T6a (DONE, live-verified on real Pi): thinking level (from the chat effort), steering mode, follow-up mode, auto compaction, auto retry, manual compact; stored per chat in `pi_settings_json`, sent with every bridge `start`. Slice T6b (open): the file-based and restart rows below. Coverage table (UI must expose each row):
+**T6 Settings model and apply path.** Slice T6a (DONE, live-verified on real Pi): thinking level (from the chat effort), steering mode, follow-up mode, auto compaction, auto retry, manual compact; stored per chat in `pi_settings_json`, sent with every bridge `start`. Slice T6b-server (DONE, live-verified: system prompt took effect and the restart kept the session): global system prompt, AGENTS.md, default and per-chat tools, stricter-only gate rules, restart-on-change in the bridge. Not built, by decision: API keys (set once over SSH), models.json/llama (after the tun-sfx test), advanced settings.json form, extension toggles. The web screens for T6b live in a Settings area, not in the chat (tun, 2026-10-11), and are built under T7. Coverage table (UI must expose each row):
 
 | Setting | Live over RPC? | UI control | Apply |
 |---|---|---|---|

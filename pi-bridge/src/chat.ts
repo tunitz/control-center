@@ -32,6 +32,8 @@ export class Chat {
   sessionFile: string | undefined;
   ready: Promise<void> = Promise.resolve();
   proc: PiProcess | undefined;
+  /** What this process was started with (tools + config files). A different key means it must restart. */
+  launchKey = "";
   private lastAssistant: any = null;
 
   constructor(
@@ -48,9 +50,11 @@ export class Chat {
     this.lastActivity = Date.now();
   }
 
-  launch(sessionPath?: string): void {
+  launch(sessionPath?: string, tools?: string[] | null, key = ""): void {
+    this.launchKey = key;
     const args = ["--mode", "rpc", "--session-dir", this.cfg.sessionDir];
     if (sessionPath) args.push("--session", sessionPath);
+    if (tools && tools.length > 0) args.push("--tools", tools.join(","));
     mkdirSync(this.cfg.sessionDir, { recursive: true });
     this.proc = new PiProcess(this.cfg, this.cwd, args, {
       onEvent: (obj) => this.onPiEvent(obj),

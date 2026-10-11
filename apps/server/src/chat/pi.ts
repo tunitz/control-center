@@ -14,6 +14,14 @@ import type { ChatModelDef } from "./models";
 import type { ContentPart, HermesFrame, StartRunArgs, TodoItem } from "./hermes";
 import { ChatError } from "./http";
 
+export type PiConfig = {
+  appendSystemPrompt: string;
+  agentsMd: string;
+  defaultTools: string[] | null;
+  gate: { extraProtectedPaths: string[]; extraRisky: string[] };
+  knownTools: string[];
+};
+
 export const PI_BRIDGE_DEFAULT_URL = "http://127.0.0.1:3050";
 const MODEL_CACHE_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -113,6 +121,15 @@ export class PiClient implements ChatBackend {
     await this.call("POST", `/chats/${runId}/ui_response`, { id: approvalId, confirmed: approve });
   }
 
+  /** The bridge's global Pi configuration (system prompt, notes, default tools, extra gate rules). */
+  async getConfig(): Promise<PiConfig> {
+    return (await this.call("GET", "/config")) as PiConfig;
+  }
+
+  async putConfig(patch: Record<string, unknown>): Promise<PiConfig> {
+    return (await this.call("PUT", "/config", patch)) as PiConfig;
+  }
+
   /** Thinking levels the model supports (starts or resumes the chat on that model first). Empty when unknown. */
   async thinkingLevels(id: string, ref: string | null, model: string, provider: string): Promise<string[]> {
     await this.call("POST", `/chats/${id}/start`, { ...(ref ? { sessionPath: ref } : {}), model: { provider, modelId: model } });
@@ -193,6 +210,8 @@ export class PiClient implements ChatBackend {
     let msg = "";
     try { msg = typeof JSON.parse(text)?.error === "string" ? JSON.parse(text).error : ""; } catch { msg = ""; }
     const detail = msg ? `: ${msg.slice(0, 200)}` : "";
+    // The bridge validates input; its 400/409 are the caller's problem, not a gateway fault.
+    if ((res.status === 400 || res.status === 409) && msg) return new ChatError(res.status, msg.slice(0, 200));
     return new ChatError(502, `pi bridge ${what} failed (${res.status})${detail}`);
   }
 }

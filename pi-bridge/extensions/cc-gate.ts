@@ -30,7 +30,13 @@ export interface GatePolicy {
 
 export const DEFAULT_POLICY: GatePolicy = {
   home: homedir(),
-  protectedPaths: [".hermes", ".ssh", ".local/share/cc-pi/env", ".local/share/cc-pi/agent/auth.json", "projects/control-center/data"],
+  protectedPaths: [
+    ".hermes", ".ssh", ".local/share/cc-pi/env", "projects/control-center/data",
+    // Pi's own configuration: a chat must not rewrite its own rules, prompt, or extensions.
+    ".local/share/cc-pi/agent/auth.json", ".local/share/cc-pi/agent/SYSTEM.md", ".local/share/cc-pi/agent/APPEND_SYSTEM.md",
+    ".local/share/cc-pi/agent/AGENTS.md", ".local/share/cc-pi/agent/cc-gate.json", ".local/share/cc-pi/agent/cc-config.json",
+    ".local/share/cc-pi/agent/settings.json", ".local/share/cc-pi/agent/models.json", ".local/share/cc-pi/agent/extensions",
+  ],
   bashAllow: [],
   bashRisky: "(^|[\\s;&|(`])(rm|sudo|chmod|chown|curl|wget|ssh|dd|mkfs[.\\w]*)(\\s|$)|>",
   timeoutMs: 120_000,
@@ -110,27 +116,34 @@ export async function askWithTimeout(ask: () => Promise<boolean>, ms: number): P
   }
 }
 
-/** Optional overrides: $PI_CODING_AGENT_DIR/cc-gate.json (same keys as GatePolicy, minus home). */
-function loadPolicy(): GatePolicy {
-  const dir = process.env.PI_CODING_AGENT_DIR;
+/**
+ * Reads $PI_CODING_AGENT_DIR/cc-gate.json. The file can only ADD rules (extraProtectedPaths,
+ * extraRisky); keys that would loosen the gate are ignored, and a bad or corrupt file falls
+ * back to the default policy, never to "allow all". The timeout is not configurable.
+ */
+export function loadPolicy(dir: string | undefined): GatePolicy {
   const file = dir ? `${dir}/cc-gate.json` : "";
   if (!file || !existsSync(file)) return DEFAULT_POLICY;
   try {
     const o = JSON.parse(readFileSync(file, "utf8"));
+    const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x !== "") : []);
+    const paths = strs(o.extraProtectedPaths).filter((p) => !p.startsWith("/") && !p.startsWith("~") && !p.split("/").includes(".."));
+    const risky = strs(o.extraRisky).filter((r) => {
+      try { new RegExp(r); return true; } catch { return false; }
+    });
+    if (paths.length === 0 && risky.length === 0) return DEFAULT_POLICY;
     return {
       ...DEFAULT_POLICY,
-      ...(Array.isArray(o.protectedPaths) ? { protectedPaths: o.protectedPaths.map(String) } : {}),
-      ...(Array.isArray(o.bashAllow) ? { bashAllow: o.bashAllow.map(String) } : {}),
-      ...(typeof o.bashRisky === "string" ? { bashRisky: o.bashRisky } : {}),
-      ...(typeof o.timeoutMs === "number" && o.timeoutMs > 0 ? { timeoutMs: o.timeoutMs } : {}),
+      protectedPaths: [...DEFAULT_POLICY.protectedPaths, ...paths],
+      bashRisky: risky.length > 0 ? `${DEFAULT_POLICY.bashRisky}|${risky.map((r) => `(?:${r})`).join("|")}` : DEFAULT_POLICY.bashRisky,
     };
   } catch {
-    return DEFAULT_POLICY; // bad file: fall back to the safe default, never to "allow all"
+    return DEFAULT_POLICY;
   }
 }
 
 export default function (pi: GateApi) {
-  const pol = loadPolicy();
+  const pol = loadPolicy(process.env.PI_CODING_AGENT_DIR);
   pi.on("tool_call", async (event, ctx) => {
     const d = evaluate(event.toolName, (event.input ?? {}) as Record<string, unknown>, ctx.cwd, pol);
     if (!d.confirm) return undefined;

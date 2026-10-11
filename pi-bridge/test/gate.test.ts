@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { evaluate, askWithTimeout, DEFAULT_POLICY } from "../extensions/cc-gate";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { evaluate, askWithTimeout, loadPolicy, DEFAULT_POLICY } from "../extensions/cc-gate";
 
 const HOME = "/home/u";
 const CWD = `${HOME}/.local/share/cc-pi/workspace/chat1`;
@@ -80,5 +83,44 @@ describe("askWithTimeout", () => {
   });
   test("a throwing prompt = deny", async () => {
     expect(await askWithTimeout(async () => { throw new Error("x"); }, 1000)).toBe(false);
+  });
+});
+
+describe("Pi's own config files are protected", () => {
+  for (const f of ["APPEND_SYSTEM.md", "SYSTEM.md", "AGENTS.md", "cc-gate.json", "cc-config.json", "extensions/cc-gate.ts"]) {
+    test(`write to agent dir ${f} asks`, () => {
+      expect(ev("write", { path: `${HOME}/.local/share/cc-pi/agent/${f}`, content: "x" }).confirm).toBe(true);
+      expect(ev("bash", { command: `echo hi > ~/.local/share/cc-pi/agent/${f}` }).confirm).toBe(true);
+    });
+  }
+  test("Pi's session files are still readable without asking", () => {
+    expect(ev("read", { path: `${HOME}/.local/share/cc-pi/agent/sessions/a.jsonl` }).confirm).toBe(false);
+  });
+});
+
+describe("loadPolicy: the config file can only make the gate stricter", () => {
+  const dirWith = (obj: unknown) => {
+    const d = mkdtempSync(join(tmpdir(), "gate-"));
+    writeFileSync(join(d, "cc-gate.json"), typeof obj === "string" ? obj : JSON.stringify(obj));
+    return d;
+  };
+  test("no file = the default policy", () => {
+    expect(loadPolicy(mkdtempSync(join(tmpdir(), "gate-")))).toEqual(DEFAULT_POLICY);
+    expect(loadPolicy(undefined)).toEqual(DEFAULT_POLICY);
+  });
+  test("extraProtectedPaths and extraRisky are added to the defaults", () => {
+    const pol = loadPolicy(dirWith({ extraProtectedPaths: ["projects/secret"], extraRisky: ["git\\s+push"] }));
+    expect(pol.protectedPaths).toEqual([...DEFAULT_POLICY.protectedPaths, "projects/secret"]);
+    expect(evaluate("read", { path: `${HOME}/projects/secret/a` }, CWD, { ...pol, home: HOME }).confirm).toBe(true);
+    expect(evaluate("bash", { command: "git push origin main" }, CWD, { ...pol, home: HOME }).confirm).toBe(true);
+    expect(evaluate("bash", { command: "ls" }, CWD, { ...pol, home: HOME }).confirm).toBe(false);
+  });
+  test("keys that would loosen the gate are ignored", () => {
+    const pol = loadPolicy(dirWith({ protectedPaths: [], bashAllow: [".*"], bashRisky: "never", timeoutMs: 1 }));
+    expect(pol).toEqual(DEFAULT_POLICY);
+  });
+  test("a bad regex or a corrupt file never loosens or crashes", () => {
+    expect(loadPolicy(dirWith({ extraRisky: ["("] })).bashRisky).toBe(DEFAULT_POLICY.bashRisky);
+    expect(loadPolicy(dirWith("{nope"))).toEqual(DEFAULT_POLICY);
   });
 });

@@ -1,3 +1,4 @@
+import { applyConfigPatch, fingerprint, KNOWN_TOOLS, parseTools, readConfig } from "./pi-config";
 import { tokenMatches, bearerFrom } from "./auth";
 import { type BridgeConfig } from "./config";
 import { Chat, HttpError, rpcError, type Frame } from "./chat";
@@ -119,6 +120,8 @@ export function createBridge(cfg: BridgeConfig): Bridge {
 
   /** Live Pi settings a chat may carry (docs/pi-plan.md T6). Anything else is rejected, not ignored. */
   interface LiveSettings {
+    /** Per-chat tool selection; applied at launch (--tools), so a change restarts the process. */
+    tools?: string[];
     steeringMode?: string;
     followUpMode?: string;
     autoCompaction?: boolean;
@@ -134,6 +137,8 @@ export function createBridge(cfg: BridgeConfig): Bridge {
       if (k === "steeringMode" || k === "followUpMode") {
         if (typeof val !== "string" || !QUEUE_MODES.includes(val)) throw new HttpError(400, `${k} must be all or one-at-a-time`);
         out[k] = val;
+      } else if (k === "tools") {
+        out.tools = parseTools(val, "tools");
       } else if (k === "autoCompaction" || k === "autoRetry") {
         if (typeof val !== "boolean") throw new HttpError(400, `${k} must be a boolean`);
         out[k] = val;
@@ -159,11 +164,22 @@ export function createBridge(cfg: BridgeConfig): Bridge {
     const settings = parseSettings(body.settings);
     const sessionPath = body.sessionPath === undefined ? undefined : checkSessionPath(body.sessionPath);
 
+    // What Pi reads only at startup: the tool list and the config files. The chat's own tools win
+    // over the global default. If these changed since launch, the process is restarted (idle only).
+    const tools = settings?.tools ?? readConfig(cfg.agentDir).defaultTools;
+    const key = JSON.stringify([tools, fingerprint(cfg.agentDir)]);
+
+    let resumeFrom = sessionPath;
     const existing = live.get(id);
     if (existing && !existing.exited) {
       await existing.ready;
-      await applySettings(existing, model, thinking, settings);
-      return json(200, { sessionFile: existing.sessionFile, state: await existing.state() });
+      if (existing.launchKey === key) {
+        await applySettings(existing, model, thinking, settings);
+        return json(200, { sessionFile: existing.sessionFile, state: await existing.state() });
+      }
+      if (existing.busy) throw new HttpError(409, "run active");
+      resumeFrom = existing.sessionFile ?? sessionPath;
+      await drop(existing);
     }
     if (live.size >= cfg.maxLive) throw new HttpError(429, `at most ${cfg.maxLive} live Pi processes`);
 
@@ -175,7 +191,7 @@ export function createBridge(cfg: BridgeConfig): Bridge {
     const chat = new Chat(cfg, id, onGone);
     live.set(id, chat); // reserve the slot before any await
     try {
-      chat.launch(sessionPath);
+      chat.launch(resumeFrom, tools, key);
       await chat.ready;
       await applySettings(chat, model, thinking, settings);
     } catch (e) {
@@ -297,6 +313,14 @@ export function createBridge(cfg: BridgeConfig): Bridge {
     const method = req.method;
 
     let m: RegExpExecArray | null;
+    if (path === "/config" && method === "GET") {
+      return json(200, { ...readConfig(cfg.agentDir), knownTools: KNOWN_TOOLS });
+    }
+    if (path === "/config" && method === "PUT") {
+      let body: unknown;
+      try { body = await req.json(); } catch { throw new HttpError(400, "body must be JSON"); }
+      return json(200, { ...applyConfigPatch(cfg.agentDir, body), knownTools: KNOWN_TOOLS });
+    }
     if (method === "GET" && path === "/sessions") {
       return json(200, { sessions: await listSessions(cfg) });
     }

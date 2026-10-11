@@ -242,7 +242,7 @@ test("GET pi-settings returns defaults plus the model's thinking levels", async 
   const r = await js(await run(req("GET", PI_URL(s.id))));
   expect(r.status).toBe(200);
   expect(r.body).toEqual({
-    settings: { steeringMode: "one-at-a-time", followUpMode: "one-at-a-time", autoCompaction: true, autoRetry: true },
+    settings: { tools: null, steeringMode: "one-at-a-time", followUpMode: "one-at-a-time", autoCompaction: true, autoRetry: true },
     thinkingLevels: ["off", "low", "high"],
   });
 });
@@ -252,7 +252,7 @@ test("PATCH pi-settings merges partial updates, persists them and returns the fu
   await js(await run(req("PATCH", PI_URL(s.id), { steeringMode: "all" })));
   const r = await js(await run(req("PATCH", PI_URL(s.id), { autoRetry: false })));
   expect(r.status).toBe(200);
-  expect(r.body.settings).toEqual({ steeringMode: "all", followUpMode: "one-at-a-time", autoCompaction: true, autoRetry: false });
+  expect(r.body.settings).toEqual({ tools: null, steeringMode: "all", followUpMode: "one-at-a-time", autoCompaction: true, autoRetry: false });
   expect(JSON.parse(S.getPiSettings(ctx.db, s.id) ? JSON.stringify(S.getPiSettings(ctx.db, s.id)) : "{}")).toEqual({ steeringMode: "all", autoRetry: false });
   expect((await js(await run(req("GET", PI_URL(s.id))))).body.settings.steeringMode).toBe("all");
 });
@@ -311,4 +311,45 @@ test("no pi-settings response ever contains the bridge token", async () => {
   await js(await run(req("PATCH", PI_URL(s.id), { autoRetry: false })));
   await js(await run(req("GET", PI_URL(s.id))));
   expect(seen.some((t) => t.includes(bridge.token))).toBe(false);
+});
+
+test("GET/PUT /pi-config go to the bridge and come back; the token never shows", async () => {
+  const g = await js(await run(req("GET", "/api/chat/pi-config")));
+  expect(g.status).toBe(200);
+  expect(g.body).toMatchObject({ appendSystemPrompt: "", agentsMd: "", defaultTools: null, gate: { extraProtectedPaths: [], extraRisky: [] } });
+  const p = await js(await run(req("PUT", "/api/chat/pi-config", { appendSystemPrompt: "Be brief.", defaultTools: ["read"] })));
+  expect(p.status).toBe(200);
+  expect(p.body).toMatchObject({ appendSystemPrompt: "Be brief.", defaultTools: ["read"] });
+  expect((await js(await run(req("GET", "/api/chat/pi-config")))).body.appendSystemPrompt).toBe("Be brief.");
+  expect(JSON.stringify([g, p])).not.toContain(bridge.token);
+});
+
+test("PUT /pi-config: a bridge validation error comes back as 400 with its message, not 502", async () => {
+  const r = await js(await run(req("PUT", "/api/chat/pi-config", { defaultTools: ["rm"] })));
+  expect(r.status).toBe(400);
+  expect(r.body.error).toContain("unknown tool");
+});
+
+test("pi-config is 503 when no bridge is configured", async () => {
+  ctx = { ...ctx, pi: undefined };
+  expect((await js(await run(req("GET", "/api/chat/pi-config")))).status).toBe(503);
+});
+
+test("per-chat tools: PATCH stores them, null clears them, and every send carries them to the bridge", async () => {
+  const s = await piSession();
+  const r = await js(await run(req("PATCH", PI_URL(s.id), { tools: ["read", "grep"] })));
+  expect(r.body.settings.tools).toEqual(["read", "grep"]);
+  await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("hello"))));
+  await waitIdle(s.id);
+  expect(lastStart()).toMatchObject({ settings: { tools: ["read", "grep"] } });
+  const cleared = await js(await run(req("PATCH", PI_URL(s.id), { tools: null })));
+  expect(cleared.body.settings.tools).toBeNull();
+  expect(S.getPiSettings(ctx.db, s.id)).toEqual({});
+});
+
+test("per-chat tools: unknown, duplicate and empty lists are 400", async () => {
+  const s = await piSession();
+  for (const tools of [["nope"], ["read", "read"], [], "read"]) {
+    expect((await js(await run(req("PATCH", PI_URL(s.id), { tools })))).status).toBe(400);
+  }
 });

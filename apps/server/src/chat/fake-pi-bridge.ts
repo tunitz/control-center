@@ -51,6 +51,7 @@ export class FakePiBridge {
   readonly chats = new Map<string, ChatRec>();
   readonly requests: FakeRequest[] = [];
   readonly uiResponses: any[] = [];
+  config: Record<string, any> = { appendSystemPrompt: "", agentsMd: "", defaultTools: null, gate: { extraProtectedPaths: [], extraRisky: [] } };
   modelsCalls = 0;
   /** The next N GET /models calls fail with 500 (for the no-cache-on-failure test). */
   failModels = 0;
@@ -104,6 +105,15 @@ export class FakePiBridge {
       this.modelsCalls++;
       if (this.failModels > 0) { this.failModels--; return json(500, { error: "internal error" }); }
       return json(200, { models: this.models });
+    }
+    if (p === "/config" && method === "GET") return json(200, { ...this.config, knownTools: ["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"] });
+    if (p === "/config" && method === "PUT") {
+      const tools = body?.defaultTools;
+      if (Array.isArray(tools) && tools.some((t: string) => !["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"].includes(t))) {
+        return json(400, { error: "defaultTools: unknown tool rm" });
+      }
+      this.config = { ...this.config, ...body };
+      return json(200, { ...this.config, knownTools: [] });
     }
     let m = /^\/chats\/([^/]+)\/(start|prompt|steer|abort|command|ui_response)$/.exec(p);
     if (method === "POST" && m) return this.post(m[1], m[2], body);
