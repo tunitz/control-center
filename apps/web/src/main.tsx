@@ -3,7 +3,8 @@ import { createRoot } from "react-dom/client";
 import "uplot/dist/uPlot.min.css";
 import "./styles.css";
 import { api } from "./api";
-import { subscribeHash } from "./route";
+import { navigate, subscribeHash } from "./route";
+import { lastChatHash } from "./chat/last";
 import { clearCache } from "./hooks";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -42,16 +43,22 @@ function App() {
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
   const unit = /^#\/unit\/(\d+)/.exec(hash), settings = hash.startsWith("#/settings");
   const chatOn = hash === "#/chat" || hash.startsWith("#/chat/");
+  // Tapping Chat from outside chat reopens the last session; inside chat it keeps the normal link (list).
+  const onChatTab = (e: { preventDefault(): void }) => {
+    if (chatOn) return;
+    e.preventDefault();
+    navigate(lastChatHash(localStorage));
+  };
+  const signOut = async () => { await api("/auth/logout", { method: "POST" }); clearCache(); writeAuthed(false); setAuthed(false); };
   return (
     <div className="app">
       <header className="top">
         <div className="brand"><img className="logo" src="/favicon.svg" alt="" width="26" height="26" />Control Center</div>
-        <nav className="tabs"><a href="#/" className={!settings && !chatOn ? "on" : ""}>Dashboard</a><a href="#/chat" className={chatOn ? "on" : ""}>Chat</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
+        <nav className="tabs"><a href="#/" className={!settings && !chatOn ? "on" : ""}>Dashboard</a><a href="#/chat" onClick={onChatTab} className={chatOn ? "on" : ""}>Chat</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
         <div className="spacer" />
-        <button className="btn" onClick={async () => { await api("/auth/logout", { method: "POST" }); clearCache(); writeAuthed(false); setAuthed(false); }}>Sign out</button>
       </header>
-      <main>{unit ? <UnitDetail id={Number(unit[1])} /> : settings ? <Settings /> : chatOn ? <Suspense fallback={null}><Chat hash={hash} /></Suspense> : <Dashboard />}</main>
-      <nav className="tabbar"><a href="#/" className={!settings && !chatOn ? "on" : ""}>Dashboard</a><a href="#/chat" className={chatOn ? "on" : ""}>Chat</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
+      <main>{unit ? <UnitDetail id={Number(unit[1])} /> : settings ? <Settings onSignOut={signOut} /> : chatOn ? <Suspense fallback={null}><Chat hash={hash} /></Suspense> : <Dashboard />}</main>
+      <nav className="tabbar"><a href="#/" className={!settings && !chatOn ? "on" : ""}>Dashboard</a><a href="#/chat" onClick={onChatTab} className={chatOn ? "on" : ""}>Chat</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
     </div>
   );
 }

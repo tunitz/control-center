@@ -9,6 +9,7 @@ import { useSessions } from "../chat/useSessions";
 import { useVisualViewportHeight } from "../chat/viewport";
 import { openChatRunEvents, type GlobalRun } from "../chat/sse";
 import { lastInputTokens } from "../chat/context";
+import { forgetChat, rememberChat } from "../chat/last";
 import { Composer } from "../components/chat/Composer";
 import { AssistantMessage, UserMessage } from "../components/chat/Message";
 import { Sessions } from "../components/chat/Sessions";
@@ -19,12 +20,6 @@ import type { Attachment, ChatConfig, ChatModel, ChatSession, Effort } from "../
 installChatMock();
 
 const PHONE_QUERY = "(max-width: 760px)";
-const SUGGESTIONS: { title: string; sub: string; prompt: string }[] = [
-  { title: "Check unit health", sub: "systemd services on tun-minipc", prompt: "Check the health of the systemd units on tun-minipc." },
-  { title: "Summarise today's alerts", sub: "Alerts from the last 24 hours", prompt: "Summarise today's alerts from the last 24 hours." },
-  { title: "Restart a service", sub: "Asks Hermes to restart it", prompt: "Restart the service I name, and ask me before running anything." },
-  { title: "Explain this log", sub: "Attach a file or paste output", prompt: "Explain this log. I will attach it." },
-];
 
 function useIsPhone(): boolean {
   const [phone, setPhone] = useState(() => matchMedia(PHONE_QUERY).matches);
@@ -54,7 +49,6 @@ export default function Chat({ hash }: { hash: string }) {
   const [models, setModels] = useState<ChatModel[]>([]);
   const [config, setConfig] = useState<ChatConfig | null>(null);
   const [pageErr, setPageErr] = useState("");
-  const [prefill, setPrefill] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
   const [menu, setMenu] = useState(false);
 
@@ -81,6 +75,17 @@ export default function Chat({ hash }: { hash: string }) {
   useEffect(() => openChatRunEvents((r: GlobalRun) => onRunRef.current(r)), []);
 
   useEffect(() => { setLiveModel(null); setLiveEffort(null); setMenu(false); setDrawer(false); }, [activeId]);
+
+  // Remember the session on screen so the Chat tab can return to it; drop it if the server says it is gone.
+  useEffect(() => {
+    if (!activeId) return;
+    if (thread.missing) {
+      forgetChat(localStorage, activeId);
+      navigate("#/chat");
+    } else {
+      rememberChat(localStorage, activeId);
+    }
+  }, [activeId, thread.missing]);
 
   const modelId = liveModel ?? active?.model ?? config?.defaultModel ?? models[0]?.id ?? "";
   const effort = liveEffort ?? active?.effort ?? config?.defaultEffort ?? null;
@@ -133,7 +138,6 @@ export default function Chat({ hash }: { hash: string }) {
       const s: ChatSession = await chat.createSession({ model: modelId || undefined, effort: sendEffort(modelRec, effort) });
       sessions.setList(prev => [s, ...prev]);
       navigate(`#/chat/${encodeURIComponent(s.id)}`);
-      setPrefill(null);
     } catch (e) { setPageErr((e as Error).message); }
   };
 
@@ -187,6 +191,7 @@ export default function Chat({ hash }: { hash: string }) {
     onPatch: sessions.patch,
     onDeleted: (id: string) => {
       sessions.setList(prev => prev.filter(s => s.id !== id));
+      forgetChat(localStorage, id);
       if (id === activeId) navigate("#/chat");
     },
     onError: setPageErr,
@@ -248,13 +253,6 @@ export default function Chat({ hash }: { hash: string }) {
                     <h2>What can I help with?</h2>
                     <p className="meta" role="note">Hermes can run commands on this machine.</p>
                   </div>
-                  <div className="sugg-grid">
-                    {SUGGESTIONS.map(s => (
-                      <button key={s.title} className="sugg" type="button" onClick={() => setPrefill(s.prompt)}>
-                        <span>{s.title}</span><small>{s.sub}</small>
-                      </button>
-                    ))}
-                  </div>
                 </div>
               )}
 
@@ -286,8 +284,6 @@ export default function Chat({ hash }: { hash: string }) {
             ctxInput={ctxInput}
             ctxWindow={ctxWindow}
             maxUploadMb={config?.maxUploadMb ?? 25}
-            prefill={prefill}
-            onPrefillUsed={() => setPrefill(null)}
             onSend={onSend}
             onSteer={onSteer}
             onStop={() => { thread.stop().catch(e => setPageErr((e as Error).message)); }}

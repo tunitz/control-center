@@ -125,7 +125,7 @@ Source of truth: Hermes owns the model context; CC keeps a mirror of every messa
 - Desktop: header tabs Dashboard / Chat / Settings; Chat = 280px sessions column + centred 760px thread; one shared column for thread and composer.
 - Phone: bottom tabbar; sessions in a drawer from the hamburger; model + thinking controls move to the composer footer as small pills; all tap targets >=44px; safe-area padding.
 - Accent only on New chat, Send, primary approval. Muted text >=4.5:1. Three font sizes (13/14/15).
-- Empty state: greeting + 4 suggestion cards that prefill the composer.
+- Empty state: heading + one-line note ("Hermes can run commands on this machine."). No suggestion cards.
 
 ## 6. Security
 - Chat gives the agent a terminal. Anyone with a CC session can run commands as the Hermes user. CC's argon2 login, `HttpOnly` + `SameSite=Strict` cookie and LAN-only exposure are the only gate. Decision D3 below: add a chat login-rate limit, and show an always-visible "Hermes can run commands" note in the first-run empty state.

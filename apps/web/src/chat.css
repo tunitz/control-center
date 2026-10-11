@@ -71,10 +71,6 @@
 .chatx .col{max-width:760px;width:100%;margin:0 auto;padding:28px var(--gut) 32px;min-height:100%;display:flex;flex-direction:column;gap:28px}
 .chatx .empty{margin:auto 0;text-align:center;display:flex;flex-direction:column;align-items:center;gap:28px;padding:24px 0}
 .chatx .empty h2{font-size:26px}
-.chatx .sugg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:560px;text-align:left}
-.chatx .sugg{border:1px solid var(--ctl-line);background:var(--surface);border-radius:14px;padding:14px 16px;color:var(--text);min-height:64px;display:flex;flex-direction:column;gap:2px;font-size:14px}
-.chatx .sugg:hover{border-color:var(--accent)}
-.chatx .sugg small{font-size:13px;color:var(--mut)}
 .chatx .msg{position:relative;display:flex;flex-direction:column;gap:8px;min-width:0}
 .chatx .msg.user{align-items:flex-end}
 .chatx .bubble{background:var(--surface2);border:1px solid var(--line);border-radius:14px;padding:12px 16px;max-width:82%;display:flex;flex-direction:column;gap:10px;min-width:0}
@@ -244,9 +240,6 @@
 .chatx .side-empty{margin:auto;padding:16px;text-align:center;color:var(--mut)}
 .chatx .empty-head{display:flex;flex-direction:column;gap:4px}
 .chatx .empty-head h2{margin:0}
-.chatx .sugg{text-align:left}
-.chatx .sugg>span{font-weight:500}
-.chatx .sugg small{font-size:13px;color:var(--mut)}
 .chatx .btn.primary:disabled,.chatx .btn.primary:disabled:hover{background:var(--surface);border-color:var(--ctl-line);color:var(--mut);opacity:1;cursor:default}
 /* Icon-only send at <=480px: 44px round, solid accent when enabled (white icon, >=3:1), surface + bordered muted icon when disabled. */
 @media (max-width:480px){
@@ -302,11 +295,9 @@
 .chatx.phone .col{padding:12px 0 24px;gap:16px}
 .chatx.phone .bubble{max-width:90%}
 
-/* Empty state: heading, then four compact cards that fit above the composer at 390x844. */
+/* Empty state: heading and note, kept above the composer at 390x844. */
 .chatx.phone .empty{margin:8px 0 auto;padding:0;gap:16px;align-items:stretch;text-align:left}
 .chatx.phone .empty-head h2{font-size:24px}
-.chatx.phone .sugg-grid{grid-template-columns:1fr;gap:8px;max-width:none}
-.chatx.phone .sugg{padding:10px 14px;min-height:0;border-radius:14px;gap:2px}
 
 /* Composer: row 1 textarea (auto-grow, one line minimum); row 2 [attach][camera] [Thinking][model] ... [Send]. */
 .chatx.phone .comp-inner{padding:8px 0 10px}

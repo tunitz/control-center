@@ -11,7 +11,7 @@ const THEME_OPTIONS: { mode: ThemeMode; label: string }[] = [
   { mode: "dark", label: "Dark" },
 ];
 
-export default function Settings() {
+export default function Settings({ onSignOut }: { onSignOut: () => void }) {
   const [theme, setTheme] = useState<ThemeMode>(getThemeMode);
   const pickTheme = (mode: ThemeMode) => { setThemeMode(mode); setTheme(mode); };
   const { data: rates, reload: rr } = useLive<{ month: string; php_per_kwh: number }[]>("/rates", 60000);
@@ -61,6 +61,7 @@ export default function Settings() {
       <div className="card"><h3 style={{ marginTop: 0 }}>Audit log</h3>
         <div className="scroll"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Unit</th><th>Detail</th></tr></thead><tbody>{audit?.map(a => <tr key={a.id}><td>{new Date(a.ts * 1000).toLocaleString()}</td><td>{a.actor}</td><td>{a.action}</td><td>{a.unit ?? ""}</td><td className="muted">{a.detail}</td></tr>)}</tbody></table></div>
       </div>
+      <button className="btn dng" style={{ width: "100%", minHeight: 44 }} onClick={onSignOut}>Sign out</button>
     </div>
   );
 }

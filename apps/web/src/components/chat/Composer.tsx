@@ -23,8 +23,6 @@ export type ComposerProps = {
   ctxInput: number | null;
   ctxWindow: number | undefined;
   maxUploadMb: number;
-  prefill: string | null;
-  onPrefillUsed: () => void;
   onSend: (text: string, files: File[]) => Promise<void>;
   onSteer: (text: string) => Promise<"ok" | "finished">;
   onStop: () => void;
@@ -49,10 +47,6 @@ export function Composer(p: ComposerProps) {
   const meter = contextMeter(p.ctxInput, p.ctxWindow);
   const slash = suggestions(text);
   const busy = p.running;
-
-  useEffect(() => {
-    if (p.prefill != null) { setText(p.prefill); p.onPrefillUsed(); ta.current?.focus(); }
-  }, [p.prefill]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Autogrow up to ~8 lines.
   useEffect(() => {

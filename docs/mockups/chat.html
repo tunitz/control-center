@@ -165,10 +165,6 @@ nav.tabs a[aria-current=page]{background:var(--surface2);color:var(--text)}
 .col{max-width:760px;width:100%;margin:0 auto;padding:28px var(--gut) 32px;min-height:100%;display:flex;flex-direction:column;gap:28px}
 .empty{margin:auto 0;text-align:center;display:flex;flex-direction:column;align-items:center;gap:28px;padding:24px 0}
 .empty h2{font-size:26px}
-.sugg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:560px;text-align:left}
-.sugg{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:14px 16px;color:var(--text);min-height:64px;display:flex;flex-direction:column;gap:2px;font-size:14px}
-.sugg:hover{border-color:var(--accent)}
-.sugg small{font-size:13px;color:var(--mut)}
 
 /* Messages */
 .msg{position:relative;display:flex;flex-direction:column;gap:8px;min-width:0}
@@ -354,7 +350,6 @@ tr:last-child td{border-bottom:0}
 .frame.phone .effort-lbl,.frame.phone .seg{display:none}
 .frame.phone .col{padding:20px var(--gut) 28px;gap:22px}
 .frame.phone .bubble{max-width:90%}
-.frame.phone .sugg-grid{grid-template-columns:1fr}
 .frame.phone .comp-inner{padding:8px var(--gut) 10px}
 .frame.phone .comp-bottom{flex-wrap:nowrap;gap:4px;min-height:40px}
 .frame.phone .composer{padding:8px 8px 8px}
@@ -679,12 +674,6 @@ tr:last-child td{border-bottom:0}
           <!-- Empty state -->
           <div class="empty" data-in="empty">
             <h2>What can I help with?</h2>
-            <div class="sugg-grid">
-              <button class="sugg" type="button"><span>Check unit health</span><small>systemd services on tun-minipc</small></button>
-              <button class="sugg" type="button"><span>Summarise today's alerts</span><small>Alerts from the last 24 hours</small></button>
-              <button class="sugg" type="button"><span>Restart a service</span><small>Asks before running anything</small></button>
-              <button class="sugg" type="button"><span>Explain this log</span><small>Attach a file or paste output</small></button>
-            </div>
           </div>
 
           <!-- User message 1 (Conversation, Attachments) -->

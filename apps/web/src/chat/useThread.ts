@@ -12,9 +12,11 @@ type Thread = {
   approvals: Record<string, Approval[]>;
   /** The run this thread is attached to, if any. */
   runId: string | null;
+  /** True when the server says this session does not exist (404). */
+  missing: boolean;
 };
 
-const EMPTY: Thread = { loading: true, error: "", messages: [], hasMore: false, approvals: {}, runId: null };
+const EMPTY: Thread = { loading: true, error: "", messages: [], hasMore: false, approvals: {}, runId: null, missing: false };
 
 /** Messages for one session plus the live stream of its active run (if any).
  *  Closing the app mid-run: on return we refetch, then re-attach from the last event we saw. */
@@ -73,10 +75,10 @@ export function useThread(sid: string | null, onRunEnd: (sid: string) => void) {
       if (sidRef.current !== id) return;
       const running = [...page.messages].reverse().find(m => m.role === "assistant" && m.status === "running" && m.runId);
       // Keep runId while a run is still in progress, so Stop and Steer stay available after a reload.
-      setSt(s => ({ ...s, loading: false, error: "", messages: page.messages, hasMore: page.hasMore, runId: running?.runId ?? null }));
+      setSt(s => ({ ...s, loading: false, error: "", missing: false, messages: page.messages, hasMore: page.hasMore, runId: running?.runId ?? null }));
       if (running && running.runId) attach(running.runId, running);
     } catch (e) {
-      if (sidRef.current === id) setSt(s => ({ ...s, loading: false, error: (e as Error).message }));
+      if (sidRef.current === id) setSt(s => ({ ...s, loading: false, error: (e as Error).message, missing: (e as { status?: number }).status === 404 }));
     }
   }, [attach]);
 
