@@ -64,3 +64,6 @@ export function swapBackend(picked: ChatModel, chatBackend: Backend | null, chat
   if (chatBackend === null || chat.loading || !chat.empty) return false;
   return (picked.backend ?? "hermes") !== chatBackend;
 }
+
+/** The agent's name for tags and headers. Sessions from before the field existed are Hermes chats. */
+export const backendLabel = (b: Backend | undefined): string => (b === "pi" ? "Pi" : "Hermes");

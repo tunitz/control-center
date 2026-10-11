@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { keyOf, splitKey, viewModels, backendOfKey, modelUsable, effortChoices, todoSummary, tokenNote, sheetErrorText, swapBackend } from "./pi";
+import { backendLabel, keyOf, splitKey, viewModels, backendOfKey, modelUsable, effortChoices, todoSummary, tokenNote, sheetErrorText, swapBackend } from "./pi";
 import type { ChatModel } from "./types";
 
 const M = (over: Partial<ChatModel>): ChatModel => ({ id: "m", provider: "p", label: "M", reasoning: true, canDisableReasoning: true, vision: false, local: false, online: true, ...over });
@@ -103,5 +103,13 @@ describe("swapBackend: an empty chat can change agent by being replaced", () => 
     expect(swapBackend(pi, "hermes", { empty: false, loading: false })).toBe(false);
     expect(swapBackend(pi, "hermes", { empty: true, loading: true })).toBe(false);
     expect(swapBackend(pi, null, { empty: true, loading: false })).toBe(false);
+  });
+});
+
+describe("backendLabel", () => {
+  test("every chat names its agent; a session without the field is Hermes", () => {
+    expect(backendLabel("pi")).toBe("Pi");
+    expect(backendLabel("hermes")).toBe("Hermes");
+    expect(backendLabel(undefined)).toBe("Hermes");
   });
 });

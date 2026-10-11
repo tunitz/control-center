@@ -259,3 +259,9 @@ Bugs the gate found, each fixed with a test that failed first:
 - The fourth chat got a 429 while three idle chats held processes for 10 minutes. The bridge now closes the longest-idle chat to make room (429 only when all are mid-run).
 - Pi stores live settings in its global `settings.json`, so one chat's values leaked into the next. The server now sends all four settings on every run.
 - Stop while an approval was waiting hung for 15 s and left the run stuck. The bridge now declines open questions before aborting.
+
+## Models and Anthropic in Pi (2026-10-11)
+
+- Hermes picker: Sonnet 5.5, Haiku 5.5, DeepSeek Flash (OpenAI and local Llama removed by tun).
+- Pi picker (curated in `apps/server/src/chat/pi.ts`): all DeepSeek models, and only Opus 5.5, Sonnet 5.5, Haiku 5.5 from Anthropic (Pi lists 18 Anthropic models). The sidebar tags every chat Hermes or Pi.
+- Anthropic in Pi uses `ANTHROPIC_OAUTH_TOKEN` in `~/.local/share/cc-pi/env` (the bridge passes it to Pi). It is a Claude subscription token. LIVE RESULT: Anthropic answers third-party apps with 400 "Third-party apps now draw from your extra usage, not your plan limits", so Pi's Anthropic models need extra usage enabled on the account (or an API key in `ANTHROPIC_API_KEY`).

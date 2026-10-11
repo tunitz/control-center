@@ -98,7 +98,7 @@ test("backend is immutable: PATCH cannot change it", async () => {
 test("GET /models merges Pi models with a backend field on every entry; hermes entries say 'hermes'", async () => {
   const models = (await js(await run(req("GET", "/api/chat/models")))).body as { id: string; backend: string; online: boolean }[];
   expect(models.every((m) => m.backend === "hermes" || m.backend === "pi")).toBe(true);
-  expect(models.filter((m) => m.backend === "pi").map((m) => m.id)).toEqual(["deepseek-flash", "deepseek-pro"]);
+  expect(models.filter((m) => m.backend === "pi").map((m) => m.id)).toEqual(["deepseek-flash", "deepseek-pro", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
   expect(models.filter((m) => m.backend === "pi").every((m) => m.online === true)).toBe(true);
   expect(models.filter((m) => m.backend === "hermes").length).toBeGreaterThan(0);
   expect(models.filter((m) => m.backend === "hermes").every((m) => m.backend === "hermes")).toBe(true);
@@ -363,13 +363,15 @@ test("send on a Pi chat accepts a model id that only Pi knows (the web always se
   expect(S.getSession(ctx.db, s.id)!.model).toBe("deepseek-flash"); // a model sent with the message becomes the chat's model
 });
 
-test("PATCH model on a Pi chat resolves against Pi's models; a Hermes-only model is 400", async () => {
+test("PATCH model on a Pi chat resolves against Pi's curated models; others are 400", async () => {
   const s = await piSession();
   const ok = await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { model: "deepseek-flash" })));
   expect(ok.status).toBe(200);
   expect(ok.body).toMatchObject({ model: "deepseek-flash", provider: "deepseek", backend: "pi" });
-  const bad = await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { model: "claude-sonnet-5-5" })));
-  expect(bad.status).toBe(400);
+  const sonnet = await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { model: "claude-sonnet-5-5" })));
+  expect(sonnet.body).toMatchObject({ model: "claude-sonnet-5-5", provider: "anthropic", backend: "pi" }); // Pi has Sonnet too
+  const bad = await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { model: "claude-haiku-4-5" })));
+  expect(bad.status).toBe(400); // a model outside the curated Pi list
 });
 
 test("PATCH model on a Hermes chat with a Pi-only model is 400", async () => {

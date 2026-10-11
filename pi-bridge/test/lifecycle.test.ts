@@ -31,12 +31,14 @@ describe("chat lifecycle", () => {
     expect(r.json.sessionFile).toMatch(/\.jsonl$/);
   });
 
-  test("start never passes CC or bridge secrets to Pi (only DEEPSEEK_API_KEY, PATH, HOME, agent dir)", async () => {
+  test("start never passes CC or bridge secrets to Pi (only the provider keys, PATH, HOME, agent dir)", async () => {
     const r = await api(h, "POST", "/chats/lc-env/start", {});
     const keys: string[] = r.json.state.envKeys;
     expect(keys).toContain("PATH");
     expect(keys).toContain("HOME");
     expect(keys).toContain("DEEPSEEK_API_KEY");
+    expect(keys).toContain("ANTHROPIC_OAUTH_TOKEN");
+    expect(keys).not.toContain("ANTHROPIC_API_KEY"); // unset in the harness, so not passed
     expect(keys).toContain("PI_CODING_AGENT_DIR");
     expect(keys.some((k) => k.startsWith("CC_"))).toBe(false);
     expect(keys).not.toContain("PI_BRIDGE_TOKEN");

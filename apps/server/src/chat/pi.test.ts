@@ -90,7 +90,7 @@ test("listModels maps Pi models to ChatModelDef and caches them for 60 s", async
   let clock = 1_000_000;
   const pi = new PiClient({ baseUrl: b.url, token: b.token, now: () => clock });
   const calls = b.modelsCalls;
-  expect(await pi.listModels()).toEqual([
+  expect((await pi.listModels()).slice(0, 2)).toEqual([
     { id: "deepseek-flash", provider: "deepseek", label: "DeepSeek V4.1 Flash", reasoning: true, canDisableReasoning: true, vision: false, local: false },
     { id: "deepseek-pro", provider: "deepseek", label: "DeepSeek V4.1 Pro", reasoning: true, canDisableReasoning: true, vision: false, local: false },
   ]);
@@ -108,7 +108,7 @@ test("a failed listModels is not cached: the next call asks the bridge again", a
   const pi = new PiClient({ baseUrl: b.url, token: b.token });
   b.failModels = 1;
   await expect(pi.listModels()).rejects.toBeInstanceOf(ChatError);
-  expect((await pi.listModels()).length).toBe(2);
+  expect((await pi.listModels()).length).toBe(5);
 });
 
 test("lockModel applies set_model to the live chat; a refusal is 502", async () => {
@@ -321,4 +321,14 @@ test("thinkingLevels returns the model's levels from the bridge", async () => {
   const pi = new PiClient({ baseUrl: b.url, token: b.token });
   const id = await pi.createSession();
   expect(await pi.thinkingLevels(id, pi.sessionRef(id), "deepseek-flash", "deepseek")).toEqual(["off", "low", "high"]);
+});
+
+test("listModels shows a curated set: DeepSeek, and only Opus, Sonnet and Haiku 5.5 from Anthropic; nothing else", async () => {
+  const b = bridge();
+  const pi = new PiClient({ baseUrl: b.url, token: b.token });
+  const ids = (await pi.listModels()).map((m) => `${m.provider}/${m.id}`);
+  expect(ids).toEqual([
+    "deepseek/deepseek-flash", "deepseek/deepseek-pro",
+    "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5", "anthropic/claude-haiku-5-5",
+  ]);
 });

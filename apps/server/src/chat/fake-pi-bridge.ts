@@ -41,6 +41,13 @@ export type FakeRequest = { method: string; path: string; auth: string | null; b
 export const FAKE_MODELS: FakeModel[] = [
   { provider: "deepseek", id: "deepseek-flash", name: "DeepSeek V4.1 Flash", reasoning: true },
   { provider: "deepseek", id: "deepseek-pro", name: "DeepSeek V4.1 Pro", reasoning: true },
+  // The real bridge lists every model Pi knows. The server shows only a curated few.
+  { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true },
+  { provider: "anthropic", id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", reasoning: true },
+  { provider: "anthropic", id: "claude-haiku-5-5", name: "Claude Haiku 5.5", reasoning: true },
+  { provider: "anthropic", id: "claude-opus-4-5", name: "Claude Opus 4.5 (latest)", reasoning: true },
+  { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", reasoning: true },
+  { provider: "openai-codex", id: "gpt-6-luna", name: "GPT-6 Luna", reasoning: true },
 ];
 
 const json = (status: number, body: unknown) => Response.json(body, { status });

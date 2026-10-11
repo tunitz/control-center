@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Icon } from "./Icon";
 import { chat } from "../../chat/api";
 import { groupSessions } from "../../chat/sessions";
+import { backendLabel } from "../../chat/pi";
 import type { ChatSession, SessionHit } from "../../chat/types";
 
 type Row = ChatSession | SessionHit;
@@ -85,7 +86,7 @@ export function Sessions(p: SessionsProps) {
                       </span>
                       <span className="row-txt">
                         <span className="row-title">{s.title}</span>
-                        <span className="row-meta">{(s as SessionHit).snippet || `${s.provider} · ${s.model}`}{s.backend === "pi" && <span className="btag">Pi</span>}</span>
+                        <span className="row-meta">{(s as SessionHit).snippet || `${s.provider} · ${s.model}`}<span className="btag">{backendLabel(s.backend)}</span></span>
                       </span>
                     </a>
                     <button className="more" type="button" aria-haspopup="menu" aria-expanded={menu === s.id} aria-label={`Chat actions for ${s.title}`} onClick={() => setMenu(menu === s.id ? null : s.id)}>

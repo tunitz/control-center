@@ -78,7 +78,7 @@ export class PiClient implements ChatBackend {
     if (this.cache && t - this.cache.at < MODEL_CACHE_MS) return this.cache.models;
     const r = await this.call("GET", "/models");
     const list: BridgeModel[] = Array.isArray(r.models) ? r.models : [];
-    const models = list.filter((m) => typeof m.id === "string" && typeof m.provider === "string").map(toModelDef);
+    const models = list.filter((m) => typeof m.id === "string" && typeof m.provider === "string").filter(curated).map(toModelDef);
     this.cache = { at: t, models };
     return models;
   }
@@ -218,6 +218,17 @@ export class PiClient implements ChatBackend {
     if ((res.status === 400 || res.status === 409) && msg) return new ChatError(res.status, msg.slice(0, 200));
     return new ChatError(502, `pi bridge ${what} failed (${res.status})${detail}`);
   }
+}
+
+/**
+ * Pi knows every model of every provider it has a key for (18 from Anthropic alone). The picker
+ * shows a short curated set: all DeepSeek models, and Opus, Sonnet and Haiku 5.5 from Anthropic.
+ */
+const PI_ANTHROPIC_SHOWN = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
+function curated(m: BridgeModel): boolean {
+  if (m.provider === "deepseek") return true;
+  if (m.provider === "anthropic") return PI_ANTHROPIC_SHOWN.has(m.id as string);
+  return false;
 }
 
 function toModelDef(m: BridgeModel): ChatModelDef {

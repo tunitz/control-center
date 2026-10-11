@@ -10,6 +10,9 @@ export interface BridgeConfig {
   workspaceRoot: string;
   piPackageDir: string;
   deepseekApiKey?: string;
+  /** Claude subscription token or API key for Pi's Anthropic provider. Passed to Pi only. */
+  anthropicOAuthToken?: string;
+  anthropicApiKey?: string;
   maxLive: number;
   idleMs: number;
   reapIntervalMs: number;
@@ -43,6 +46,8 @@ export function loadConfig(env: Env = process.env): BridgeConfig {
     workspaceRoot: join(piHome, "workspace"),
     piPackageDir: join(piHome, "node_modules/@earendil-works/pi-coding-agent"),
     deepseekApiKey: env.DEEPSEEK_API_KEY || undefined,
+    anthropicOAuthToken: env.ANTHROPIC_OAUTH_TOKEN || undefined,
+    anthropicApiKey: env.ANTHROPIC_API_KEY || undefined,
     maxLive: num(env, "PI_BRIDGE_MAX_LIVE", 3),
     idleMs: num(env, "PI_BRIDGE_IDLE_MS", 10 * 60_000),
     reapIntervalMs: num(env, "PI_BRIDGE_REAP_MS", 30_000),

@@ -33,6 +33,8 @@ export class PiProcess {
       PI_CODING_AGENT_DIR: cfg.agentDir,
     };
     if (cfg.deepseekApiKey) env.DEEPSEEK_API_KEY = cfg.deepseekApiKey;
+    if (cfg.anthropicOAuthToken) env.ANTHROPIC_OAUTH_TOKEN = cfg.anthropicOAuthToken;
+    if (cfg.anthropicApiKey) env.ANTHROPIC_API_KEY = cfg.anthropicApiKey;
 
     this.proc = Bun.spawn(cmd, { cwd, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     this.pid = this.proc.pid;

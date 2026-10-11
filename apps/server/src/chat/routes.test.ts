@@ -41,7 +41,7 @@ test("GET /models and /config need no x-cc and return contract shapes", async ()
   expect(m.status).toBe(200);
   expect(m.body.map((x: any) => x.id)).toContain("claude-sonnet-5-5");
   const c = await js(await run(req("GET", "/api/chat/config")));
-  expect(c.body).toMatchObject({ defaultModel: "claude-sonnet-5-5", defaultEffort: null, maxUploadMb: 20, contextWindow: { "local-llama": 32768 } });
+  expect(c.body).toMatchObject({ defaultModel: "claude-sonnet-5-5", defaultEffort: null, maxUploadMb: 20, contextWindow: { "deepseek-flash": 1000000 } });
 });
 
 test("x-cc is enforced on every non-GET route (403)", async () => {
@@ -95,8 +95,8 @@ test("PATCH sets title (titleAuto false), pinned, archived, effort; validates", 
   expect((await js(await run(req("PATCH", "/api/chat/sessions/s1", { body: { model: "nope" } })))).status).toBe(400);
   expect((await js(await run(req("PATCH", "/api/chat/sessions/s1", { body: { pinned: "yes" } })))).status).toBe(400);
   expect((await js(await run(req("PATCH", "/api/chat/sessions/zzz", { body: { pinned: true } })))).status).toBe(404);
-  const m = await js(await run(req("PATCH", "/api/chat/sessions/s1", { body: { model: "gpt-6-luna" } })));
-  expect(m.body).toMatchObject({ model: "gpt-6-luna", provider: "openai-codex" });
+  const m = await js(await run(req("PATCH", "/api/chat/sessions/s1", { body: { model: "claude-haiku-5-5" } })));
+  expect(m.body).toMatchObject({ model: "claude-haiku-5-5", provider: "anthropic" });
   expect(fake.locks).toEqual([]); // model is locked in Hermes only at the next send
 });
 
