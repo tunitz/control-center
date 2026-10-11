@@ -23,6 +23,20 @@ export type PiConfig = {
   knownTools: string[];
 };
 
+/** A Pi skill (global or project) with its enable/disable state. Mirrors the bridge's skills.ts. */
+export type PiSkill = {
+  name: string;
+  description: string;
+  scope: "global" | "project";
+  /** Absolute SKILL.md path; the stable id used to disable it. */
+  path: string;
+  /** Skill directory passed to Pi as `--skill`. */
+  dir: string;
+  /** Working folder a project skill was found for; null for global skills. */
+  cwd: string | null;
+  enabled: boolean;
+};
+
 /** Provider sign-in (the chat's `/login`). Mirrors the bridge's login.ts types. */
 export type PiAuthType = "oauth" | "api_key";
 export type PiAuthProvider = {
@@ -171,6 +185,20 @@ export class PiClient implements ChatBackend {
 
   async putConfig(patch: Record<string, unknown>): Promise<PiConfig> {
     return (await this.call("PUT", "/config", patch)) as PiConfig;
+  }
+
+  /** Skills the bridge can see for these working folders, with the disabled set applied. */
+  async getSkills(cwds: string[]): Promise<PiSkill[]> {
+    const q = cwds.map((c) => `cwd=${encodeURIComponent(c)}`).join("&");
+    const r = await this.call("GET", `/skills${q === "" ? "" : `?${q}`}`);
+    return Array.isArray(r.skills) ? (r.skills as PiSkill[]) : [];
+  }
+
+  /** Replaces the disabled set and returns the recomputed skills. */
+  async putSkills(disabled: string[], cwds: string[]): Promise<PiSkill[]> {
+    const q = cwds.map((c) => `cwd=${encodeURIComponent(c)}`).join("&");
+    const r = await this.call("PUT", `/skills${q === "" ? "" : `?${q}`}`, { disabled });
+    return Array.isArray(r.skills) ? (r.skills as PiSkill[]) : [];
   }
 
   /** Thinking levels the model supports (starts or resumes the chat on that model first). Empty when unknown. */

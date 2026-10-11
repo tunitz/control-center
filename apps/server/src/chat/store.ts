@@ -153,6 +153,12 @@ export function getBackend(db: Database, id: string): { backend: "hermes" | "pi"
   return r ? { backend: r.backend, ref: r.backend_ref } : null;
 }
 
+/** Distinct working folders used by Pi chats; the skill list scans project skills in each. */
+export function listPiCwds(db: Database): string[] {
+  return (db.query("SELECT DISTINCT cwd FROM chat_sessions WHERE backend = 'pi' AND cwd IS NOT NULL ORDER BY cwd").all() as
+    { cwd: string }[]).map((r) => r.cwd);
+}
+
 /** Only the settings the user changed; {} when none. */
 export function getPiSettings(db: Database, id: string): Partial<PiSettings> {
   const r = db.query("SELECT pi_settings_json FROM chat_sessions WHERE id = ?").get(id) as { pi_settings_json: string | null } | null;

@@ -1,4 +1,4 @@
-import type { Backend, ChatConfig, ChatMessage, ChatModel, ChatSession, CommandNote, Effort, PiAuthProvider, PiAuthType, PiConfig, PiSettings, SessionHit } from "./types";
+import type { Backend, ChatConfig, ChatMessage, ChatModel, ChatSession, CommandNote, Effort, PiAuthProvider, PiAuthType, PiConfig, PiSettings, PiSkill, SessionHit } from "./types";
 
 /** GET /api/chat/pi/dirs: subfolders of `path` (root is the home folder, parent null there). */
 export type PiDirList = { path: string; parent: string | null; entries: { name: string; path: string }[] };
@@ -67,6 +67,8 @@ export const chat = {
     chatReq<{ tokensBefore: number; tokensAfter: number }>("POST", `/sessions/${encodeURIComponent(sid)}/pi-compact`, instructions ? { instructions } : {}),
   piConfig: () => chatReq<PiConfig>("GET", "/pi-config"),
   putPiConfig: (patch: Partial<Omit<PiConfig, "knownTools">>) => chatReq<PiConfig>("PUT", "/pi-config", patch),
+  piSkills: () => chatReq<{ skills: PiSkill[] }>("GET", "/pi/skills"),
+  putPiSkills: (disabled: string[]) => chatReq<{ skills: PiSkill[] }>("PUT", "/pi/skills", { disabled }),
   piAuthProviders: () => chatReq<{ providers: PiAuthProvider[] }>("GET", "/pi/auth/providers"),
   piAuthStart: (provider: string, authType: PiAuthType) =>
     chatReq<{ id: string; provider: string; providerName: string; authType: PiAuthType }>("POST", "/pi/auth/login", { provider, authType }),

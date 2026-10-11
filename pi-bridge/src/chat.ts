@@ -57,12 +57,17 @@ export class Chat {
     this.lastActivity = Date.now();
   }
 
-  launch(sessionPath?: string, tools?: string[] | null, key = ""): void {
+  launch(sessionPath?: string, tools?: string[] | null, key = "", skills?: { suppress: boolean; enabled: string[] } | null): void {
     this.launchKey = key;
     this.launchTools = tools && tools.length > 0 ? tools : null;
     const args = ["--mode", "rpc", "--session-dir", this.cfg.sessionDir];
     if (sessionPath) args.push("--session", sessionPath);
     if (tools && tools.length > 0) args.push("--tools", tools.join(","));
+    // A disabled skill means Pi's own discovery is off; the enabled ones are named explicitly.
+    if (skills?.suppress) {
+      args.push("--no-skills");
+      for (const dir of skills.enabled) args.push("--skill", dir);
+    }
     mkdirSync(this.cfg.sessionDir, { recursive: true });
     this.proc = new PiProcess(this.cfg, this.cwd, args, {
       onEvent: (obj) => this.onPiEvent(obj),

@@ -33,6 +33,8 @@ export type ChatConfig = { defaultModel: string; defaultEffort: Effort | null; m
 export type RunEvent = { id: number; type: string; data: any };
 export type PiSettings = { tools: string[] | null; steeringMode: "all" | "one-at-a-time"; followUpMode: "all" | "one-at-a-time"; autoCompaction: boolean; autoRetry: boolean };
 export type PiConfig = { appendSystemPrompt: string; agentsMd: string; defaultTools: string[] | null; gate: { extraProtectedPaths: string[]; extraRisky: string[] }; knownTools: string[] };
+/** A Pi skill (global or project) with its enable/disable state. Mirrors the server's PiSkill. */
+export type PiSkill = { name: string; description: string; scope: "global" | "project"; path: string; dir: string; cwd: string | null; enabled: boolean };
 export type PiAuthType = "oauth" | "api_key";
 /** A provider the chat's `/login` can sign in to (GET /pi/auth/providers). */
 export type PiAuthProvider = { id: string; name: string; authTypes: PiAuthType[]; oauthLabel?: string; subscription: boolean; configured: boolean; source?: string };

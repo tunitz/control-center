@@ -90,6 +90,14 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
     if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
     return json(method === "GET" ? await ctx.pi.getConfig() : await ctx.pi.putConfig(await readJson(req)));
   }
+  if (p === "/pi/skills" && (method === "GET" || method === "PUT")) {
+    if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
+    const cwds = S.listPiCwds(ctx.db);
+    if (method === "GET") return json({ skills: await ctx.pi.getSkills(cwds) });
+    const body = await readJson(req);
+    if (!Array.isArray(body.disabled) || body.disabled.some((x: unknown) => typeof x !== "string")) throw new ChatError(400, "disabled must be a string[]");
+    return json({ skills: await ctx.pi.putSkills(body.disabled, cwds) });
+  }
   if (p === "/pi/auth/providers" && method === "GET") {
     if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
     return json({ providers: await ctx.pi.authProviders() });

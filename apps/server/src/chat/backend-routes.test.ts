@@ -335,6 +335,28 @@ test("pi-config is 503 when no bridge is configured", async () => {
   expect((await js(await run(req("GET", "/api/chat/pi-config")))).status).toBe(503);
 });
 
+test("GET/PUT /pi/skills go to the bridge with the chat folders", async () => {
+  const cwd = `${bridge.home}/projects/alpha`;
+  await js(await run(req("POST", "/api/chat/sessions", { backend: "pi", model: "deepseek-pro", cwd })));
+  const g = await js(await run(req("GET", "/api/chat/pi/skills")));
+  expect(g.status).toBe(200);
+  expect(g.body.skills.map((s: any) => s.name)).toEqual(["pdf-tools", "release-notes"]);
+  expect(g.body.skills.find((s: any) => s.name === "release-notes")).toMatchObject({ scope: "project", cwd, enabled: true });
+
+  const rn = g.body.skills.find((s: any) => s.name === "release-notes");
+  const p = await js(await run(req("PUT", "/api/chat/pi/skills", { disabled: [rn.path] })));
+  expect(p.status).toBe(200);
+  expect(p.body.skills.find((s: any) => s.name === "release-notes").enabled).toBe(false);
+  expect(p.body.skills.find((s: any) => s.name === "pdf-tools").enabled).toBe(true);
+  expect((await js(await run(req("PUT", "/api/chat/pi/skills", { disabled: "x" })))).status).toBe(400);
+  expect(JSON.stringify([g, p])).not.toContain(bridge.token);
+});
+
+test("pi/skills is 503 when no bridge is configured", async () => {
+  ctx = { ...ctx, pi: undefined };
+  expect((await js(await run(req("GET", "/api/chat/pi/skills")))).status).toBe(503);
+});
+
 test("per-chat tools: PATCH stores them, null clears them, and every send carries them to the bridge", async () => {
   const s = await piSession();
   const r = await js(await run(req("PATCH", PI_URL(s.id), { tools: ["read", "grep"] })));

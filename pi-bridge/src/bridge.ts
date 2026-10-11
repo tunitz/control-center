@@ -1,9 +1,11 @@
+import { join } from "node:path";
 import { applyConfigPatch, fingerprint, KNOWN_TOOLS, parseTools, readConfig } from "./pi-config";
 import { tokenMatches, bearerFrom } from "./auth";
 import { type BridgeConfig } from "./config";
 import { Chat, HttpError, rpcError, type Frame } from "./chat";
 import { listModelsOnce, listSessions } from "./sessions";
 import { chosenCwd, listDirs, makeDir } from "./pi-dirs";
+import { listSkills, parseDisabled, skillLaunch, writeSkillsConfig } from "./skills";
 import { AuthManager, makeDeviceIdLoader, makeRuntimeLoader, type AuthType, type LoadRuntime } from "./login";
 
 export interface BridgeDeps {
@@ -199,7 +201,9 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
     const existing = liveChat;
     const tools = namesTools ? settings!.tools ?? readConfig(cfg.agentDir).defaultTools
       : running && liveChat ? liveChat.launchTools : readConfig(cfg.agentDir).defaultTools;
-    const key = JSON.stringify([tools, fingerprint(cfg.agentDir)]);
+    // Skills are read at startup too, so the disabled set is part of the launch key: a toggle restarts.
+    const skills = skillLaunch(cfg, cwd ?? join(cfg.workspaceRoot, id));
+    const key = JSON.stringify([tools, fingerprint(cfg.agentDir), skills]);
 
     let resumeFrom = sessionPath;
     if (existing) {
@@ -229,7 +233,7 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
     chat.chosenCwd = cwd;
     live.set(id, chat); // reserve the slot before any await
     try {
-      chat.launch(resumeFrom, tools, key);
+      chat.launch(resumeFrom, tools, key, skills);
       await chat.ready;
       await applySettings(chat, model, thinking, settings);
     } catch (e) {
@@ -361,6 +365,17 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
       let body: unknown;
       try { body = await req.json(); } catch { throw new HttpError(400, "body must be JSON"); }
       return json(200, { ...applyConfigPatch(cfg.agentDir, body), knownTools: KNOWN_TOOLS });
+    }
+    if (path === "/skills" && method === "GET") {
+      return json(200, { skills: listSkills(cfg, url.searchParams.getAll("cwd")) });
+    }
+    if (path === "/skills" && method === "PUT") {
+      const body = await readBody(req);
+      writeSkillsConfig(cfg.agentDir, parseDisabled(body.disabled));
+      // Apply now: recycle idle chats so their next message launches with the new skill set.
+      // A busy chat is restarted by its next /start, once the run has settled.
+      for (const chat of [...live.values()]) if (!chat.busy && !chat.exited) void drop(chat);
+      return json(200, { skills: listSkills(cfg, url.searchParams.getAll("cwd")) });
     }
     if (method === "GET" && path === "/dirs") {
       return json(200, listDirs(cfg, url.searchParams.get("path") ?? undefined));

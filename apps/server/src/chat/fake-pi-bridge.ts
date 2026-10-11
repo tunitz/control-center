@@ -100,6 +100,8 @@ export class FakePiBridge {
   readonly url: string;
   /** A fake HOME on disk, with the same protected rules as the real bridge (pi-bridge/src/pi-dirs.ts). */
   readonly home: string;
+  /** Skills the bridge would list, global + project, with their enable/disable state. */
+  readonly skills: any[] = [];
   private readonly server: Server<undefined>;
 
   private constructor(server: Server<undefined>, token: string, models: FakeModel[]) {
@@ -114,6 +116,13 @@ export class FakePiBridge {
     writeFileSync(join(this.home, "notes.txt"), "x");
     symlinkSync("/etc", join(this.home, "escape-link"));
     this.home = realpathSync(this.home);
+    const globalDir = join(this.home, ".local/share/cc-pi/agent/skills/pdf-tools");
+    const projectCwd = join(this.home, "projects/alpha");
+    const projectDir = join(projectCwd, ".pi/skills/release-notes");
+    this.skills.push(
+      { name: "pdf-tools", description: "Extract text and tables from PDF files. Use when reading or converting PDFs.", scope: "global", path: join(globalDir, "SKILL.md"), dir: globalDir, cwd: null, enabled: true },
+      { name: "release-notes", description: "Draft release notes from the git history.", scope: "project", path: join(projectDir, "SKILL.md"), dir: projectDir, cwd: projectCwd, enabled: true },
+    );
   }
 
   static start(opts: { token?: string; models?: FakeModel[] } = {}): FakePiBridge {
@@ -158,6 +167,13 @@ export class FakePiBridge {
       return json(200, { models: this.models });
     }
     if (p === "/config" && method === "GET") return json(200, { ...this.config, knownTools: ["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"] });
+    if (p === "/skills" && method === "GET") return json(200, { skills: this.skills });
+    if (p === "/skills" && method === "PUT") {
+      const disabled = Array.isArray(body?.disabled) ? body.disabled : null;
+      if (!disabled || disabled.some((x: unknown) => typeof x !== "string")) return json(400, { error: "disabled must be a list of skill paths" });
+      for (const s of this.skills) s.enabled = !disabled.includes(s.path);
+      return json(200, { skills: this.skills });
+    }
     if (method === "GET" && p === "/auth/providers") return json(200, { providers: this.authProviders });
     if (method === "POST" && p === "/auth/login") return this.startAuth(body);
     const am = /^\/auth\/login\/([^/]+)\/(events|response|cancel)$/.exec(p);

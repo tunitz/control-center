@@ -83,6 +83,16 @@ Global, shared by every Pi chat; stored by the bridge as files in Pi's agent dir
 - Per-chat `tools` (`string[] | null`) is part of `pi-settings` (GET/PATCH) and overrides `defaultTools`; `null` removes the override.
 - Pi's own config files (prompt, notes, gate and tool config, extensions) are on the gate's protected list, so a Pi chat cannot rewrite its own rules.
 
+## Pi skills (additive)
+
+Pi skills Pi can see, global and project, with a per-skill toggle that applies to every Pi chat.
+Global skills come from `<agent-dir>/skills/` and `~/.agents/skills/`; project skills from `<cwd>/.pi/skills/` and `.agents/skills/` up the tree. A skill is a folder holding a `SKILL.md` with both `name` and `description`; a missing description means it is not listed.
+
+- `GET /api/chat/pi/skills` -> `{ skills: PiSkill[] }`, where `PiSkill = { name, description, scope: "global" | "project", path, dir, cwd: string | null, enabled }`. `path` is the absolute `SKILL.md` path (the toggle id) and `dir` is the skill folder passed to Pi. Project skills are discovered in every distinct `chat_sessions.cwd` of a Pi chat. 503 when no bridge is configured.
+- `PUT /api/chat/pi/skills` `{ disabled: string[] }` -> `{ skills: PiSkill[] }`. The list is the full disabled set of absolute `path`s; every other skill is enabled. 400 when it is not a list of absolute paths. 503 without a bridge.
+
+Disabling is launch-time: the bridge starts a chat's Pi process with `--no-skills` plus `--skill <dir>` for every enabled skill (nothing is passed while the disabled set is empty, so Pi's own discovery stays). Toggling recycles idle chats right away; a busy chat picks it up on its next message. The disabled set is stored in `<agent-dir>/cc-skills.json`; skill files are never modified. Skills from npm packages are not re-added when discovery is suppressed.
+
 ## Pi working directory (additive)
 
 A Pi chat may start in a directory the user picks, instead of `workspace/<chatId>`. The choice is fixed when the chat is created.

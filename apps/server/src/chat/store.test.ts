@@ -121,3 +121,11 @@ test("preview is the last message text trimmed to 140 chars", () => {
   S.insertMessage(db, { id: "m1", sessionId: "s1", seq: 1, role: "user", text: "x".repeat(300), createdAt: 1, status: "complete", attachments: [] });
   expect(S.getSession(db, "s1")!.preview.length).toBe(140);
 });
+
+test("listPiCwds returns distinct Pi working folders only", () => {
+  S.createSession(db, { id: "p1", model: "m", provider: "p", effort: null, now: 1, backend: "pi", cwd: "/a" });
+  S.createSession(db, { id: "p2", model: "m", provider: "p", effort: null, now: 1, backend: "pi", cwd: "/b" });
+  S.createSession(db, { id: "p3", model: "m", provider: "p", effort: null, now: 1, backend: "pi", cwd: "/a" });
+  S.createSession(db, { id: "h1", model: "m", provider: "p", effort: null, now: 1 });
+  expect(S.listPiCwds(db)).toEqual(["/a", "/b"]);
+});
