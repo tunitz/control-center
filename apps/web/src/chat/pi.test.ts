@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { keyOf, splitKey, viewModels, backendOfKey, modelUsable, effortChoices, todoSummary, tokenNote, sheetErrorText } from "./pi";
+import { keyOf, splitKey, viewModels, backendOfKey, modelUsable, effortChoices, todoSummary, tokenNote, sheetErrorText, swapBackend } from "./pi";
 import type { ChatModel } from "./types";
 
 const M = (over: Partial<ChatModel>): ChatModel => ({ id: "m", provider: "p", label: "M", reasoning: true, canDisableReasoning: true, vision: false, local: false, online: true, ...over });
@@ -88,5 +88,20 @@ describe("sheetErrorText", () => {
   test("the bridge's technical prefix is dropped, and a short chat gets a plain message", () => {
     expect(sheetErrorText(new Error("pi bridge command failed (502): Nothing to compact (session too small)"))).toBe("Nothing to compact yet. This chat is still short.");
     expect(sheetErrorText(new Error("pi bridge command failed (502): Something else broke"))).toBe("Something else broke");
+  });
+});
+
+describe("swapBackend: an empty chat can change agent by being replaced", () => {
+  const pi = M({ id: "pi:a", backend: "pi" });
+  const he = M({ id: "a" });
+  test("empty chat + a model of the other backend = swap", () => {
+    expect(swapBackend(pi, "hermes", { empty: true, loading: false })).toBe(true);
+    expect(swapBackend(he, "pi", { empty: true, loading: false })).toBe(true);
+  });
+  test("same backend, a chat with messages, a loading chat, or no chat = no swap", () => {
+    expect(swapBackend(pi, "pi", { empty: true, loading: false })).toBe(false);
+    expect(swapBackend(pi, "hermes", { empty: false, loading: false })).toBe(false);
+    expect(swapBackend(pi, "hermes", { empty: true, loading: true })).toBe(false);
+    expect(swapBackend(pi, null, { empty: true, loading: false })).toBe(false);
   });
 });

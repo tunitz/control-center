@@ -54,3 +54,13 @@ export function sheetErrorText(e: unknown): string {
   if (/nothing to compact/i.test(text)) return "Nothing to compact yet. This chat is still short.";
   return text || "Something went wrong.";
 }
+
+/**
+ * A chat keeps the agent it was created with, but "New chat" creates one at once, so the first
+ * thing a person does is pick a model. While the chat is still empty, picking a model of the other
+ * backend replaces it with a fresh chat on that backend instead of refusing.
+ */
+export function swapBackend(picked: ChatModel, chatBackend: Backend | null, chat: { empty: boolean; loading: boolean }): boolean {
+  if (chatBackend === null || chat.loading || !chat.empty) return false;
+  return (picked.backend ?? "hermes") !== chatBackend;
+}

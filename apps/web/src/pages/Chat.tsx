@@ -3,7 +3,7 @@ import "../chat.css";
 import { chat } from "../chat/api";
 import { navigate } from "../route";
 import { sendEffort } from "../chat/effort";
-import { backendOfKey, effortChoices, keyOf, modelUsable, splitKey, tokenNote, viewModels } from "../chat/pi";
+import { backendOfKey, effortChoices, keyOf, modelUsable, splitKey, swapBackend, tokenNote, viewModels } from "../chat/pi";
 import { installChatMock } from "../chat/mock";
 import { useThread } from "../chat/useThread";
 import { useSessions } from "../chat/useSessions";
@@ -251,6 +251,19 @@ export default function Chat({ hash }: { hash: string }) {
 
   const onModel = async (id: string) => {
     const picked = models.find(m => m.id === id);
+    if (picked && activeId && swapBackend(picked, chatBackend, { empty: thread.messages.length === 0, loading: thread.loading })) {
+      // "New chat" already created a chat on the old backend. Nothing is in it yet, so replace it.
+      const old = activeId;
+      try {
+        const { backend, id: modelId } = splitKey(id);
+        const s: ChatSession = await chat.createSession({ model: modelId, effort: null, ...(backend === "pi" ? { backend } : {}) });
+        sessions.setList(prev => [s, ...prev.filter(x => x.id !== old)]);
+        navigate(`#/chat/${encodeURIComponent(s.id)}`);
+        void chat.deleteSession(old).catch(() => {});
+        setLiveModel(id);
+      } catch (e) { setPageErr((e as Error).message); }
+      return;
+    }
     if (picked && !modelUsable(picked, chatBackend)) return; // a chat keeps its backend
     setLiveModel(id);
     if (activeId) {
@@ -394,7 +407,7 @@ export default function Chat({ hash }: { hash: string }) {
             running={!!thread.runId}
             runId={thread.runId}
             models={models}
-            chatBackend={chatBackend}
+            chatBackend={emptyView && !thread.loading ? null : chatBackend}
             piLevels={piLevels}
             model={modelId}
             effort={effort}
