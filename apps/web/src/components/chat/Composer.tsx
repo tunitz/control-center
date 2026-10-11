@@ -107,7 +107,13 @@ export function Composer(p: ComposerProps) {
   const runCommand = (cmd: Exclude<Parsed, null>) => {
     if (cmd.kind === "unknown") { setNotice(unknownText(cmd.name)); return true; }
     if (cmd.name === "help") { p.onNote("/help", helpText(backend)); setText(""); return true; }
+    if (cmd.name === "compact" && p.running) {
+      setNotice("Wait for the running task or stop it first.");
+      setText("");
+      return true;
+    }
     if ((PAGE_COMMANDS as readonly string[]).includes(cmd.name)) {
+      if (cmd.name === "compact") setNotice("Compacting…");
       const keep = text;
       setText("");
       // `onAction` records the command row itself; here we only restore the text if it throws.

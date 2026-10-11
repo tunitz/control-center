@@ -4,7 +4,7 @@ import { chat } from "../chat/api";
 import { PickCancelled, folderTag, sessionCreatePayload } from "../chat/dirs";
 import { navigate } from "../route";
 import { sendEffort } from "../chat/effort";
-import { backendLabel, backendOfKey, defaultBackend, defaultModelFor, effortChoices, keyOf, modelUsable, newChoices, splitKey, swapBackend, viewModels } from "../chat/pi";
+import { backendLabel, backendOfKey, defaultBackend, defaultModelFor, effortChoices, keyOf, modelUsable, newChoices, sheetErrorText, splitKey, swapBackend, tokenNote, viewModels } from "../chat/pi";
 import { installChatMock } from "../chat/mock";
 import { useThread } from "../chat/useThread";
 import { useSessions } from "../chat/useSessions";
@@ -269,6 +269,12 @@ export default function Chat({ hash }: { hash: string }) {
       return next
         ? "YOLO is on. Pi runs risky commands in this chat without asking, even while the app is closed. Run /yolo again to turn it off."
         : "YOLO is off. Pi asks before risky commands again.";
+    }
+    if (name === "compact") {
+      if (active.backend !== "pi") return "Only Pi chats can compact.";
+      if (thread.runId) return "Wait for the running task or stop it first.";
+      try { return tokenNote(await chat.piCompact(activeId, arg || undefined)); }
+      catch (e) { return sheetErrorText(e); }
     }
     if (name === "export") { window.location.href = chat.exportUrl(activeId); return "Downloading the chat."; }
     if (name === "title") {

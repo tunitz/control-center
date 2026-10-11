@@ -229,7 +229,7 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
     const extensions: string[] = [];
     if (useClaudeBridge) extensions.push(cfg.claudeBridgeExtension);
     if (useBrowser) extensions.push(cfg.browserExtension);
-    const key = JSON.stringify([tools, fingerprint(cfg.agentDir), skills, skillsSignature(cfg, skillsCwd), useClaudeBridge, useBrowser]);
+    const key = JSON.stringify([tools, fingerprint(cfg.agentDir), skills, skillsSignature(cfg, skillsCwd), useClaudeBridge, useBrowser, cc.compaction]);
 
     let resumeFrom = sessionPath;
     if (existing) {

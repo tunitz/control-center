@@ -363,6 +363,21 @@ test("GET/PUT /pi-config go to the bridge and come back; the token never shows",
   expect(JSON.stringify([g, p])).not.toContain(bridge.token);
 });
 
+test("PUT /pi-config: compaction passes through to the bridge and reads back, with the other fields", async () => {
+  const p = await js(await run(req("PUT", "/api/chat/pi-config", { compaction: { enabled: false, compactAtTokens: 300000, keepRecentTokens: 30000 } })));
+  expect(p.status).toBe(200);
+  expect(p.body.compaction).toEqual({ enabled: false, compactAtTokens: 300000, keepRecentTokens: 30000 });
+  const g = await js(await run(req("GET", "/api/chat/pi-config")));
+  expect(g.body.compaction).toEqual({ enabled: false, compactAtTokens: 300000, keepRecentTokens: 30000 });
+  expect(g.body.defaultTools).toBeNull();
+});
+
+test("PUT /pi-config: a bad compaction value is 400 with the bridge's message", async () => {
+  const r = await js(await run(req("PUT", "/api/chat/pi-config", { compaction: { compactAtTokens: 10 } })));
+  expect(r.status).toBe(400);
+  expect(r.body.error).toContain("compactAtTokens");
+});
+
 test("PUT /pi-config: a bridge validation error comes back as 400 with its message, not 502", async () => {
   const r = await js(await run(req("PUT", "/api/chat/pi-config", { defaultTools: ["rm"] })));
   expect(r.status).toBe(400);

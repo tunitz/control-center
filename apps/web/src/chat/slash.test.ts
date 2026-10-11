@@ -44,11 +44,18 @@ test("every page command is a listed command; help and unknown text come from th
   expect(unknownText("x")).toBe("Unknown command /x. Type /help to list them.");
 });
 
-test("/compact is no longer offered (compaction lives in the Pi options sheet)", () => {
-  expect(parseSlash("/compact", "pi")).toEqual({ kind: "unknown", name: "compact" });
-  expect(suggestions("/comp", "pi").map(c => c.name)).toEqual([]);
-  expect(suggestions("/", "pi").map(c => c.name)).not.toContain("compact");
-  expect(helpText("pi")).not.toContain("/compact");
+test("/compact exists only for Pi chats and takes optional focus instructions", () => {
+  expect(parseSlash("/compact")).toEqual({ kind: "unknown", name: "compact" });
+  expect(parseSlash("/compact", "pi")).toEqual({ kind: "command", name: "compact", arg: "" });
+  expect(parseSlash("/compact keep the API decisions", "pi")).toEqual({ kind: "command", name: "compact", arg: "keep the API decisions" });
+  expect(suggestions("/comp", "pi").map(c => c.name)).toEqual(["compact"]);
+  expect(suggestions("/", "hermes").map(c => c.name)).not.toContain("compact");
+  expect(helpText("pi")).toContain("/compact  Compact this chat's context");
+  expect(helpText("hermes")).not.toContain("/compact");
+});
+
+test("/compact is a page command so the page can call piCompact", () => {
+  expect(PAGE_COMMANDS).toContain("compact");
 });
 
 test("/login exists only for Pi chats and takes an optional provider", () => {

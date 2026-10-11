@@ -252,6 +252,7 @@ td{font-variant-numeric:tabular-nums}
 .pi-chk{display:flex;align-items:center;gap:10px;min-height:44px;font-size:14px}
 .pi-chk input{width:20px;height:20px;flex:none}
 .pi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px}
+.pi-num{width:100%;min-height:44px;box-sizing:border-box}
 .pi-add{display:flex;gap:8px;align-items:center}
 .pi-add input{flex:1;min-width:0}
 .pi-add .btn{min-height:44px;white-space:nowrap}

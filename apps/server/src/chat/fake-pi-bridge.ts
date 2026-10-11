@@ -93,7 +93,7 @@ export class FakePiBridge {
   readonly authLogins = new Map<string, AuthRec>();
   readonly authAnswers: { id: string; value: string; promptId?: string }[] = [];
   authStarts = 0;
-  config: Record<string, any> = { appendSystemPrompt: "", agentsMd: "", defaultTools: null, gate: { extraProtectedPaths: [], extraRisky: [] }, claudeBridge: false, browser: false };
+  config: Record<string, any> = { appendSystemPrompt: "", agentsMd: "", defaultTools: null, gate: { extraProtectedPaths: [], extraRisky: [] }, claudeBridge: false, browser: false, compaction: { enabled: true, compactAtTokens: 200000, keepRecentTokens: 20000 } };
   modelsCalls = 0;
   /** The next N GET /models calls fail with 500 (for the no-cache-on-failure test). */
   failModels = 0;
@@ -188,7 +188,11 @@ export class FakePiBridge {
       if (Array.isArray(tools) && tools.some((t: string) => !["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"].includes(t))) {
         return json(400, { error: "defaultTools: unknown tool rm" });
       }
-      this.config = { ...this.config, ...body };
+      const ca = body?.compaction?.compactAtTokens;
+      if (ca !== undefined && !(Number.isInteger(ca) && ca >= 50000 && ca <= 900000)) {
+        return json(400, { error: "compaction.compactAtTokens must be an integer from 50000 to 900000" });
+      }
+      this.config = { ...this.config, ...body, compaction: { ...this.config.compaction, ...(body?.compaction ?? {}) } };
       return json(200, { ...this.config, knownTools: [], claudeCode: { found: false, path: null, extension: true }, browserStatus: { extension: true, agent: false, chromium: false } });
     }
     let m = /^\/chats\/([^/]+)\/(start|prompt|steer|abort|command|ui_response)$/.exec(p);

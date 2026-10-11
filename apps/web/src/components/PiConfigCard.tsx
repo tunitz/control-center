@@ -1,6 +1,32 @@
 import { useEffect, useState } from "react";
 import { chat, ChatError } from "../chat/api";
-import type { PiConfig } from "../chat/types";
+import type { PiCompaction, PiConfig } from "../chat/types";
+import { compactionError, compactionPatch } from "./piCompaction";
+
+const numValue = (n: number) => (Number.isNaN(n) ? "" : n);
+
+/** Auto-compaction controls. A controlled component: the card owns the draft and the save. */
+export function CompactionSection({ value, onChange }: { value: PiCompaction; onChange: (next: PiCompaction) => void }) {
+  const error = compactionError(value);
+  return (
+    <>
+      <h4 style={{ margin: "16px 0 4px" }}>Compaction</h4>
+      <label className="pi-chk"><input type="checkbox" aria-label="Compact automatically" checked={value.enabled} onChange={e => onChange({ ...value, enabled: e.target.checked })} />Compact automatically</label>
+      <div className="pi-grid">
+        <div>
+          <label htmlFor="pi-compact-at">Compact when context passes (tokens)</label>
+          <input id="pi-compact-at" className="pi-num" type="number" inputMode="numeric" min={50000} max={900000} step={1000} aria-label="Compact when context passes (tokens)" value={numValue(value.compactAtTokens)} disabled={!value.enabled} onChange={e => onChange({ ...value, compactAtTokens: Number(e.target.value) })} />
+        </div>
+        <div>
+          <label htmlFor="pi-keep-recent">Keep recent (tokens)</label>
+          <input id="pi-keep-recent" className="pi-num" type="number" inputMode="numeric" min={5000} max={100000} step={1000} aria-label="Keep recent (tokens)" value={numValue(value.keepRecentTokens)} disabled={!value.enabled} onChange={e => onChange({ ...value, keepRecentTokens: Number(e.target.value) })} />
+        </div>
+      </div>
+      <p className="muted">Lower values save tokens, because Pi compacts sooner and keeps less history verbatim.</p>
+      {error && <p className="muted" role="alert" style={{ color: "var(--err)" }}>{error}</p>}
+    </>
+  );
+}
 
 /** Global Pi configuration. Rarely changed, so it lives in Settings and not in the chat. */
 export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) {
@@ -13,13 +39,14 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
   const [risky, setRisky] = useState<string[]>([]);
   const [claudeBridge, setClaudeBridge] = useState(false);
   const [browser, setBrowser] = useState(false);
+  const [compaction, setCompaction] = useState<PiCompaction>({ enabled: true, compactAtTokens: 200000, keepRecentTokens: 20000 });
   const [newPath, setNewPath] = useState("");
   const [newRisky, setNewRisky] = useState("");
   const [err, setErr] = useState("");
 
   const apply = (c: PiConfig) => {
     setCfg(c); setPrompt(c.appendSystemPrompt); setNotes(c.agentsMd); setTools(c.defaultTools);
-    setPaths(c.gate.extraProtectedPaths); setRisky(c.gate.extraRisky); setClaudeBridge(c.claudeBridge); setBrowser(c.browser);
+    setPaths(c.gate.extraProtectedPaths); setRisky(c.gate.extraRisky); setClaudeBridge(c.claudeBridge); setBrowser(c.browser); setCompaction(c.compaction);
   };
   useEffect(() => {
     chat.piConfig().then(c => { apply(c); setState("ready"); })
@@ -27,7 +54,7 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
   }, []);
 
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  const dirty = !!cfg && (prompt !== cfg.appendSystemPrompt || notes !== cfg.agentsMd || !same(tools, cfg.defaultTools) || !same(paths, cfg.gate.extraProtectedPaths) || !same(risky, cfg.gate.extraRisky) || claudeBridge !== cfg.claudeBridge || browser !== cfg.browser);
+  const dirty = !!cfg && (prompt !== cfg.appendSystemPrompt || notes !== cfg.agentsMd || !same(tools, cfg.defaultTools) || !same(paths, cfg.gate.extraProtectedPaths) || !same(risky, cfg.gate.extraRisky) || claudeBridge !== cfg.claudeBridge || browser !== cfg.browser || !!compactionPatch(cfg.compaction, compaction));
 
   const save = async () => {
     if (!cfg) return;
@@ -39,6 +66,12 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
     if (!same(paths, cfg.gate.extraProtectedPaths) || !same(risky, cfg.gate.extraRisky)) patch.gate = { extraProtectedPaths: paths, extraRisky: risky };
     if (claudeBridge !== cfg.claudeBridge) patch.claudeBridge = claudeBridge;
     if (browser !== cfg.browser) patch.browser = browser;
+    const comp = compactionPatch(cfg.compaction, compaction);
+    if (comp) {
+      const bad = compactionError(compaction);
+      if (bad) { setErr(bad); return; }
+      patch.compaction = comp;
+    }
     try { apply(await chat.putPiConfig(patch)); onMsg("Pi settings saved. They apply on the next message."); }
     catch (e) { setErr((e as Error).message); }
   };
@@ -89,6 +122,8 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
             {claudeBridge && !cfg.claudeCode.extension && " The pi-claude-bridge extension was not found."}
             {claudeBridge && cfg.claudeCode.extension && !cfg.claudeCode.found && " Claude Code was not found. Install it and sign in once with the claude command."}
           </p>
+
+          <CompactionSection value={compaction} onChange={setCompaction} />
 
           <h4 style={{ margin: "16px 0 4px" }}>Browser tools</h4>
           <label className="pi-chk"><input type="checkbox" checked={browser} onChange={e => setBrowser(e.target.checked)} />Give Pi browser tools</label>
