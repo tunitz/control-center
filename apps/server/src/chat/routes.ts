@@ -24,6 +24,8 @@ export type ChatContext = {
   now: () => number;
   /** Reports finished background subagents. Started by index.ts. */
   watcher?: DelegationWatcher;
+  /** Host-side read-only credits endpoint (credits-http.service). */
+  creditsUrl?: string;
 };
 
 const managers = new WeakMap<ChatContext, RunManager>();
@@ -48,7 +50,7 @@ export function createChatContext(
   else if (env.HERMES_API_KEY) {
     hermes = new HttpHermes({ baseUrl: env.HERMES_URL || "http://127.0.0.1:8642", apiKey: env.HERMES_API_KEY });
   } else hermes = new UnconfiguredHermes();
-  const ctx: ChatContext = { db, hermes, uploadRoot: uploadRoot(env), now: () => Date.now() };
+  const ctx: ChatContext = { db, hermes, uploadRoot: uploadRoot(env), now: () => Date.now(), creditsUrl: env.CREDITS_URL || "http://127.0.0.1:9103/credits" };
   recoverRuns(db, ctx.now());
   const runs = new RunManager({ db, hermes, now: () => ctx.now(), emit: opts.emit });
   managers.set(ctx, runs);
@@ -77,6 +79,7 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
 
   if (p === "/models" && method === "GET") return json(await getModels(ctx.db, ctx.hermes));
   if (p === "/config" && method === "GET") return json(getConfig(ctx.db));
+  if (p === "/credits" && method === "GET") return creditsRoute(ctx);
 
   if (p === "/sessions" && method === "GET") return listSessionsRoute(url, ctx);
   if (p === "/sessions" && method === "POST") return createSessionRoute(req, ctx);
@@ -324,4 +327,17 @@ async function sendRoute(req: Request, id: string, ctx: ChatContext): Promise<Re
       for (const a of saved) rmSync(a.path, { force: true });
     }
   }
+}
+
+/** /credits: balance text from the host script, via a tiny read-only endpoint. No model call, no tokens. */
+async function creditsRoute(ctx: ChatContext): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetch(ctx.creditsUrl ?? "http://127.0.0.1:9103/credits", { signal: AbortSignal.timeout(45_000) });
+  } catch {
+    throw new ChatError(502, "credits service is not reachable");
+  }
+  const text = (await res.text()).trim();
+  if (!res.ok) throw new ChatError(502, text || `credits failed (${res.status})`);
+  return json({ text });
 }

@@ -12,11 +12,12 @@ export const COMMANDS = [
   { name: "archive", desc: "Archive or restore this chat" },
   { name: "delete", desc: "Delete this chat" },
   { name: "steer", desc: "Send a note to the running task" },
+  { name: "credits", desc: "Show account balances and usage limits" },
   { name: "help", desc: "List commands" },
 ] as const;
 
 /** Commands the page handles (they need the active chat); the rest the composer handles itself. */
-export const PAGE_COMMANDS = ["retry", "title", "export", "pin", "archive", "delete", "steer"] as const;
+export const PAGE_COMMANDS = ["retry", "title", "export", "pin", "archive", "delete", "steer", "credits"] as const;
 
 export const helpText = () => COMMANDS.map(c => `/${c.name} ${c.desc.toLowerCase()}`).join(" · ");
 export const unknownText = (name: string) => `Unknown command /${name}. Type /help to list them.`;

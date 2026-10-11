@@ -353,3 +353,26 @@ test("createChatContext: CHAT_FAKE_HERMES=1 selects FakeHermes; otherwise unconf
   expect(r.status).toBe(503);
   expect((await r.json() as any).error).toBeString();
 });
+
+test("GET /credits returns the host credits text, no model involved", async () => {
+  const srv = Bun.serve({ port: 0, fetch: () => new Response("DeepSeek $1.33", { headers: { "content-type": "text/plain" } }) });
+  try {
+    ctx.creditsUrl = `http://127.0.0.1:${srv.port}/credits`;
+    const r = await handleChat(req("GET", "/api/chat/credits"), url("/api/chat/credits"), ctx);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ text: "DeepSeek $1.33" });
+  } finally { srv.stop(true); }
+});
+
+test("GET /credits is 502 when the host endpoint is down or fails", async () => {
+  ctx.creditsUrl = "http://127.0.0.1:1/credits";
+  const r = await handleChat(req("GET", "/api/chat/credits"), url("/api/chat/credits"), ctx);
+  expect(r.status).toBe(502);
+  const bad = Bun.serve({ port: 0, fetch: () => new Response("no key", { status: 502 }) });
+  try {
+    ctx.creditsUrl = `http://127.0.0.1:${bad.port}/credits`;
+    const r2 = await handleChat(req("GET", "/api/chat/credits"), url("/api/chat/credits"), ctx);
+    expect(r2.status).toBe(502);
+    expect((await r2.json()).error).toContain("no key");
+  } finally { bad.stop(true); }
+});

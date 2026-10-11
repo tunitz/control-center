@@ -16,7 +16,7 @@ test("unknown slash word is reported, not sent as a command", () => {
 });
 
 test("suggestions filter by prefix and stop after the first space", () => {
-  expect(suggestions("/").map(c => c.name)).toEqual(["new", "model", "reasoning", "stop", "retry", "title", "export", "pin", "archive", "delete", "steer", "help"]);
+  expect(suggestions("/").map(c => c.name)).toEqual(["new", "model", "reasoning", "stop", "retry", "title", "export", "pin", "archive", "delete", "steer", "credits", "help"]);
   expect(suggestions("/mo").map(c => c.name)).toEqual(["model"]);
   expect(suggestions("/stop now")).toEqual([]);
   expect(suggestions("hi")).toEqual([]);

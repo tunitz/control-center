@@ -44,5 +44,6 @@ export const chat = {
   },
   stopRun: (runId: string) => chatReq<{ ok: true }>("POST", `/runs/${encodeURIComponent(runId)}/stop`),
   steerRun: (runId: string, message: string) => chatReq<{ ok: true }>("POST", `/runs/${encodeURIComponent(runId)}/steer`, { message }),
+  credits: () => chatReq<{ text: string }>("GET", "/credits"),
   exportUrl: (id: string) => `/api/chat/sessions/${encodeURIComponent(id)}/export`,
 };

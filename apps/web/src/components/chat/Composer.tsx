@@ -281,7 +281,7 @@ export function Composer(p: ComposerProps) {
           </div>
         </div>
         <div className="comp-foot">
-          <span className="hint">{err || notice || (files.some(f => f.note === "Text PDFs only") ? "Text PDFs only" : p.phone ? (meter && meter.pct >= 70 ? `Context ~${Math.round(meter.pct)}% full` : "") : "Enter to send · Shift+Enter for a new line")}</span>
+          <span className={`hint${notice && !err ? " note" : ""}`} role={notice || err ? "status" : undefined}>{err || notice || (files.some(f => f.note === "Text PDFs only") ? "Text PDFs only" : p.phone ? (meter && meter.pct >= 70 ? `Context ~${Math.round(meter.pct)}% full` : "") : "Enter to send · Shift+Enter for a new line")}</span>
         </div>
       </div>
     </div>

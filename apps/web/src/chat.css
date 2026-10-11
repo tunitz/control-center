@@ -178,6 +178,7 @@
 .chatx .stop:hover{background:var(--err-bg)}
 .chatx .comp-foot{display:flex;align-items:center;gap:12px;padding:8px 6px 0;font-size:13px;color:var(--mut);min-width:0}
 .chatx .comp-foot .hint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.chatx .comp-foot .hint.note{white-space:pre-line;overflow:visible;text-overflow:clip}
 .chatx .steer{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .chatx .steer .pulse{width:6px;height:6px;flex:none}
 .chatx .meter{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;font-variant-numeric:tabular-nums;font-size:13px;color:var(--mut);flex:none}

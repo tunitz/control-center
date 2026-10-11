@@ -173,6 +173,7 @@ export default function Chat({ hash }: { hash: string }) {
   };
 
   const onAction = async (name: string, arg: string): Promise<string> => {
+    if (name === "credits") return (await chat.credits()).text.split(" | ").join("\n");
     if (name === "steer") {
       if (!arg) return "Usage: /steer <note for the running task>";
       return (await onSteer(arg)) === "ok" ? "Steer sent to the running task." : "Nothing is running.";
