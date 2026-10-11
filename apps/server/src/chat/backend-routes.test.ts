@@ -152,3 +152,62 @@ test("deleting a Pi session ends its bridge chat", async () => {
 test("no response body ever contains the bridge token", () => {
   for (const text of seen) expect(text).not.toContain(bridge.token);
 });
+
+async function gateRun(): Promise<{ s: any; sent: any }> {
+  const { body: s } = await js(await run(req("POST", "/api/chat/sessions", { backend: "pi", model: "deepseek-pro" })));
+  const sent = await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("GATE please"))));
+  for (let i = 0; i < 400 && S.getSession(ctx.db, s.id)!.runState !== "needs_approval"; i++) await new Promise((r) => setTimeout(r, 5));
+  return { s, sent: sent.body };
+}
+
+test("a Pi approval puts the session in needs_approval and the event carries id and options", async () => {
+  const { s, sent } = await gateRun();
+  expect(S.getSession(ctx.db, s.id)!.runState).toBe("needs_approval");
+  const rd = (await run(req("GET", `/api/chat/runs/${sent.runId}/events`))).body!.getReader();
+  let seen = "";
+  for (let i = 0; i < 20 && !seen.includes("event: approval"); i++) seen += new TextDecoder().decode((await rd.read()).value);
+  await rd.cancel();
+  const data = seen.split("\n").find((l, i, a) => a[i - 1] === "event: approval" && l.startsWith("data:"))!;
+  expect(JSON.parse(data.slice(5))).toMatchObject({ id: "ui-1", options: ["approve", "deny"], note: "Allow command?" });
+  await js(await run(req("POST", `/api/chat/runs/${sent.runId}/approval`, { id: "ui-1", choice: "deny" })));
+  await waitIdle(s.id);
+});
+
+test("POST /runs/:id/approval approve: tool runs, state goes back to running, the run completes", async () => {
+  const { s, sent } = await gateRun();
+  const r = await js(await run(req("POST", `/api/chat/runs/${sent.runId}/approval`, { id: "ui-1", choice: "approve" })));
+  expect(r).toEqual({ status: 200, body: { ok: true } });
+  expect(bridge.uiResponses).toEqual([{ id: "ui-1", confirmed: true }]);
+  await waitIdle(s.id);
+  const m = S.getMessage(ctx.db, sent.assistantMessage.id)!;
+  expect(m.status).toBe("complete");
+  expect(m.tools[0]).toMatchObject({ name: "bash", status: "ok" });
+});
+
+test("POST /runs/:id/approval deny: the tool is recorded failed and the run still completes", async () => {
+  const { s, sent } = await gateRun();
+  await js(await run(req("POST", `/api/chat/runs/${sent.runId}/approval`, { id: "ui-1", choice: "deny" })));
+  await waitIdle(s.id);
+  const m = S.getMessage(ctx.db, sent.assistantMessage.id)!;
+  expect(m.status).toBe("complete");
+  expect(m.tools[0]).toMatchObject({ name: "bash", status: "failed" });
+});
+
+test("POST /runs/:id/approval rejects a bad choice, a wrong id and a finished run", async () => {
+  const { s, sent } = await gateRun();
+  expect((await js(await run(req("POST", `/api/chat/runs/${sent.runId}/approval`, { id: "ui-1", choice: "maybe" })))).status).toBe(400);
+  expect((await js(await run(req("POST", `/api/chat/runs/${sent.runId}/approval`, { choice: "approve" })))).status).toBe(400);
+  expect((await js(await run(req("POST", `/api/chat/runs/${sent.runId}/approval`, { id: "other", choice: "approve" })))).status).toBe(409);
+  expect(bridge.uiResponses).toEqual([]);
+  await js(await run(req("POST", `/api/chat/runs/${sent.runId}/approval`, { id: "ui-1", choice: "approve" })));
+  await waitIdle(s.id);
+  expect((await js(await run(req("POST", `/api/chat/runs/${sent.runId}/approval`, { id: "ui-1", choice: "approve" })))).status).toBe(409);
+});
+
+test("approval on a Hermes run is refused (Hermes approvals stay read-only)", async () => {
+  const { body: s } = await js(await run(req("POST", "/api/chat/sessions", {})));
+  const sent = await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("hello"))));
+  const r = await js(await run(req("POST", `/api/chat/runs/${sent.body.runId}/approval`, { id: "x", choice: "approve" })));
+  expect(r.status).toBe(409);
+  await waitIdle(s.id);
+});

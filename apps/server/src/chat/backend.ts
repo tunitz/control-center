@@ -16,6 +16,8 @@ export interface ChatBackend {
   startRun(args: StartRunArgs): Promise<{ runId: string; frames: AsyncIterable<HermesFrame> }>;
   stopRun(runId: string): Promise<void>;
   steerRun(runId: string, message: string): Promise<void>;
+  /** Answers an approval request (Pi only; Hermes approvals are read-only notices). */
+  respondApproval?(runId: string, approvalId: string, approve: boolean): Promise<void>;
   /** Only backends that report finished background work implement this. */
   delegations?(sessionId: string): Promise<Delegations>;
 }

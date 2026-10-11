@@ -108,7 +108,7 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
   m = /^\/files\/([^/]+)$/.exec(p);
   if (m && method === "GET") return fileRoute(safeId(m[1]), ctx);
 
-  m = /^\/runs\/([^/]+)\/(events|stop|steer)$/.exec(p);
+  m = /^\/runs\/([^/]+)\/(events|stop|steer|approval)$/.exec(p);
   if (m) {
     const runId = safeId(m[1]);
     const runs = runsOf(ctx);
@@ -117,6 +117,13 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
     }
     if (m[2] === "stop" && method === "POST") {
       await runs.stop(runId);
+      return json({ ok: true });
+    }
+    if (m[2] === "approval" && method === "POST") {
+      const body = await readJson(req);
+      if (typeof body.id !== "string" || body.id === "") throw new ChatError(400, "id must be a non-empty string");
+      if (body.choice !== "approve" && body.choice !== "deny") throw new ChatError(400, "choice must be approve or deny");
+      await runs.respondApproval(runId, body.id, body.choice === "approve");
       return json({ ok: true });
     }
     if (m[2] === "steer" && method === "POST") {

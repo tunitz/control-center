@@ -18,7 +18,7 @@ export type HermesFrame =
   | { type: "reasoning"; text: string }
   | { type: "tool.started"; id: string; name: string; args: Record<string, unknown> | null; preview: string | null }
   | { type: "tool.completed"; id: string; ok: boolean; durationMs: number | null; preview: string | null }
-  | { type: "approval"; command: string | null; note: string }
+  | { type: "approval"; command: string | null; note: string; id?: string; options?: string[] }
   | { type: "usage"; input: number; output: number }
   | { type: "done"; status: "complete" | "failed" | "interrupted"; error: string | null; model: string | null };
 

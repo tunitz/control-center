@@ -232,3 +232,52 @@ test("bridge down: calls fail with 502 and nothing leaks the token", async () =>
   expect((err as Error).message).not.toContain(token);
   expect(await pi.listModels().catch((e: unknown) => e)).toBeInstanceOf(ChatError);
 });
+
+test("a tool run maps to tool.started, tool.completed and usage frames", async () => {
+  const b = bridge();
+  const pi = new PiClient({ baseUrl: b.url, token: b.token });
+  const id = await pi.createSession();
+  const out = await drain((await pi.startRun({ sessionId: id, message: "TOOL please", ...RUN })).frames);
+  const types = out.map((f) => f.type);
+  expect(types.indexOf("tool.started")).toBeGreaterThan(-1);
+  expect(types.indexOf("tool.completed")).toBeGreaterThan(types.indexOf("tool.started"));
+  expect(out.find((f) => f.type === "tool.completed")).toMatchObject({ id: "call-1", ok: true, durationMs: 7 });
+  expect(out.filter((f) => f.type === "usage").length).toBeGreaterThan(0);
+  expect(out.at(-1)).toMatchObject({ type: "done", status: "complete" });
+});
+
+test("approval: the confirm becomes an approval frame; respondApproval(approve) lets the tool run", async () => {
+  const b = bridge();
+  const pi = new PiClient({ baseUrl: b.url, token: b.token });
+  const id = await pi.createSession();
+  const { runId, frames } = await pi.startRun({ sessionId: id, message: "GATE please", ...RUN });
+  const it = frames[Symbol.asyncIterator]();
+  let ap: HermesFrame | undefined;
+  for (;;) { const n = await it.next(); if (n.done) break; if (n.value.type === "approval") { ap = n.value; break; } }
+  expect(ap).toEqual({ type: "approval", id: "ui-1", command: "Run: echo hi > /tmp/x", note: "Allow command?", options: ["approve", "deny"] });
+  await pi.respondApproval(runId, "ui-1", true);
+  const tail = await rest(it);
+  expect(b.uiResponses).toEqual([{ id: "ui-1", confirmed: true }]);
+  expect(tail.find((f) => f.type === "tool.completed")).toMatchObject({ ok: true });
+  expect(tail.at(-1)).toMatchObject({ type: "done", status: "complete" });
+});
+
+test("approval: deny blocks the tool (tool.completed ok:false) and the run still completes", async () => {
+  const b = bridge();
+  const pi = new PiClient({ baseUrl: b.url, token: b.token });
+  const id = await pi.createSession();
+  const { runId, frames } = await pi.startRun({ sessionId: id, message: "GATE please", ...RUN });
+  const it = frames[Symbol.asyncIterator]();
+  for (;;) { const n = await it.next(); if (n.done || n.value.type === "approval") break; }
+  await pi.respondApproval(runId, "ui-1", false);
+  const tail = await rest(it);
+  expect(b.uiResponses).toEqual([{ id: "ui-1", confirmed: false }]);
+  expect(tail.find((f) => f.type === "tool.completed")).toMatchObject({ ok: false, preview: "Blocked by cc-gate: not approved" });
+});
+
+test("respondApproval with nothing pending is a 502 from the bridge", async () => {
+  const b = bridge();
+  const pi = new PiClient({ baseUrl: b.url, token: b.token });
+  const id = await pi.createSession();
+  await expect(pi.respondApproval(id, "nope", true)).rejects.toBeInstanceOf(ChatError);
+});

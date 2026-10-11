@@ -105,18 +105,24 @@ export class PiClient implements ChatBackend {
     await this.call("POST", `/chats/${runId}/steer`, { message });
   }
 
+  /** The run id is the chat id. The extension's confirm resolves with this answer. */
+  async respondApproval(runId: string, approvalId: string, approve: boolean): Promise<void> {
+    await this.call("POST", `/chats/${runId}/ui_response`, { id: approvalId, confirmed: approve });
+  }
+
   /* ---------- internals ---------- */
 
   private async *frames(
     runId: string, sessionId: string, model: string, body: ReadableStream<Uint8Array>, ctl: AbortController,
   ): AsyncGenerator<HermesFrame> {
     yield { type: "run.started", runId, sessionId, assistantMessageId: "", model };
+    const st = newPiMapState();
     try {
       for await (const ev of sseEvents(body)) {
-        const f = mapPiEvent(ev.event, ev.data, model);
-        if (!f) continue;
-        yield f;
-        if (f.type === "done") return;
+        for (const f of mapPiEvent(ev.event, ev.data, model, st)) {
+          yield f;
+          if (f.type === "done") return;
+        }
       }
       yield { type: "done", status: "failed", error: "pi stream ended unexpectedly", model };
     } finally {
@@ -198,27 +204,83 @@ function splitContent(message: string | ContentPart[]): { text: string; images: 
   return { text: texts.join("\n"), images };
 }
 
-/** Maps one bridge SSE event to a frame, or null for events T3 ignores (T4 completes the mapping). */
-export function mapPiEvent(event: string, data: any, model: string): HermesFrame | null {
+/** Per-run mapping state: Pi reports usage per turn, the UI wants one running total. */
+export type PiMapState = { input: number; output: number };
+export const newPiMapState = (): PiMapState => ({ input: 0, output: 0 });
+
+const PREVIEW_MAX = 300;
+const cut = (t: string): string => (t.length > PREVIEW_MAX ? t.slice(0, PREVIEW_MAX - 1) + "\u2026" : t);
+
+/** What the UI shows next to a tool call: the command for bash, the path for file tools. */
+function argPreview(name: string, args: unknown): string | null {
+  const a = (typeof args === "object" && args !== null ? args : {}) as Record<string, unknown>;
+  if (name === "bash") return typeof a.command === "string" ? cut(a.command) : null;
+  const p = a.path ?? a.file_path;
+  return typeof p === "string" && p !== "" ? cut(p) : null;
+}
+
+function resultPreview(result: any): string | null {
+  const parts: unknown[] = Array.isArray(result?.content) ? result.content : [];
+  const text = parts.map((c) => (c as any)?.type === "text" && typeof (c as any).text === "string" ? (c as any).text : "").join("").trim();
+  return text === "" ? null : cut(text);
+}
+
+/**
+ * Maps one bridge SSE event to zero or more frames (event name = Pi event type, data = the raw event).
+ * Stop result comes from the last assistant message's stopReason, carried on agent_settled by the bridge.
+ */
+export function mapPiEvent(event: string, data: any, model: string, st: PiMapState = newPiMapState()): HermesFrame[] {
   switch (event) {
     case "message_update": {
       const ae = data?.assistantMessageEvent;
-      if (ae?.type === "text_delta" && typeof ae.delta === "string" && ae.delta !== "") return { type: "delta", text: ae.delta };
-      return null;
+      if (typeof ae?.delta !== "string" || ae.delta === "") return [];
+      if (ae.type === "text_delta") return [{ type: "delta", text: ae.delta }];
+      if (ae.type === "thinking_delta") return [{ type: "reasoning", text: ae.delta }];
+      return [];
+    }
+    case "tool_execution_start": {
+      const name = typeof data?.toolName === "string" ? data.toolName : "tool";
+      const args = typeof data?.args === "object" && data.args !== null ? (data.args as Record<string, unknown>) : null;
+      return [{ type: "tool.started", id: String(data?.toolCallId ?? ""), name, args, preview: argPreview(name, args) }];
+    }
+    case "tool_execution_end":
+      return [{
+        type: "tool.completed",
+        id: String(data?.toolCallId ?? ""),
+        ok: data?.isError !== true,
+        durationMs: typeof data?.durationMs === "number" ? data.durationMs : null,
+        preview: resultPreview(data?.result),
+      }];
+    case "message_end": {
+      const m = data?.message;
+      if (m?.role !== "assistant" || typeof m?.usage !== "object" || m.usage === null) return [];
+      st.input += Number(m.usage.input) || 0;
+      st.output += Number(m.usage.output) || 0;
+      return [{ type: "usage", input: st.input, output: st.output }];
+    }
+    case "extension_ui_request": {
+      if (data?.method !== "confirm" || typeof data?.id !== "string") return [];
+      return [{
+        type: "approval",
+        id: data.id,
+        command: typeof data.message === "string" ? data.message : null,
+        note: typeof data.title === "string" && data.title !== "" ? data.title : "Needs approval",
+        options: ["approve", "deny"],
+      }];
     }
     case "agent_settled": {
       const stop = data?.stopReason;
-      if (stop === "aborted") return { type: "done", status: "interrupted", error: null, model };
+      if (stop === "aborted") return [{ type: "done", status: "interrupted", error: null, model }];
       if (stop === "error") {
         const err = typeof data?.errorMessage === "string" && data.errorMessage !== "" ? data.errorMessage : "pi run failed";
-        return { type: "done", status: "failed", error: err, model };
+        return [{ type: "done", status: "failed", error: err, model }];
       }
-      return { type: "done", status: "complete", error: null, model };
+      return [{ type: "done", status: "complete", error: null, model }];
     }
     case "process_exit":
-      return { type: "done", status: "failed", error: "pi process exited", model };
+      return [{ type: "done", status: "failed", error: "pi process exited", model }];
     default:
-      return null;
+      return [];
   }
 }
 

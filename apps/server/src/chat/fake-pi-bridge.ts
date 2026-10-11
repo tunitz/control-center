@@ -5,6 +5,10 @@
  * (pi-bridge/src/chat.ts). The run scenario is chosen from the prompt text:
  *   contains "SLOW"  streams a partial, waits for abort, settles stopReason "aborted"
  *   contains "ERR"   settles stopReason "error" with errorMessage "boom: provider down"
+ *   contains "TOOL"  runs one bash tool call (start, end), then answers "Hello world"
+ *   contains "GATE"  runs one bash tool call that needs approval: emits extension_ui_request
+ *                    confirm (id "ui-1") and waits for POST ui_response; confirmed -> tool ok,
+ *                    declined -> tool_execution_end isError "Blocked by cc-gate: not approved"
  *   otherwise        streams "Hello" + " world", settles stopReason "stop"
  */
 import type { Server } from "bun";
@@ -26,6 +30,8 @@ type ChatRec = {
   model: { provider: string; modelId: string } | null;
   prompts: string[];
   steers: string[];
+  /** Resolves the pending confirm (GATE scenario). */
+  answer: ((confirmed: boolean) => void) | null;
 };
 
 export type FakeRequest = { method: string; path: string; auth: string | null; body: any };
@@ -42,6 +48,7 @@ export class FakePiBridge {
   readonly models: FakeModel[];
   readonly chats = new Map<string, ChatRec>();
   readonly requests: FakeRequest[] = [];
+  readonly uiResponses: any[] = [];
   modelsCalls = 0;
   /** The next N GET /models calls fail with 500 (for the no-cache-on-failure test). */
   failModels = 0;
@@ -96,7 +103,7 @@ export class FakePiBridge {
       if (this.failModels > 0) { this.failModels--; return json(500, { error: "internal error" }); }
       return json(200, { models: this.models });
     }
-    let m = /^\/chats\/([^/]+)\/(start|prompt|steer|abort|command)$/.exec(p);
+    let m = /^\/chats\/([^/]+)\/(start|prompt|steer|abort|command|ui_response)$/.exec(p);
     if (method === "POST" && m) return this.post(m[1], m[2], body);
     m = /^\/chats\/([^/]+)$/.exec(p);
     if (method === "DELETE" && m) {
@@ -119,7 +126,7 @@ export class FakePiBridge {
         const sessionFile = typeof body.sessionPath === "string" ? body.sessionPath : `/fake/sessions/${id}.jsonl`;
         rec = {
           id, sessionFile, live: true, busy: false, aborted: false, abort: null, seq: 0, ring: [],
-          subs: new Set(), model: null, prompts: [], steers: [],
+          subs: new Set(), model: null, prompts: [], steers: [], answer: null,
         };
         this.chats.set(id, rec);
       }
@@ -144,6 +151,14 @@ export class FakePiBridge {
       if (!rec.busy) return json(502, { error: "no run in progress" });
       rec.steers.push(body.message);
       return json(200, { disposition: "steered" });
+    }
+    if (action === "ui_response") {
+      this.uiResponses.push(body);
+      if (!rec.answer) return json(409, { error: "no pending request" });
+      const a = rec.answer;
+      rec.answer = null;
+      a(body.confirmed === true);
+      return json(200, { ok: true });
     }
     if (action === "abort") {
       rec.aborted = true;
@@ -228,7 +243,7 @@ export class FakePiBridge {
   private run(rec: ChatRec, message: string): void {
     rec.busy = true;
     rec.aborted = false;
-    const scenario = message.includes("SLOW") ? "slow" : message.includes("ERR") ? "err" : "ok";
+    const scenario = message.includes("SLOW") ? "slow" : message.includes("ERR") ? "err" : message.includes("GATE") ? "gate" : message.includes("TOOL") ? "tool" : "ok";
     const user = { role: "user", content: [{ type: "text", text: message }], timestamp: Date.now() };
     const tick = () => new Promise<void>((r) => setTimeout(r, 0));
     const update = (ae: any) => this.emit(rec, "message_update", { type: "message_update", usage: {}, assistantMessageEvent: ae });
@@ -253,6 +268,24 @@ export class FakePiBridge {
         this.emit(rec, "message_end", { type: "message_end", message: msg });
         this.settle(rec, [user, msg], msg);
         return;
+      }
+      if (scenario === "tool" || scenario === "gate") {
+        const args = { command: "echo hi > /tmp/x", timeout: null };
+        const call = this.assistant("", "toolUse");
+        this.emit(rec, "message_end", { type: "message_end", message: call });
+        this.emit(rec, "tool_execution_start", { type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args });
+        let ok = true;
+        if (scenario === "gate") {
+          ok = await new Promise<boolean>((r) => {
+            rec.answer = r;
+            this.emit(rec, "extension_ui_request", { type: "extension_ui_request", id: "ui-1", method: "confirm", title: "Allow command?", message: `Run: ${args.command}` });
+          });
+        }
+        this.emit(rec, "tool_execution_end", {
+          type: "tool_execution_end", toolCallId: "call-1", toolName: "bash", isError: !ok,
+          result: { content: [{ type: "text", text: ok ? "(no output)" : "Blocked by cc-gate: not approved" }] },
+          ...(ok ? { durationMs: 7 } : {}),
+        });
       }
       update({ type: "text_start", contentIndex: 0 });
       update({ type: "text_delta", contentIndex: 0, delta: "Hello" });

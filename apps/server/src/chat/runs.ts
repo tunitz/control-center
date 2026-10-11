@@ -49,6 +49,8 @@ type RunRec = {
   stopRequested: boolean;
   finished: boolean;
   needsApproval: boolean;
+  /** Id of the Pi confirm waiting for an answer (null for none, and for Hermes notices). */
+  approvalId: string | null;
   seq: number;
   events: RunEvent[];
   listeners: Set<(e: RunEvent) => void>;
@@ -152,7 +154,7 @@ export class RunManager {
     const rec: RunRec = {
       runId, sessionId, assistantId, model: input.model, userText: input.text, startedAt: now, firstTurn,
       text: "", reasoning: null, tools: [], usage: null, hermesRunId: null, stopRequested: false,
-      finished: false, needsApproval: false, seq: 0, events: [], listeners: new Set(),
+      finished: false, needsApproval: false, approvalId: null, seq: 0, events: [], listeners: new Set(),
       started: new Promise<void>(r => (resolveStarted = r)), resolveStarted,
       done: new Promise<void>(r => (resolveDone = r)), resolveDone,
     };
@@ -244,6 +246,21 @@ export class RunManager {
     if (rec.hermesRunId) await this.clientFor(rec.sessionId).client.stopRun(rec.hermesRunId);
   }
 
+  /** Answers a pending Pi approval. 409 when the run is over, nothing is pending, or the id is stale. */
+  async respondApproval(runId: string, approvalId: string, approve: boolean): Promise<void> {
+    const rec = this.runs.get(runId);
+    if (!rec) {
+      if (this.runExists(runId)) throw new ChatError(409, "run finished");
+      throw new ChatError(404, "run not found");
+    }
+    if (rec.finished) throw new ChatError(409, "run finished");
+    const { client } = this.clientFor(rec.sessionId);
+    if (!client.respondApproval) throw new ChatError(409, "this chat cannot answer approvals");
+    if (!rec.needsApproval || rec.approvalId === null || rec.approvalId !== approvalId) throw new ChatError(409, "no such approval pending");
+    if (!rec.hermesRunId) throw new ChatError(409, "run not started");
+    await client.respondApproval(rec.hermesRunId, approvalId, approve);
+  }
+
   /** Forwards a steer to Hermes. 409 'run finished' once the run is over. */
   async steer(runId: string, message: string): Promise<void> {
     const rec = this.runs.get(runId);
@@ -291,6 +308,7 @@ export class RunManager {
   private apply(rec: RunRec, f: HermesFrame): void {
     if (f.type !== "approval" && rec.needsApproval) {
       rec.needsApproval = false;
+      rec.approvalId = null;
       S.setRunState(this.db, rec.sessionId, "running", rec.runId, this.now());
       this.emitRun(rec.sessionId, rec.runId, "running");
     }
@@ -325,8 +343,9 @@ export class RunManager {
       }
       case "approval":
         rec.needsApproval = true;
+        rec.approvalId = f.id ?? null;
         S.setRunState(this.db, rec.sessionId, "needs_approval", rec.runId, this.now());
-        this.addEvent(rec, "approval", { command: f.command, note: f.note });
+        this.addEvent(rec, "approval", { command: f.command, note: f.note, ...(f.id ? { id: f.id, options: f.options ?? ["approve", "deny"] } : {}) });
         this.emitRun(rec.sessionId, rec.runId, "needs_approval");
         return;
       case "usage":
