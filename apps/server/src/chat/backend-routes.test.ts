@@ -230,3 +230,85 @@ test("a message without todos reports todos: null (also for old rows)", async ()
   await waitIdle(s.id);
   expect(S.getMessage(ctx.db, sent.body.assistantMessage.id)!.todos).toBeNull();
 });
+
+const PI_URL = (id: string) => `/api/chat/sessions/${id}/pi-settings`;
+async function piSession(): Promise<any> {
+  return (await js(await run(req("POST", "/api/chat/sessions", { backend: "pi", model: "deepseek-pro" })))).body;
+}
+const lastStart = () => bridge.requests.filter((r) => r.method === "POST" && r.path.endsWith("/start")).at(-1)!.body;
+
+test("GET pi-settings returns defaults plus the model's thinking levels", async () => {
+  const s = await piSession();
+  const r = await js(await run(req("GET", PI_URL(s.id))));
+  expect(r.status).toBe(200);
+  expect(r.body).toEqual({
+    settings: { steeringMode: "one-at-a-time", followUpMode: "one-at-a-time", autoCompaction: true, autoRetry: true },
+    thinkingLevels: ["off", "low", "high"],
+  });
+});
+
+test("PATCH pi-settings merges partial updates, persists them and returns the full settings", async () => {
+  const s = await piSession();
+  await js(await run(req("PATCH", PI_URL(s.id), { steeringMode: "all" })));
+  const r = await js(await run(req("PATCH", PI_URL(s.id), { autoRetry: false })));
+  expect(r.status).toBe(200);
+  expect(r.body.settings).toEqual({ steeringMode: "all", followUpMode: "one-at-a-time", autoCompaction: true, autoRetry: false });
+  expect(JSON.parse(S.getPiSettings(ctx.db, s.id) ? JSON.stringify(S.getPiSettings(ctx.db, s.id)) : "{}")).toEqual({ steeringMode: "all", autoRetry: false });
+  expect((await js(await run(req("GET", PI_URL(s.id))))).body.settings.steeringMode).toBe("all");
+});
+
+test("PATCH pi-settings rejects unknown keys, bad values and empty bodies; nothing is stored", async () => {
+  const s = await piSession();
+  for (const body of [{ bash: true }, { steeringMode: "sometimes" }, { autoRetry: "no" }, { followUpMode: 3 }, {}]) {
+    expect((await js(await run(req("PATCH", PI_URL(s.id), body)))).status).toBe(400);
+  }
+  expect(S.getPiSettings(ctx.db, s.id)).toEqual({});
+});
+
+test("pi-settings on a Hermes chat is 400", async () => {
+  const { body: h } = await js(await run(req("POST", "/api/chat/sessions", {})));
+  expect((await js(await run(req("GET", PI_URL(h.id))))).status).toBe(400);
+  expect((await js(await run(req("PATCH", PI_URL(h.id), { autoRetry: false })))).status).toBe(400);
+});
+
+test("pi-settings on an unknown chat is 404", async () => {
+  expect((await js(await run(req("GET", PI_URL("nope"))))).status).toBe(404);
+});
+
+test("PATCH pi-settings during a run is 409 and changes nothing", async () => {
+  const s = await piSession();
+  const sent = await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("SLOW please"))));
+  const r = await js(await run(req("PATCH", PI_URL(s.id), { autoRetry: false })));
+  expect(r).toEqual({ status: 409, body: { error: "run active" } });
+  expect(S.getPiSettings(ctx.db, s.id)).toEqual({});
+  await js(await run(req("POST", `/api/chat/runs/${sent.body.runId}/stop`)));
+  await waitIdle(s.id);
+});
+
+test("the next send carries the stored settings and the chat's effort to the bridge", async () => {
+  const s = await piSession();
+  await js(await run(req("PATCH", PI_URL(s.id), { steeringMode: "all", autoCompaction: false })));
+  await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { effort: "high" })));
+  await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("hello"))));
+  await waitIdle(s.id);
+  expect(lastStart()).toMatchObject({ thinking: "high", settings: { steeringMode: "all", autoCompaction: false } });
+});
+
+test("POST pi-compact compacts and returns the numbers; 409 mid-run; 400 on Hermes", async () => {
+  const s = await piSession();
+  const r = await js(await run(req("POST", `/api/chat/sessions/${s.id}/pi-compact`, {})));
+  expect(r).toEqual({ status: 200, body: { tokensBefore: 1000, tokensAfter: 200 } });
+  const sent = await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("SLOW please"))));
+  expect((await js(await run(req("POST", `/api/chat/sessions/${s.id}/pi-compact`, {})))).status).toBe(409);
+  await js(await run(req("POST", `/api/chat/runs/${sent.body.runId}/stop`)));
+  await waitIdle(s.id);
+  const { body: h } = await js(await run(req("POST", "/api/chat/sessions", {})));
+  expect((await js(await run(req("POST", `/api/chat/sessions/${h.id}/pi-compact`, {})))).status).toBe(400);
+});
+
+test("no pi-settings response ever contains the bridge token", async () => {
+  const s = await piSession();
+  await js(await run(req("PATCH", PI_URL(s.id), { autoRetry: false })));
+  await js(await run(req("GET", PI_URL(s.id))));
+  expect(seen.some((t) => t.includes(bridge.token))).toBe(false);
+});

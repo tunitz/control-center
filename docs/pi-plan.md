@@ -137,7 +137,7 @@ Every task ends: `bun run typecheck` + `bun test apps/server apps/web/src` green
 
 ### Workstream C — settings
 
-**T6 Settings model and apply path.** Coverage table (UI must expose each row):
+**T6 Settings model and apply path.** Slice T6a (DONE, live-verified on real Pi): thinking level (from the chat effort), steering mode, follow-up mode, auto compaction, auto retry, manual compact; stored per chat in `pi_settings_json`, sent with every bridge `start`. Slice T6b (open): the file-based and restart rows below. Coverage table (UI must expose each row):
 
 | Setting | Live over RPC? | UI control | Apply |
 |---|---|---|---|

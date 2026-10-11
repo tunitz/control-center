@@ -78,9 +78,12 @@ export class PiClient implements ChatBackend {
     const chat = args.sessionId;
     const model = args.model;
     const provider = args.provider;
+    const settings = args.piSettings && Object.keys(args.piSettings).length > 0 ? args.piSettings : null;
     await this.call("POST", `/chats/${chat}/start`, {
       ...(args.ref ? { sessionPath: args.ref } : {}),
       ...(provider ? { model: { provider, modelId: model } } : {}),
+      ...(args.effort ? { thinking: args.effort } : {}),
+      ...(settings ? { settings } : {}),
     });
 
     // Live-only subscription: no ring replay of earlier runs. Open it before the prompt so nothing is missed.
@@ -108,6 +111,24 @@ export class PiClient implements ChatBackend {
   /** The run id is the chat id. The extension's confirm resolves with this answer. */
   async respondApproval(runId: string, approvalId: string, approve: boolean): Promise<void> {
     await this.call("POST", `/chats/${runId}/ui_response`, { id: approvalId, confirmed: approve });
+  }
+
+  /** Thinking levels the model supports (starts or resumes the chat on that model first). Empty when unknown. */
+  async thinkingLevels(id: string, ref: string | null, model: string, provider: string): Promise<string[]> {
+    await this.call("POST", `/chats/${id}/start`, { ...(ref ? { sessionPath: ref } : {}), model: { provider, modelId: model } });
+    const r = await this.call("POST", `/chats/${id}/command`, { name: "get_available_thinking_levels", args: {} });
+    const levels = r.data?.levels;
+    return Array.isArray(levels) ? levels.filter((l: unknown): l is string => typeof l === "string") : [];
+  }
+
+  /** Manual compaction. Returns Pi's before/after token estimates. */
+  async compact(id: string, ref: string | null, instructions?: string): Promise<{ tokensBefore: number; tokensAfter: number }> {
+    await this.call("POST", `/chats/${id}/start`, ref ? { sessionPath: ref } : {});
+    const r = await this.call("POST", `/chats/${id}/command`, {
+      name: "compact",
+      args: instructions ? { customInstructions: instructions } : {},
+    });
+    return { tokensBefore: Number(r.data?.tokensBefore) || 0, tokensAfter: Number(r.data?.estimatedTokensAfter) || 0 };
   }
 
   /* ---------- internals ---------- */

@@ -33,6 +33,7 @@ type ChatRec = {
   steers: string[];
   /** Resolves the pending confirm (GATE scenario). */
   answer: ((confirmed: boolean) => void) | null;
+  compactions: number;
 };
 
 export type FakeRequest = { method: string; path: string; auth: string | null; body: any };
@@ -127,7 +128,7 @@ export class FakePiBridge {
         const sessionFile = typeof body.sessionPath === "string" ? body.sessionPath : `/fake/sessions/${id}.jsonl`;
         rec = {
           id, sessionFile, live: true, busy: false, aborted: false, abort: null, seq: 0, ring: [],
-          subs: new Set(), model: null, prompts: [], steers: [], answer: null,
+          subs: new Set(), model: null, prompts: [], steers: [], answer: null, compactions: 0,
         };
         this.chats.set(id, rec);
       }
@@ -167,6 +168,14 @@ export class FakePiBridge {
       return json(200, { ok: true });
     }
     if (action === "command") {
+      if (body.name === "compact") {
+        if (rec.busy) return json(502, { error: "agent is busy" });
+        rec.compactions++;
+        return json(200, { success: true, data: { summary: "s", firstKeptEntryId: "e1", tokensBefore: 1000, estimatedTokensAfter: 200 } });
+      }
+      if (body.name === "get_available_thinking_levels") {
+        return json(200, { success: true, data: { levels: ["off", "low", "high"] } });
+      }
       if (body.name !== "set_model") return json(400, { error: `command not allowed: ${String(body.name)}` });
       const args = body.args ?? {};
       const found = this.models.find((x) => x.provider === args.provider && x.id === args.modelId);

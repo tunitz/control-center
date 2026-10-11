@@ -156,6 +156,11 @@ async function runPrompt(message: string) {
   settle([userMsg, msg], "stop");
 }
 
+let steeringMode = "one-at-a-time";
+let followUpMode = "one-at-a-time";
+let autoCompaction = true;
+let autoRetry = true;
+
 async function handle(cmd: any) {
   const id: string = cmd.id ?? "";
   switch (cmd.type) {
@@ -165,11 +170,12 @@ async function handle(cmd: any) {
         thinkingLevel: thinking,
         isStreaming: busy,
         isCompacting: false,
-        steeringMode: "one-at-a-time",
-        followUpMode: "one-at-a-time",
+        steeringMode,
+        followUpMode,
         sessionFile,
         sessionId: sessionFile ? sessionFile.split("/").pop() : undefined,
-        autoCompactionEnabled: true,
+        autoCompactionEnabled: autoCompaction,
+        autoRetryEnabled: autoRetry,
         messageCount: 0,
         pendingMessageCount: 0,
         pid: process.pid,
@@ -242,13 +248,27 @@ async function handle(cmd: any) {
       if (typeof cmd.sessionPath === "string") sessionFile = cmd.sessionPath;
       ok("switch_session", id, { cancelled: false });
       return;
+    case "set_steering_mode":
+      steeringMode = cmd.mode;
+      ok(cmd.type, id, {});
+      return;
+    case "set_follow_up_mode":
+      followUpMode = cmd.mode;
+      ok(cmd.type, id, {});
+      return;
+    case "set_auto_compaction":
+      autoCompaction = cmd.enabled;
+      ok(cmd.type, id, {});
+      return;
+    case "set_auto_retry":
+      autoRetry = cmd.enabled;
+      ok(cmd.type, id, {});
+      return;
+    case "compact":
+      ok("compact", id, { summary: "s", firstKeptEntryId: "e1", tokensBefore: 1000, estimatedTokensAfter: 200 });
+      return;
     case "new_session":
     case "set_session_name":
-    case "compact":
-    case "set_auto_compaction":
-    case "set_auto_retry":
-    case "set_steering_mode":
-    case "set_follow_up_mode":
       ok(cmd.type, id, {});
       return;
     default:

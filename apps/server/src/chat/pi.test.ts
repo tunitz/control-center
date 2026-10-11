@@ -281,3 +281,43 @@ test("respondApproval with nothing pending is a 502 from the bridge", async () =
   const id = await pi.createSession();
   await expect(pi.respondApproval(id, "nope", true)).rejects.toBeInstanceOf(ChatError);
 });
+
+const startBodies = (b: FakePiBridge) => b.requests.filter((r) => r.method === "POST" && r.path.endsWith("/start")).map((r) => r.body);
+
+test("startRun sends the effort as thinking and the chat's stored settings with every start", async () => {
+  const b = bridge();
+  const pi = new PiClient({ baseUrl: b.url, token: b.token });
+  const id = await pi.createSession();
+  await drain((await pi.startRun({
+    sessionId: id, message: "hi", ...RUN, effort: "high", piSettings: { steeringMode: "all", autoRetry: false },
+  })).frames);
+  expect(startBodies(b).at(-1)).toMatchObject({ thinking: "high", settings: { steeringMode: "all", autoRetry: false } });
+});
+
+test("startRun with no effort and no settings sends neither", async () => {
+  const b = bridge();
+  const pi = new PiClient({ baseUrl: b.url, token: b.token });
+  const id = await pi.createSession();
+  await drain((await pi.startRun({ sessionId: id, message: "hi", ...RUN })).frames);
+  const last = startBodies(b).at(-1);
+  expect(last).not.toHaveProperty("thinking");
+  expect(last).not.toHaveProperty("settings");
+});
+
+test("compact starts the chat from its session file, compacts and returns Pi's numbers", async () => {
+  const b = bridge();
+  const pi = new PiClient({ baseUrl: b.url, token: b.token });
+  const id = await pi.createSession();
+  const r = await pi.compact(id, pi.sessionRef(id), "focus on code");
+  expect(r).toEqual({ tokensBefore: 1000, tokensAfter: 200 });
+  expect(b.chats.get(id)!.compactions).toBe(1);
+  const cmd = b.requests.filter((x) => x.path.endsWith("/command")).at(-1)!;
+  expect(cmd.body).toMatchObject({ name: "compact", args: { customInstructions: "focus on code" } });
+});
+
+test("thinkingLevels returns the model's levels from the bridge", async () => {
+  const b = bridge();
+  const pi = new PiClient({ baseUrl: b.url, token: b.token });
+  const id = await pi.createSession();
+  expect(await pi.thinkingLevels(id, pi.sessionRef(id), "deepseek-flash", "deepseek")).toEqual(["off", "low", "high"]);
+});

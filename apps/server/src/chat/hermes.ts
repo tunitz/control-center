@@ -37,6 +37,8 @@ export type StartRunArgs = {
   /** Pi only: the model's provider and the session's backend ref. Hermes never receives these. */
   provider?: string;
   ref?: string | null;
+  /** Pi only: the chat's stored live settings, sent with every start. */
+  piSettings?: Record<string, unknown>;
 };
 
 /** A finished background subagent batch: Hermes writes it into the session transcript (no push). */

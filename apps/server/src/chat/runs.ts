@@ -285,7 +285,7 @@ export class RunManager {
       const ref = backend === "pi" ? S.getBackend(this.db, rec.sessionId)?.ref ?? null : undefined;
       handle = await client.startRun({
         sessionId: rec.sessionId, message: input.message, model: input.model, effort: input.effort,
-        ...(backend === "pi" ? { provider: sess?.provider, ref } : {}),
+        ...(backend === "pi" ? { provider: sess?.provider, ref, piSettings: S.getPiSettings(this.db, rec.sessionId) } : {}),
       });
     } catch (e) {
       rec.resolveStarted();

@@ -1,6 +1,7 @@
 /** SQLite access for chat tables. All values are bound parameters. */
 import type { Database } from "bun:sqlite";
 import type { TodoItem } from "./hermes";
+import { readStoredSettings, type PiSettings } from "./pi-settings";
 
 export const EFFORTS = ["off", "low", "medium", "high"] as const;
 export type Effort = (typeof EFFORTS)[number];
@@ -136,6 +137,16 @@ export function getBackend(db: Database, id: string): { backend: "hermes" | "pi"
   const r = db.query("SELECT backend, backend_ref FROM chat_sessions WHERE id = ?").get(id) as
     { backend: "hermes" | "pi"; backend_ref: string | null } | null;
   return r ? { backend: r.backend, ref: r.backend_ref } : null;
+}
+
+/** Only the settings the user changed; {} when none. */
+export function getPiSettings(db: Database, id: string): Partial<PiSettings> {
+  const r = db.query("SELECT pi_settings_json FROM chat_sessions WHERE id = ?").get(id) as { pi_settings_json: string | null } | null;
+  return readStoredSettings(r?.pi_settings_json ?? null);
+}
+
+export function setPiSettings(db: Database, id: string, settings: Partial<PiSettings>): void {
+  db.query("UPDATE chat_sessions SET pi_settings_json = ? WHERE id = ?").run(JSON.stringify(settings), id);
 }
 
 export function setBackendRef(db: Database, id: string, ref: string | null): void {

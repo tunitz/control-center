@@ -17,6 +17,7 @@ import { buildSessionDir, fileHeaders, inspectFile, MAX_FILES, MAX_BODY_BYTES, s
 import { assertImageSize, buildPrompt, type PromptAttachment } from "./prompt";
 import { RunManager, recoverRuns } from "./runs";
 import { DelegationWatcher } from "./watcher";
+import { parsePiSettingsPatch, withDefaults } from "./pi-settings";
 
 export type ChatContext = {
   db: Database;
@@ -94,6 +95,14 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
   if (m && !m[2] && (method === "PATCH" || method === "DELETE")) {
     const id = safeId(m[1]);
     return method === "PATCH" ? patchSessionRoute(req, id, ctx) : deleteSessionRoute(id, ctx);
+  }
+
+  m = /^\/sessions\/([^/]+)\/(pi-settings|pi-compact)$/.exec(p);
+  if (m) {
+    const id = safeId(m[1]);
+    if (m[2] === "pi-settings" && method === "GET") return piSettingsGet(id, ctx);
+    if (m[2] === "pi-settings" && method === "PATCH") return piSettingsPatch(req, id, ctx);
+    if (m[2] === "pi-compact" && method === "POST") return piCompact(req, id, ctx);
   }
 
   m = /^\/sessions\/([^/]+)\/(messages|send|export)$/.exec(p);
@@ -270,6 +279,41 @@ async function patchSessionRoute(req: Request, id: string, ctx: ChatContext): Pr
   return json(withBackend(ctx, updated!));
 }
 
+/** A Pi chat's session row, or throws: 404 unknown, 400 not a Pi chat, 503 no bridge. */
+function requirePiChat(ctx: ChatContext, id: string) {
+  const s = requireSession(ctx, id);
+  const b = S.getBackend(ctx.db, id);
+  if (b?.backend !== "pi") throw new ChatError(400, "not a Pi chat");
+  if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
+  return { s, ref: b.ref, pi: ctx.pi };
+}
+
+async function piSettingsGet(id: string, ctx: ChatContext): Promise<Response> {
+  const { s, ref, pi } = requirePiChat(ctx, id);
+  let thinkingLevels: string[] = [];
+  if (s.runState === "idle") {
+    try { thinkingLevels = await pi.thinkingLevels(id, ref, s.model, s.provider); } catch { thinkingLevels = []; }
+  }
+  return json({ settings: withDefaults(S.getPiSettings(ctx.db, id)), thinkingLevels });
+}
+
+async function piSettingsPatch(req: Request, id: string, ctx: ChatContext): Promise<Response> {
+  const { s } = requirePiChat(ctx, id);
+  const patch = parsePiSettingsPatch(await readJson(req));
+  if (s.runState !== "idle") throw new ChatError(409, "run active");
+  const merged = { ...S.getPiSettings(ctx.db, id), ...patch };
+  S.setPiSettings(ctx.db, id, merged);
+  return json({ settings: withDefaults(merged) });
+}
+
+async function piCompact(req: Request, id: string, ctx: ChatContext): Promise<Response> {
+  const { s, ref, pi } = requirePiChat(ctx, id);
+  if (s.runState !== "idle") throw new ChatError(409, "run active");
+  const body = await readJson(req);
+  const instructions = typeof body.instructions === "string" && body.instructions.trim() !== "" ? body.instructions.trim().slice(0, 2000) : undefined;
+  return json(await pi.compact(id, ref, instructions));
+}
+
 async function deleteSessionRoute(id: string, ctx: ChatContext): Promise<Response> {
   const s = requireSession(ctx, id);
   if (s.runState !== "idle") throw new ChatError(409, "run active");
@@ -353,7 +397,13 @@ async function sendRoute(req: Request, id: string, ctx: ChatContext): Promise<Re
     ? resolveModel(ctx, modelField) : { model: s.model, provider: s.provider };
   const effort = typeof effortField === "string" && effortField !== "" ? parseEffort(effortField) : s.effort;
   // Effort is a hint, sent only to models that report reasoning.
-  const sentEffort = getModelDef(ctx.db, picked.model)?.reasoning ? effort : null;
+  let reasoning = getModelDef(ctx.db, picked.model)?.reasoning === true;
+  if (S.getBackend(ctx.db, id)?.backend === "pi" && ctx.pi) {
+    // Pi chats: reasoning support comes from Pi's own model list, not Hermes's.
+    const piModels = await ctx.pi.listModels().catch(() => []);
+    reasoning = piModels.find(m => m.id === picked.model && m.provider === picked.provider)?.reasoning === true;
+  }
+  const sentEffort = reasoning ? effort : null;
 
   const { maxBytes } = uploadLimits(ctx.db);
   const blobs: { name: string; bytes: Uint8Array }[] = [];

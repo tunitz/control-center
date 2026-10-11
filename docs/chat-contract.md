@@ -48,3 +48,12 @@ type ChatMessage = { id: string; seq: number; role: "user" | "assistant"; text: 
 - `title` is auto-set after the first assistant reply to the first 8 words of the first user message (`titleAuto=true`).
 - Model is per session. New sessions use `config.defaultModel`.
 - Reasoning effort is a hint, sent only when the model has `reasoning:true`.
+
+## Pi chat settings (additive)
+
+Pi chats only (`backend: "pi"`); Hermes chats get 400.
+
+- `GET /api/chat/sessions/:id/pi-settings` -> `{ settings: { steeringMode, followUpMode, autoCompaction, autoRetry }, thinkingLevels: string[] }`. Stored overrides merged over Pi's defaults (`one-at-a-time`, `one-at-a-time`, `true`, `true`). `thinkingLevels` is the model's list from Pi (empty while a run is active or when the bridge is down).
+- `PATCH /api/chat/sessions/:id/pi-settings` with any subset of those four keys -> `{ settings }`. Unknown keys, wrong types and an empty body are 400; 409 `run active` during a run. Applied by Pi at the start of the next run.
+- `POST /api/chat/sessions/:id/pi-compact` `{ instructions? }` -> `{ tokensBefore, tokensAfter }`. 409 during a run; 502 with Pi's message when there is nothing to compact.
+- The chat's `effort` is sent to Pi as its thinking level when the model reports reasoning.

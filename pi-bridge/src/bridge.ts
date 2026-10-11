@@ -117,20 +117,52 @@ export function createBridge(cfg: BridgeConfig): Bridge {
     return t;
   }
 
-  async function applySettings(chat: Chat, model?: { provider: string; modelId: string }, thinking?: string) {
+  /** Live Pi settings a chat may carry (docs/pi-plan.md T6). Anything else is rejected, not ignored. */
+  interface LiveSettings {
+    steeringMode?: string;
+    followUpMode?: string;
+    autoCompaction?: boolean;
+    autoRetry?: boolean;
+  }
+  const QUEUE_MODES = ["all", "one-at-a-time"];
+
+  function parseSettings(v: unknown): LiveSettings | undefined {
+    if (v === undefined) return undefined;
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new HttpError(400, "settings must be an object");
+    const out: LiveSettings = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (k === "steeringMode" || k === "followUpMode") {
+        if (typeof val !== "string" || !QUEUE_MODES.includes(val)) throw new HttpError(400, `${k} must be all or one-at-a-time`);
+        out[k] = val;
+      } else if (k === "autoCompaction" || k === "autoRetry") {
+        if (typeof val !== "boolean") throw new HttpError(400, `${k} must be a boolean`);
+        out[k] = val;
+      } else {
+        throw new HttpError(400, `unknown setting: ${k}`);
+      }
+    }
+    return out;
+  }
+
+  async function applySettings(chat: Chat, model?: { provider: string; modelId: string }, thinking?: string, settings?: LiveSettings) {
     if (model) await chat.expectOk({ type: "set_model", provider: model.provider, modelId: model.modelId });
     if (thinking) await chat.expectOk({ type: "set_thinking_level", level: thinking });
+    if (settings?.steeringMode !== undefined) await chat.expectOk({ type: "set_steering_mode", mode: settings.steeringMode });
+    if (settings?.followUpMode !== undefined) await chat.expectOk({ type: "set_follow_up_mode", mode: settings.followUpMode });
+    if (settings?.autoCompaction !== undefined) await chat.expectOk({ type: "set_auto_compaction", enabled: settings.autoCompaction });
+    if (settings?.autoRetry !== undefined) await chat.expectOk({ type: "set_auto_retry", enabled: settings.autoRetry });
   }
 
   async function start(id: string, body: Record<string, any>) {
     const model = parseModel(body.model);
     const thinking = parseThinking(body.thinking);
+    const settings = parseSettings(body.settings);
     const sessionPath = body.sessionPath === undefined ? undefined : checkSessionPath(body.sessionPath);
 
     const existing = live.get(id);
     if (existing && !existing.exited) {
       await existing.ready;
-      await applySettings(existing, model, thinking);
+      await applySettings(existing, model, thinking, settings);
       return json(200, { sessionFile: existing.sessionFile, state: await existing.state() });
     }
     if (live.size >= cfg.maxLive) throw new HttpError(429, `at most ${cfg.maxLive} live Pi processes`);
@@ -145,7 +177,7 @@ export function createBridge(cfg: BridgeConfig): Bridge {
     try {
       chat.launch(sessionPath);
       await chat.ready;
-      await applySettings(chat, model, thinking);
+      await applySettings(chat, model, thinking, settings);
     } catch (e) {
       await drop(chat);
       if (e instanceof HttpError) throw e;
