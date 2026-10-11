@@ -138,12 +138,12 @@ export function UserMessage({ m, onOpenImage, onRetry, onDelete }: {
 }
 
 /** The token line under a reply. Tap it for the full breakdown: uncached input, cache read/write, output, timing. */
-function UsageRow({ id, u }: { id: string; u: TokenUsage }) {
+function UsageRow({ id, u, compactions }: { id: string; u: TokenUsage; compactions?: number }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="usage-wrap">
       <button type="button" className="usage usage-btn" aria-expanded={open} aria-controls={`usage-${id}`} title="Token details" onClick={() => setOpen(o => !o)}>
-        {usageSummary(u).map(part => <span key={part}>{part}</span>)}
+        {[...usageSummary(u), ...(compactions ? [`compacted ${compactions}×`] : [])].map(part => <span key={part}>{part}</span>)}
         <Icon name="chevr" className="chev" />
       </button>
       {open && (
@@ -155,8 +155,10 @@ function UsageRow({ id, u }: { id: string; u: TokenUsage }) {
   );
 }
 
-export function AssistantMessage({ m, agent = "Hermes", onApprove }: {
+export function AssistantMessage({ m, agent = "Hermes", onApprove, compactions }: {
   m: ChatMessage; agent?: string;
+  /** Times the chat had compacted as of this reply. */
+  compactions?: number;
   /** Answers a Pi approval for this message's run. */
   onApprove?: (runId: string, approvalId: string, choice: "approve" | "deny") => Promise<void>;
 }) {
@@ -210,7 +212,7 @@ export function AssistantMessage({ m, agent = "Hermes", onApprove }: {
           </button>
         </div>
       )}
-      {m.usage && <UsageRow id={m.id} u={m.usage} />}
+      {m.usage && <UsageRow id={m.id} u={m.usage} compactions={compactions} />}
     </div>
   );
 }

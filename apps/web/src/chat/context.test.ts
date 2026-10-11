@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { contextMeter, lastInputTokens, fmtTokens } from "./context";
+import { contextMeter, countCompactions, lastInputTokens, fmtTokens } from "./context";
 import type { ChatMessage } from "./types";
 
 test("fmtTokens: plain, k with one decimal under 100k, k rounded above", () => {
@@ -31,4 +31,11 @@ test("estimateContextTokens: base + chars/4, capped by last reported input, neve
   // 3.1M cumulative input must not read as context
   expect(estimateContextTokens([mk("user", "hi"), mk("assistant", "ok", { input: 3_184_043, output: 5 })])).toBe(BASE_CONTEXT_TOKENS + 1);
   expect(estimateContextTokens([mk("user", "x".repeat(400000)), mk("assistant", "ok", { input: 30_000, output: 5 })])).toBe(30_000);
+});
+
+test("countCompactions: counts big drops in reported context, ignores growth and small dips", () => {
+  const m = (context?: number) => ({ role: "assistant", text: "", tools: [], usage: context === undefined ? null : { input: 1, output: 1, context } }) as unknown as ChatMessage;
+  expect(countCompactions([m(40_000), m(90_000), m(30_000), m(60_000), m(10_000)])).toBe(2);
+  expect(countCompactions([m(40_000), m(35_000), m(50_000)])).toBe(0);
+  expect(countCompactions([m(), m(5)])).toBe(0);
 });

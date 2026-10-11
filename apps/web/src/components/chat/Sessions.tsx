@@ -31,6 +31,9 @@ export type SessionsProps = {
 
 export function Sessions(p: SessionsProps) {
   const groups = groupSessions(p.list, Date.now());
+  // Accordion: Pinned and Today start open; the older groups start closed. A search shows every match.
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  const isOpen = (label: string) => !!p.query || (toggled[label] ?? (label === "Pinned" || label === "Today"));
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<string | null>(null);
@@ -82,8 +85,10 @@ export function Sessions(p: SessionsProps) {
           {groups.length === 0 && <p className="meta side-empty">{p.archived ? "No archived chats." : p.query ? "No chats match." : "No chats yet."}</p>}
           {groups.map(g => (
             <div key={g.label}>
-              <div className="sec">{g.label}</div>
-              {g.items.map(s => {
+              <button type="button" className="sec sec-toggle" aria-expanded={isOpen(g.label)} onClick={() => setToggled(t => ({ ...t, [g.label]: !isOpen(g.label) }))}>
+                <Icon name="chevr" className="chev" />{g.label}<span className="sec-count">{g.items.length}</span>
+              </button>
+              {isOpen(g.label) && g.items.map(s => {
                 const isActive = s.id === p.activeId;
                 if (renaming === s.id) {
                   return (

@@ -16,3 +16,19 @@ test("running: everything says steer, so the button cannot be mistaken for Send"
   // The placeholder no longer names the agent, so it cannot read like a fresh message.
   expect(m.placeholder).not.toContain("Message");
 });
+
+import { routeInput } from "./sendmode";
+import { parseSlash } from "./slash";
+
+test("a slash command never steers or sends, running or idle", () => {
+  for (const busy of [true, false]) {
+    expect(routeInput(busy, parseSlash("/yolo", "pi"))).toBe("command");
+    expect(routeInput(busy, parseSlash("/nope", "pi"))).toBe("command");
+    expect(routeInput(busy, parseSlash("/steer be brief", "pi"))).toBe("command");
+  }
+});
+
+test("plain text steers while running and sends when idle", () => {
+  expect(routeInput(true, parseSlash("use bun", "pi"))).toBe("steer");
+  expect(routeInput(false, parseSlash("use bun", "pi"))).toBe("send");
+});

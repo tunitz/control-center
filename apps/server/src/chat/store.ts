@@ -390,6 +390,8 @@ export type UsageReport = {
   totals: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number; calls: number; costUsd: number; replies: number };
   /** Mean time to first token over the replies that recorded one, ms. null when none did. */
   avgTtftMs: number | null;
+  /** Times the context shrank between replies (Pi compacting). */
+  compactions: number;
   /** The newest reply that reported usage: its `context` is the chat's current context size. */
   last: { context: number | null; ttftMs: number | null; durationMs: number | null } | null;
 };
@@ -402,6 +404,7 @@ export function sessionUsage(db: Database, sessionId: string): UsageReport {
   const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, calls: 0, costUsd: 0, replies: 0 };
   let ttftSum = 0, ttftN = 0;
   let last: UsageReport["last"] = null;
+  let compactions = 0, prevCtx: number | null = null;
   for (const r of rows) {
     let u: TokenUsage;
     try { u = JSON.parse(r.usage_json) as TokenUsage; } catch { continue; }
@@ -415,6 +418,11 @@ export function sessionUsage(db: Database, sessionId: string): UsageReport {
     totals.costUsd += n(u.costUsd);
     totals.replies++;
     if (typeof u.ttftMs === "number") { ttftSum += u.ttftMs; ttftN++; }
+    // A context well below the previous reply's means Pi compacted in between.
+    if (typeof u.context === "number" && u.context > 0) {
+      if (prevCtx !== null && u.context < prevCtx * 0.75) compactions++;
+      prevCtx = u.context;
+    }
     last = {
       context: typeof u.context === "number" ? u.context : null,
       ttftMs: typeof u.ttftMs === "number" ? u.ttftMs : null,
@@ -422,7 +430,7 @@ export function sessionUsage(db: Database, sessionId: string): UsageReport {
     };
   }
   totals.total = totals.input + totals.output + totals.cacheRead + totals.cacheWrite;
-  return { totals, avgTtftMs: ttftN > 0 ? Math.round(ttftSum / ttftN) : null, last };
+  return { totals, avgTtftMs: ttftN > 0 ? Math.round(ttftSum / ttftN) : null, compactions, last };
 }
 
 /** Attachment row with its disk path (server side only; never sent to the browser). */

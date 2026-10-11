@@ -24,6 +24,8 @@ export type TokenUsage = {
 export type UsageReport = {
   totals: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number; calls: number; costUsd: number; replies: number };
   avgTtftMs: number | null;
+  /** Times the context shrank between replies (Pi compacting). */
+  compactions?: number;
   last: { context: number | null; ttftMs: number | null; durationMs: number | null } | null;
 };
 export type MessageStatus = "complete" | "failed" | "interrupted" | "running";

@@ -6,7 +6,7 @@ import { contextMeter } from "../../chat/context";
 import { shortModelLabel } from "./label";
 import { TextMenu } from "./TextMenu";
 import { effortLabel } from "../../chat/menu";
-import { sendMode } from "../../chat/sendmode";
+import { sendMode, routeInput } from "../../chat/sendmode";
 import { effortChoices, modelUsable } from "../../chat/pi";
 import type { Backend, ChatModel, Effort } from "../../chat/types";
 
@@ -172,6 +172,8 @@ export function Composer(p: ComposerProps) {
 
   const steer = async () => {
     if (!text.trim()) return;
+    // The Steer button used to skip this check, so "/yolo" was sent into the run as text.
+    if (routeInput(busy, parseSlash(text, backend)) === "command") { void submit(); return; }
     const value = text;
     try {
       const res = await p.onSteer(value);
@@ -192,7 +194,7 @@ export function Composer(p: ComposerProps) {
     if (p.phone || e.shiftKey) return;
     e.preventDefault();
     // While a task runs the button says Steer, so Enter steers too. A slash command still runs as a command.
-    if (busy && parseSlash(text, backend) === null) { if (canSteer) void steer(); return; }
+    if (routeInput(busy, parseSlash(text, backend)) === "steer") { if (canSteer) void steer(); return; }
     void submit();
   };
 
@@ -329,14 +331,14 @@ export function Composer(p: ComposerProps) {
               </button>
             ) : (
               <button className="btn primary icon-send" type="button" aria-label={mode.label} title={mode.title} disabled={!canSend} onClick={() => void submit()}>
-                <Icon name="up" className="i sm" /><span className="send-lbl">{mode.label}</span>
+                <Icon name="send" className="i sm" /><span className="send-lbl">{mode.label}</span>
               </button>
             )}
             </div>
           </div>
         </div>
         <div className="comp-foot">
-          <span className={`hint${notice && !err ? " note" : ""}`} role={notice || err ? "status" : undefined}>{err || notice || mode.hint || (files.some(f => f.note === "Text PDFs only") ? "Text PDFs only" : p.phone ? (meter ? `Context ${meter.label} (${Math.round(meter.pct)}%)` : "") : "Enter to send · Shift+Enter for a new line")}</span>
+          <span className={`hint${notice && !err ? " note" : ""}`} role={notice || err ? "status" : undefined}>{err || notice || mode.hint || (files.some(f => f.note === "Text PDFs only") ? "Text PDFs only" : p.phone ? "" : "Enter to send · Shift+Enter for a new line")}</span>
         </div>
       </div>
     </div>

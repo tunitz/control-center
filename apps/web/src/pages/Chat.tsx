@@ -10,8 +10,10 @@ import { useThread } from "../chat/useThread";
 import { useSessions } from "../chat/useSessions";
 import { useVisualViewportHeight } from "../chat/viewport";
 import { openChatRunEvents, type GlobalRun } from "../chat/sse";
-import { estimateContextTokens } from "../chat/context";
+import { countCompactions, estimateContextTokens } from "../chat/context";
 import { usageReportText } from "../chat/usage";
+import { creditsMarkdown } from "../chat/credits";
+import { Markdown } from "../components/chat/Markdown";
 import { forgetChat, rememberChat } from "../chat/last";
 import { Composer } from "../components/chat/Composer";
 import { AssistantMessage, UserMessage } from "../components/chat/Message";
@@ -235,6 +237,8 @@ export default function Chat({ hash }: { hash: string }) {
 
   /** Persistent command rows live on the server (`thread.commands`); this only tracks which one is expanded. */
   const [noteOpen, setNoteOpen] = useState<number | null>(null);
+  /** The command that is running now. It shows as a working row until its result row replaces it. */
+  const [pendingCmd, setPendingCmd] = useState<string | null>(null);
   useEffect(() => { setNoteOpen(null); }, [activeId]);
   /** Records a command row on the server so it survives a reload, then reveals it in the thread. */
   const addNote = async (name: string, body: string) => {
@@ -249,7 +253,7 @@ export default function Chat({ hash }: { hash: string }) {
 
   /** Runs a page command and returns the text to record in the thread. "" means nothing to show. */
   const runAction = async (name: string, arg: string): Promise<string> => {
-    if (name === "credits") return (await chat.credits()).text.split(" | ").join("\n");
+    if (name === "credits") return creditsMarkdown((await chat.credits()).text);
     if (name === "steer") {
       if (!arg) return "Usage: /steer <note for the running task>";
       return (await onSteer(arg)) === "ok" ? `Sent to the running task:\n${arg}` : "Nothing is running.";
@@ -300,9 +304,13 @@ export default function Chat({ hash }: { hash: string }) {
 
   /** Every command leaves its own row in the thread, so the chat records what ran and what it did. */
   const onAction = async (name: string, arg: string): Promise<string> => {
-    const result = await runAction(name, arg);
-    if (result.trim() !== "") void addNote(name, result);
-    return result;
+    // Show a working row at once: /credits waits several seconds on the host, and nothing on screen looked like progress.
+    setPendingCmd(name);
+    try {
+      const result = await runAction(name, arg);
+      if (result.trim() !== "") await addNote(name, result);
+      return result;
+    } finally { setPendingCmd(null); }
   };
 
   const onModel = async (id: string) => {
@@ -373,7 +381,9 @@ export default function Chat({ hash }: { hash: string }) {
               <span className="tname">/{n.name}</span>
               <span className="stat-ok">local</span>
             </button>
-            {noteOpen === n.id && <pre className="out" id={`note-${n.id}`} style={{ whiteSpace: "pre-wrap" }}>{n.body}</pre>}
+            {noteOpen === n.id && (n.name === "credits"
+              ? <div className="out note-md" id={`note-${n.id}`}><Markdown text={n.body} /></div>
+              : <pre className="out" id={`note-${n.id}`} style={{ whiteSpace: "pre-wrap" }}>{n.body}</pre>)}
           </div>
         ))}
       </div>
@@ -445,7 +455,10 @@ export default function Chat({ hash }: { hash: string }) {
                 <button className="btn ghost" type="button" style={{ alignSelf: "center" }} onClick={() => void older()}>Load older messages</button>
               )}
 
-              {thread.messages.map(m => (
+              {/* Rows anchored before the first loaded message: show them when nothing older exists, else they wait for "Load older". */}
+              {!thread.hasMore && noteRows(thread.commands.filter(n => n.afterSeq < (thread.messages[0]?.seq ?? 0)))}
+
+              {thread.messages.map((m, i) => (
                 <Fragment key={m.id}>
                   {m.role === "user" ? (
                     <UserMessage m={m} onOpenImage={setLightbox}
@@ -455,14 +468,24 @@ export default function Chat({ hash }: { hash: string }) {
                         void thread.remove(m.id).catch(e => setPageErr((e as Error).message));
                       } : undefined} />
                   ) : (
-                    <AssistantMessage m={m} agent={chatBackend === "pi" ? "Pi" : "Hermes"} onApprove={onApprove} />
+                    <AssistantMessage m={m} agent={chatBackend === "pi" ? "Pi" : "Hermes"} onApprove={onApprove} compactions={countCompactions(thread.messages.slice(0, i + 1))} />
                   )}
-                  {noteRows(thread.commands.filter(n => n.afterSeq === m.seq))}
+                  {noteRows(thread.commands.filter(n => n.afterSeq >= m.seq && n.afterSeq < (thread.messages[i + 1]?.seq ?? Infinity)))}
                 </Fragment>
               ))}
 
-              {/* Command rows whose anchor message is not loaded (paged out) still render, at the end. */}
-              {noteRows(thread.commands.filter(n => !thread.messages.some(m => m.seq === n.afterSeq)))}
+              {thread.messages.length === 0 && noteRows(thread.commands)}
+
+              {pendingCmd && (
+                <div className="fgroup">
+                  <div className="fold static" role="status" aria-live="polite">
+                    <span className="spin" aria-hidden="true" />
+                    <Icon name="term" className="i sm" />
+                    <span className="tname">/{pendingCmd}</span>
+                    <span className="lbl">working…</span>
+                  </div>
+                </div>
+              )}
 
               {!thread.runId && (active?.awaiting ?? 0) > 0 && (
                 <div className="fold static" role="status" aria-live="polite">

@@ -21,3 +21,12 @@ export function sendMode(busy: boolean, agent: string): SendMode {
     hint: "Running. What you send steers the task.",
   };
 }
+
+/**
+ * Where the composer's text goes. A slash command (known or not) is never a prompt and never a steer: it runs
+ * as a command whatever the button says. Only plain text steers a running task or starts a message.
+ */
+export function routeInput(busy: boolean, parsed: unknown): "command" | "steer" | "send" {
+  if (parsed) return "command";
+  return busy ? "steer" : "send";
+}

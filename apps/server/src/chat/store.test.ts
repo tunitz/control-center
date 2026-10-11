@@ -153,14 +153,22 @@ test("sessionUsage sums every reply, keeps the newest context, and averages firs
   expect(S.sessionUsage(db, "u1")).toEqual({
     totals: { input: 6, output: 1000, cacheRead: 1_010_000, cacheWrite: 4_000, total: 1_015_006, calls: 4, costUsd: 0.5, replies: 2 },
     avgTtftMs: 2000,
+    compactions: 0,
     last: { context: 510_004, ttftMs: 3000, durationMs: 4000 },
   });
 });
 
 test("sessionUsage on a chat with no usage, and on rows from before the extra fields existed", () => {
   mk("u2", 1);
-  expect(S.sessionUsage(db, "u2")).toEqual({ totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, calls: 0, costUsd: 0, replies: 0 }, avgTtftMs: null, last: null });
+  expect(S.sessionUsage(db, "u2")).toEqual({ totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, calls: 0, costUsd: 0, replies: 0 }, avgTtftMs: null, compactions: 0, last: null });
   S.insertMessage(db, { id: "o1", sessionId: "u2", seq: 1, role: "assistant", text: "x", createdAt: 1, status: "complete", usage: { input: 10, output: 5 }, attachments: [] });
   expect(S.sessionUsage(db, "u2")).toMatchObject({ totals: { input: 10, output: 5, total: 15, replies: 1 }, avgTtftMs: null, last: { context: null, ttftMs: null, durationMs: null } });
 });
 
+
+test("sessionUsage counts a compaction when the context drops well below the previous reply", () => {
+  mk("u3", 1);
+  const ctxs = [40_000, 90_000, 30_000, 35_000, 33_000];
+  ctxs.forEach((context, i) => S.insertMessage(db, { id: `c${i}`, sessionId: "u3", seq: i + 1, role: "assistant", text: "x", createdAt: i, status: "complete", usage: { input: 1, output: 1, context }, attachments: [] }));
+  expect(S.sessionUsage(db, "u3").compactions).toBe(1);
+});

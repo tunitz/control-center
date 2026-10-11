@@ -32,6 +32,21 @@ export function reportedContext(messages: ChatMessage[]): number | null {
   return null;
 }
 
+/** A reply whose context fell this far below the previous one's means the chat was compacted in between. */
+export const COMPACTION_DROP = 0.75;
+
+/** How many times the reported context shrank between consecutive replies (Pi reports `usage.context`). */
+export function countCompactions(messages: ChatMessage[]): number {
+  let prev: number | null = null, n = 0;
+  for (const m of messages) {
+    const c = m.role === "assistant" && typeof m.usage?.context === "number" && m.usage.context > 0 ? m.usage.context : null;
+    if (c === null) continue;
+    if (prev !== null && c < prev * COMPACTION_DROP) n++;
+    prev = c;
+  }
+  return n;
+}
+
 /** Fixed prompt Hermes sends every call (system prompt + tool schemas); measured: a one-word chat reports ~23k input. */
 export const BASE_CONTEXT_TOKENS = 23_000;
 

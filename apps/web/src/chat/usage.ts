@@ -61,6 +61,7 @@ export function usageReportText(r: UsageReport, windowSize?: number | null): str
     const pct = windowSize ? ` (${Math.min(100, Math.round((ctx / windowSize) * 1000) / 10)}%)` : "";
     lines.push(`Context now: ${exact(ctx)}${windowSize ? ` / ${fmtTokens(windowSize)}` : ""}${pct}`);
   }
+  if (r.compactions) lines.push(`Compacted: ${r.compactions} ${r.compactions === 1 ? "time" : "times"}`);
   lines.push(`Input, uncached: ${exact(t.input)}`);
   lines.push(`Cache read: ${exact(t.cacheRead)}`);
   lines.push(`Cache write: ${exact(t.cacheWrite)}`);
