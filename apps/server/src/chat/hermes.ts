@@ -33,7 +33,10 @@ export type StartRunArgs = {
 };
 
 /** A finished background subagent batch: Hermes writes it into the session transcript (no push). */
-export type Completion = { id: number; ts: number };
+export type Completion = { id: number; ts: number; delegationId: string | null };
+/** A background batch Hermes accepted. One batch = one delegation id = one completion row, however many tasks it holds. */
+export type Dispatch = { delegationId: string; ts: number };
+export type Delegations = { done: Completion[]; dispatched: Dispatch[] };
 
 export interface HermesClient {
   createSession(): Promise<string>;
@@ -43,8 +46,8 @@ export interface HermesClient {
   startRun(args: StartRunArgs): Promise<{ runId: string; frames: AsyncIterable<HermesFrame> }>;
   stopRun(runId: string): Promise<void>;
   steerRun(runId: string, message: string): Promise<void>;
-  /** Recent background-subagent completion rows of a session (cheap HTTP read, no model call). */
-  completions?(sessionId: string): Promise<Completion[]>;
+  /** Recent background-subagent dispatches and completions of a session (cheap HTTP read, no model call). */
+  delegations?(sessionId: string): Promise<Delegations>;
 }
 
 /** Used when no transport is configured. Every call fails with 503. */
@@ -196,6 +199,8 @@ export async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerat
   }
 }
 
+const DELEG_ID = /\bdeleg_[A-Za-z0-9]+/;
+
 /** Picks async_delegation_complete rows out of a Hermes message list. */
 export function parseCompletions(rows: unknown[]): Completion[] {
   const out: Completion[] = [];
@@ -204,7 +209,27 @@ export function parseCompletions(rows: unknown[]): Completion[] {
     if (o.display_kind !== "async_delegation_complete") continue;
     const id = Number(o.id);
     const ts = num(o.timestamp) ?? Number(o.timestamp);
-    if (Number.isFinite(id) && Number.isFinite(ts)) out.push({ id, ts });
+    if (!Number.isFinite(id) || !Number.isFinite(ts)) continue;
+    const m = typeof o.content === "string" ? DELEG_ID.exec(o.content) : null;
+    out.push({ id, ts, delegationId: m ? m[0] : null });
+  }
+  return out;
+}
+
+/** Dispatch results of delegate_task (steer/list calls and transcript copies are ignored). One entry per batch id. */
+export function parseDispatches(rows: unknown[]): Dispatch[] {
+  const seen = new Set<string>();
+  const out: Dispatch[] = [];
+  for (const r of rows) {
+    const o = (r ?? {}) as Obj;
+    if (o.role !== "tool" || o.tool_name !== "delegate_task" || typeof o.content !== "string") continue;
+    let c: Obj;
+    try { c = JSON.parse(o.content) as Obj; } catch { continue; }
+    if (c.status !== "dispatched" || typeof c.delegation_id !== "string" || seen.has(c.delegation_id)) continue;
+    const ts = num(o.timestamp) ?? Number(o.timestamp);
+    if (!Number.isFinite(ts)) continue;
+    seen.add(c.delegation_id);
+    out.push({ delegationId: c.delegation_id, ts });
   }
   return out;
 }
@@ -333,11 +358,12 @@ export class HttpHermes implements HermesClient {
     if (!res.ok) throw new ChatError(502, `hermes stop failed (${res.status})`);
   }
 
-  async completions(sessionId: string): Promise<Completion[]> {
-    const res = await this.call("GET", `/api/sessions/${encodeURIComponent(sessionId)}/messages?order=latest&limit=40`);
+  async delegations(sessionId: string): Promise<Delegations> {
+    const res = await this.call("GET", `/api/sessions/${encodeURIComponent(sessionId)}/messages?order=latest&limit=500&include_compacted=true`);
     if (!res.ok) throw new ChatError(502, `hermes messages failed (${res.status})`);
     const data = (await this.json(res)).data;
-    return parseCompletions(Array.isArray(data) ? data : []);
+    const rows = Array.isArray(data) ? data : [];
+    return { done: parseCompletions(rows), dispatched: parseDispatches(rows) };
   }
 
   async steerRun(runId: string, message: string): Promise<void> {

@@ -336,7 +336,8 @@ export class RunManager {
       S.setAutoTitle(this.db, rec.sessionId, autoTitle(rec.userText));
     }
     // Background subagents run on after the turn ends; remember them so the watcher can report back.
-    const dispatched = rec.tools.filter(t => t.name === "delegate_task" && t.status === "ok").length;
+    // A real dispatch only: delegate_task is also used to steer or list running subagents.
+    const dispatched = rec.tools.filter(t => t.name === "delegate_task" && t.status === "ok" && (t.args?.action === undefined || t.args?.action === "spawn")).length;
     if (dispatched > 0) S.addAwaiting(this.db, rec.sessionId, dispatched, rec.startedAt, this.now() + AWAIT_TIMEOUT_MS);
     S.setRunState(this.db, rec.sessionId, "idle", null, this.now());
     this.release(rec.sessionId);

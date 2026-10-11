@@ -9,13 +9,15 @@ import type { Database } from "bun:sqlite";
 import type { HermesClient } from "./hermes";
 import { ChatError } from "./http";
 import { getModelDef } from "./models";
-import type { RunManager } from "./runs";
+import { AWAIT_TIMEOUT_MS, type RunManager } from "./runs";
 import * as S from "./store";
 
 export const POLL_MS = 5_000;
 export const FOLLOW_UP_PROMPT = "[Control Center] A background subagent you dispatched has finished. Its result is in your transcript. Report it to the user now.";
 /** Hermes timestamps are seconds; allow a little clock skew against our run start. */
 const SKEW_MS = 2_000;
+/** Hermes records a dispatch the moment it happens; no dispatch row this long after the turn means there is nothing to wait for. */
+const NO_DISPATCH_GRACE_MS = 30_000;
 
 export type WatcherOptions = {
   db: Database;
@@ -65,21 +67,39 @@ export class DelegationWatcher {
       runs.emitRun(row.sessionId, s.runId, s.runState);
       return;
     }
-    if (!hermes.completions) return;
-    let found;
+    if (!hermes.delegations) return;
+    let d;
     try {
-      const seen = S.seenIds(db, row.sessionId);
-      found = (await hermes.completions(row.sessionId)).filter(c => !seen.has(c.id) && c.ts * 1000 >= row.sinceMs - SKEW_MS);
+      d = await hermes.delegations(row.sessionId);
     } catch {
       return; // Hermes unreachable: try again next tick.
     }
-    if (found.length === 0) return;
+    const since = row.sinceMs - SKEW_MS;
+    const dispatched = new Set(d.dispatched.filter(x => x.ts * 1000 >= since).map(x => x.delegationId));
+    const recent = d.done.filter(c => c.ts * 1000 >= since);
+    const doneIds = new Set(recent.map(c => c.delegationId).filter((x): x is string => !!x));
+    const seen = S.seenIds(db, row.sessionId);
+    const found = recent.filter(c => !seen.has(c.id));
+
+    // Pending = batches Hermes accepted that have not completed. One batch is one report, whatever its task count,
+    // so this is exact; the count taken from the run's tool calls is only a first guess.
+    let pending = row.expected - found.length;
+    if (dispatched.size > 0) pending = [...dispatched].filter(x => !doneIds.has(x)).length;
+    else if (found.length === 0 && now() > row.deadlineMs - AWAIT_TIMEOUT_MS + NO_DISPATCH_GRACE_MS) pending = 0;
+
+    if (found.length === 0) {
+      if (pending !== row.expected) {
+        S.setAwaiting(db, row.sessionId, pending);
+        runs.emitRun(row.sessionId, s.runId, s.runState);
+      }
+      return;
+    }
 
     // Report only when the session is free; otherwise the next tick retries (nothing consumed yet).
     try { runs.reserve(row.sessionId); } catch (e) { if (e instanceof ChatError) return; throw e; }
     let started = false;
     try {
-      S.consumeAwaiting(db, row.sessionId, found.map(c => c.id));
+      S.consumeAwaiting(db, row.sessionId, found.map(c => c.id), pending);
       const reasoning = getModelDef(db, s.model)?.reasoning ? s.effort : null;
       runs.begin(row.sessionId, {
         text: FOLLOW_UP_PROMPT, message: FOLLOW_UP_PROMPT, attachments: [], model: s.model, effort: reasoning, internal: true,

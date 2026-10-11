@@ -9,7 +9,7 @@
  *   anything else   -> deltas "Hello" + " world", usage, done{complete}
  */
 import { ChatError } from "./http";
-import type { HermesClient, HermesFrame, ModelOptions, StartRunArgs, ContentPart } from "./hermes";
+import type { Delegations, HermesClient, HermesFrame, ModelOptions, StartRunArgs, ContentPart } from "./hermes";
 
 export type FakeOptions = {
   modelOptions?: ModelOptions;
@@ -34,7 +34,8 @@ export class FakeHermes implements HermesClient {
   deleted: string[] = [];
   steered: { runId: string; message: string }[] = [];
   lockFails = false;
-  rows = new Map<string, { id: number; ts: number }[]>();
+  rows = new Map<string, { id: number; ts: number; delegationId: string | null }[]>();
+  dispatches = new Map<string, { delegationId: string; ts: number }[]>();
   private rowSeq = 0;
 
   private seq = 0;
@@ -69,14 +70,21 @@ export class FakeHermes implements HermesClient {
   }
 
   /** Test hook: a background subagent finished in `sessionId` (ts in seconds). */
-  addCompletion(sessionId: string, ts: number): void {
+  addCompletion(sessionId: string, ts: number, delegationId: string | null = null): void {
     const l = this.rows.get(sessionId) ?? [];
-    l.push({ id: ++this.rowSeq, ts });
+    l.push({ id: ++this.rowSeq, ts, delegationId });
     this.rows.set(sessionId, l);
   }
 
-  async completions(sessionId: string): Promise<{ id: number; ts: number }[]> {
-    return this.rows.get(sessionId) ?? [];
+  /** Test hook: Hermes recorded a dispatch result (one per batch, whatever its task count). */
+  addDispatch(sessionId: string, delegationId: string, ts: number): void {
+    const l = this.dispatches.get(sessionId) ?? [];
+    l.push({ delegationId, ts });
+    this.dispatches.set(sessionId, l);
+  }
+
+  async delegations(sessionId: string): Promise<Delegations> {
+    return { done: this.rows.get(sessionId) ?? [], dispatched: this.dispatches.get(sessionId) ?? [] };
   }
 
   async startRun(args: StartRunArgs): Promise<{ runId: string; frames: AsyncIterable<HermesFrame> }> {
@@ -117,7 +125,15 @@ export class FakeHermes implements HermesClient {
       body.push({ type: "tool.started", id: "t1", name: "terminal", args: { cmd: "ls" }, preview: "ls" });
       body.push({ type: "tool.completed", id: "t1", ok: true, durationMs: 12, preview: "ok" });
     }
-    if (text.includes("run delegate")) {
+    if (text.includes("run delegate steer")) {
+      body.push({ type: "tool.started", id: "d1", name: "delegate_task", args: { action: "steer", subagent_id: "sa-0", message: "x" }, preview: null });
+      body.push({ type: "tool.completed", id: "d1", ok: true, durationMs: 5, preview: null });
+    } else if (text.includes("run delegate two")) {
+      for (const id of ["d1", "d2"]) {
+        body.push({ type: "tool.started", id, name: "delegate_task", args: { tasks: [{ goal: "g" }] }, preview: null });
+        body.push({ type: "tool.completed", id, ok: true, durationMs: 40, preview: null });
+      }
+    } else if (text.includes("run delegate")) {
       body.push({ type: "tool.started", id: "d1", name: "delegate_task", args: { tasks: [{ goal: "check things" }] }, preview: null });
       body.push({ type: "tool.completed", id: "d1", ok: true, durationMs: 48, preview: null });
     }

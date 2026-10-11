@@ -401,11 +401,16 @@ export function seenIds(db: Database, sessionId: string): Set<number> {
   return new Set((db.query("SELECT hermes_msg_id AS id FROM chat_seen WHERE session_id = ?").all(sessionId) as { id: number }[]).map(r => r.id));
 }
 
-/** Marks `ids` as reported and lowers the awaiting count; the row is removed at zero. */
-export function consumeAwaiting(db: Database, sessionId: string, ids: number[]): void {
+/** Marks `ids` as reported and sets the still-pending count; the row is removed at zero. */
+export function consumeAwaiting(db: Database, sessionId: string, ids: number[], pending: number): void {
   db.transaction(() => {
     for (const id of ids) db.query("INSERT OR IGNORE INTO chat_seen (session_id, hermes_msg_id) VALUES (?, ?)").run(sessionId, id);
-    db.query("UPDATE chat_await SET expected = MAX(0, expected - ?) WHERE session_id = ?").run(ids.length, sessionId);
-    db.query("DELETE FROM chat_await WHERE session_id = ? AND expected <= 0").run(sessionId);
+    setAwaiting(db, sessionId, pending);
   })();
+}
+
+/** Sets the pending count; at zero or below the wait is over. */
+export function setAwaiting(db: Database, sessionId: string, pending: number): void {
+  if (pending <= 0) db.query("DELETE FROM chat_await WHERE session_id = ?").run(sessionId);
+  else db.query("UPDATE chat_await SET expected = ? WHERE session_id = ?").run(pending, sessionId);
 }

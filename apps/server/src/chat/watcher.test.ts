@@ -3,7 +3,7 @@ import { openDb } from "../db";
 import { createChatContext, runsOf, type ChatContext } from "./routes";
 import { FakeHermes } from "./fake-hermes";
 import { AWAIT_TIMEOUT_MS } from "./runs";
-import { parseCompletions } from "./hermes";
+import { parseCompletions, parseDispatches } from "./hermes";
 import * as S from "./store";
 
 let ctx: ChatContext;
@@ -109,5 +109,66 @@ test("parseCompletions keeps only async_delegation_complete rows", () => {
     { id: "7", display_kind: "async_delegation_complete", timestamp: 1791694264.83 },
     { id: 9, display_kind: "async_delegation_complete" },
   ];
-  expect(parseCompletions(rows)).toEqual([{ id: 7, ts: 1791694264.83 }]);
+  expect(parseCompletions(rows)).toEqual([{ id: 7, ts: 1791694264.83, delegationId: null }]);
+});
+
+const dtool = (id: number, ts: number, content: object) => ({ id, role: "tool", tool_name: "delegate_task", timestamp: ts, content: JSON.stringify(content) });
+
+test("parseCompletions reads the delegation id from the row text; parseDispatches only takes dispatch results", () => {
+  const rows = [
+    { id: 1, display_kind: "async_delegation_complete", timestamp: 5, content: "[ASYNC DELEGATION BATCH COMPLETE — deleg_ab12]\nbody" },
+    dtool(2, 4, { status: "dispatched", mode: "background", count: 2, delegation_id: "deleg_ab12" }),
+    dtool(3, 4, { status: "dispatched", mode: "background", count: 2, delegation_id: "deleg_ab12" }), // transcript copy
+    dtool(4, 4, { action: "steer", subagent_id: "sa-0", status: "queued" }),
+  ];
+  expect(parseCompletions(rows)[0]!.delegationId).toBe("deleg_ab12");
+  expect(parseDispatches(rows)).toEqual([{ delegationId: "deleg_ab12", ts: 4 }]);
+});
+
+test("one batch of two tasks is ONE report and clears the indicator (no phantom second subagent)", async () => {
+  await turn("run delegate two");   // two delegate_task calls in one turn
+  expect(S.getSession(ctx.db, "s1")!.awaiting).toBe(2);
+  fake.addDispatch("s1", "deleg_1", t / 1000 + 1);
+  fake.addCompletion("s1", t / 1000 + 5, "deleg_1");
+  await ctx.watcher!.tick();
+  await runsOf(ctx).waitDone(S.getSession(ctx.db, "s1")!.runId!);
+  expect(S.getSession(ctx.db, "s1")!.awaiting).toBe(0);
+});
+
+test("two separate batches: indicator drops to 1 after the first, 0 after the second", async () => {
+  await turn("run delegate two");
+  fake.addDispatch("s1", "deleg_1", t / 1000 + 1);
+  fake.addDispatch("s1", "deleg_2", t / 1000 + 1);
+  fake.addCompletion("s1", t / 1000 + 5, "deleg_1");
+  await ctx.watcher!.tick();
+  await runsOf(ctx).waitDone(S.getSession(ctx.db, "s1")!.runId!);
+  expect(S.getSession(ctx.db, "s1")!.awaiting).toBe(1);
+  fake.addCompletion("s1", t / 1000 + 9, "deleg_2");
+  await ctx.watcher!.tick();
+  await runsOf(ctx).waitDone(S.getSession(ctx.db, "s1")!.runId!);
+  expect(S.getSession(ctx.db, "s1")!.awaiting).toBe(0);
+});
+
+test("a steer/list call on delegate_task is not a dispatch", async () => {
+  await turn("run delegate steer");
+  expect(S.getSession(ctx.db, "s1")!.awaiting).toBe(0);
+});
+
+test("a wait with no dispatch row after the grace period is dropped, not stuck for 30 minutes", async () => {
+  await turn("run delegate");
+  await ctx.watcher!.tick();
+  expect(S.getSession(ctx.db, "s1")!.awaiting).toBe(1);
+  t += 31_000;
+  await ctx.watcher!.tick();
+  expect(S.getSession(ctx.db, "s1")!.awaiting).toBe(0);
+});
+
+test("the client asks Hermes for compacted rows too (a compacted completion must not leave a phantom subagent)", async () => {
+  const urls: string[] = [];
+  const srv = Bun.serve({ port: 0, fetch: req => { urls.push(req.url); return Response.json({ data: [] }); } });
+  try {
+    const { HttpHermes } = await import("./hermes");
+    await new HttpHermes({ baseUrl: `http://127.0.0.1:${srv.port}`, apiKey: "k" }).delegations("s1");
+    expect(urls[0]).toContain("include_compacted=true");
+  } finally { srv.stop(true); }
 });
