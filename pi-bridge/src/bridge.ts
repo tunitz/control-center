@@ -1,0 +1,349 @@
+import { tokenMatches, bearerFrom } from "./auth";
+import { type BridgeConfig } from "./config";
+import { Chat, HttpError, rpcError, type Frame } from "./chat";
+import { listModelsOnce, listSessions } from "./sessions";
+
+export interface Bridge {
+  fetch(req: Request): Promise<Response>;
+  chats: { size(): number };
+  shutdown(): Promise<void>;
+}
+
+const CHAT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const MAX_BODY = 8 * 1024 * 1024;
+const GRAVE_MS = 5 * 60_000;
+const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+// Only these RPC commands may be passed through /command. bash and anything unknown are refused.
+export const ALLOWED_COMMANDS = new Set([
+  "get_state",
+  "get_messages",
+  "get_entries",
+  "get_available_models",
+  "get_available_thinking_levels",
+  "set_model",
+  "set_thinking_level",
+  "get_commands",
+  "new_session",
+  "switch_session",
+  "set_session_name",
+  "compact",
+  "set_auto_compaction",
+  "set_auto_retry",
+  "set_steering_mode",
+  "set_follow_up_mode",
+]);
+
+export function createBridge(cfg: BridgeConfig): Bridge {
+  const live = new Map<string, Chat>();
+  // Exited chats stay readable for a while so a client that connects after process_exit can
+  // still replay the tail. They are never accepted for commands.
+  const grave = new Map<string, { chat: Chat; timer: ReturnType<typeof setTimeout> }>();
+
+  const onGone = (chat: Chat) => {
+    if (live.get(chat.id) === chat) live.delete(chat.id);
+    const old = grave.get(chat.id);
+    if (old) clearTimeout(old.timer);
+    const timer = setTimeout(() => {
+      if (grave.get(chat.id)?.chat === chat) grave.delete(chat.id);
+    }, GRAVE_MS);
+    timer.unref?.();
+    grave.set(chat.id, { chat, timer });
+  };
+
+  async function drop(chat: Chat): Promise<void> {
+    // Remove from the live table first so the slot frees immediately.
+    if (live.get(chat.id) === chat) live.delete(chat.id);
+    await chat.kill();
+  }
+
+  const reaper = setInterval(() => {
+    const now = Date.now();
+    for (const chat of [...live.values()]) {
+      if (!chat.busy && now - chat.lastActivity > cfg.idleMs) void drop(chat);
+    }
+  }, cfg.reapIntervalMs);
+  reaper.unref?.();
+
+  const json = (status: number, body: unknown) => Response.json(body, { status });
+
+  function requireChatId(id: string): string {
+    if (!CHAT_ID.test(id)) throw new HttpError(400, "invalid chat id");
+    return id;
+  }
+
+  function requireLive(id: string): Chat {
+    const chat = live.get(id);
+    if (!chat || chat.exited) throw new HttpError(404, "no live chat with that id");
+    return chat;
+  }
+
+  async function readBody(req: Request): Promise<Record<string, any>> {
+    const text = await req.text();
+    if (text.length > MAX_BODY) throw new HttpError(413, "body too large");
+    if (text.trim() === "") return {};
+    let v: unknown;
+    try {
+      v = JSON.parse(text);
+    } catch {
+      throw new HttpError(400, "invalid JSON");
+    }
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new HttpError(400, "body must be a JSON object");
+    return v as Record<string, any>;
+  }
+
+  function checkSessionPath(p: unknown): string {
+    if (typeof p !== "string" || p.length === 0) throw new HttpError(400, "sessionPath must be a string");
+    const prefix = cfg.sessionDir.endsWith("/") ? cfg.sessionDir : cfg.sessionDir + "/";
+    if (!p.startsWith(prefix) || !p.endsWith(".jsonl") || p.includes("..")) {
+      throw new HttpError(400, "sessionPath must be a .jsonl file inside the session dir");
+    }
+    return p;
+  }
+
+  function parseModel(m: unknown): { provider: string; modelId: string } | undefined {
+    if (m === undefined) return undefined;
+    if (!m || typeof m !== "object") throw new HttpError(400, "model must be {provider, modelId}");
+    const { provider, modelId } = m as Record<string, unknown>;
+    if (typeof provider !== "string" || typeof modelId !== "string") {
+      throw new HttpError(400, "model must be {provider, modelId}");
+    }
+    return { provider, modelId };
+  }
+
+  function parseThinking(t: unknown): string | undefined {
+    if (t === undefined) return undefined;
+    if (typeof t !== "string" || !THINKING.includes(t)) throw new HttpError(400, "invalid thinking level");
+    return t;
+  }
+
+  async function applySettings(chat: Chat, model?: { provider: string; modelId: string }, thinking?: string) {
+    if (model) await chat.expectOk({ type: "set_model", provider: model.provider, modelId: model.modelId });
+    if (thinking) await chat.expectOk({ type: "set_thinking_level", level: thinking });
+  }
+
+  async function start(id: string, body: Record<string, any>) {
+    const model = parseModel(body.model);
+    const thinking = parseThinking(body.thinking);
+    const sessionPath = body.sessionPath === undefined ? undefined : checkSessionPath(body.sessionPath);
+
+    const existing = live.get(id);
+    if (existing && !existing.exited) {
+      await existing.ready;
+      await applySettings(existing, model, thinking);
+      return json(200, { sessionFile: existing.sessionFile, state: await existing.state() });
+    }
+    if (live.size >= cfg.maxLive) throw new HttpError(429, `at most ${cfg.maxLive} live Pi processes`);
+
+    const existingGrave = grave.get(id);
+    if (existingGrave) {
+      clearTimeout(existingGrave.timer);
+      grave.delete(id);
+    }
+    const chat = new Chat(cfg, id, onGone);
+    live.set(id, chat); // reserve the slot before any await
+    try {
+      chat.launch(sessionPath);
+      await chat.ready;
+      await applySettings(chat, model, thinking);
+    } catch (e) {
+      await drop(chat);
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(502, `pi failed to start: ${(e as Error).message}`);
+    }
+    return json(200, { sessionFile: chat.sessionFile, state: await chat.state() });
+  }
+
+  async function prompt(id: string, kind: "prompt" | "steer" | "follow_up", body: Record<string, any>) {
+    const chat = requireLive(id);
+    if (typeof body.message !== "string" || body.message.trim() === "") {
+      throw new HttpError(400, "message must be a non-empty string");
+    }
+    let images: unknown;
+    if (body.images !== undefined) {
+      if (!Array.isArray(body.images)) throw new HttpError(400, "images must be an array");
+      for (const im of body.images) {
+        if (!im || im.type !== "image" || typeof im.data !== "string" || typeof im.mimeType !== "string") {
+          throw new HttpError(400, "each image needs {type:'image', data, mimeType}");
+        }
+      }
+      images = body.images;
+    }
+    chat.touch();
+    const cmd: Record<string, unknown> = { type: kind, message: body.message };
+    if (images !== undefined) cmd.images = images;
+    const before = chat.settledCount;
+    const resp = await chat.send(cmd);
+    if (!resp.success) throw rpcError(resp);
+    const disposition = resp.data?.disposition ?? null;
+    if (kind === "prompt" && disposition === "started" && chat.settledCount === before) chat.busy = true;
+    chat.touch();
+    return json(200, { disposition });
+  }
+
+  async function command(id: string, body: Record<string, any>) {
+    if (typeof body.name !== "string" || !ALLOWED_COMMANDS.has(body.name)) {
+      throw new HttpError(400, `command not allowed: ${String(body.name)}`);
+    }
+    const args = body.args ?? {};
+    if (!args || typeof args !== "object" || Array.isArray(args)) throw new HttpError(400, "args must be an object");
+    if (body.name === "switch_session") checkSessionPath(args.sessionPath);
+    const chat = requireLive(id);
+    chat.touch();
+    const resp = await chat.send({ ...args, type: body.name });
+    if (!resp.success) throw rpcError(resp);
+    chat.touch();
+    return json(200, { success: true, data: resp.data ?? null });
+  }
+
+  function events(id: string, url: URL): Response {
+    const raw = url.searchParams.get("after") ?? "0";
+    if (!/^\d+$/.test(raw)) throw new HttpError(400, "after must be a non-negative integer");
+    const after = Number(raw);
+    const chat = live.get(id) ?? grave.get(id)?.chat;
+    if (!chat) throw new HttpError(404, "no chat with that id");
+    return sseResponse(chat, after);
+  }
+
+  function sseResponse(chat: Chat, after: number): Response {
+    const enc = new TextEncoder();
+    let closed = false;
+    let sub: ((f: Frame) => void) | undefined;
+    let ka: ReturnType<typeof setInterval> | undefined;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const send = (f: Frame) => {
+          if (closed) return;
+          const head = f.id !== undefined ? `id: ${f.id}\n` : "";
+          controller.enqueue(enc.encode(`${head}event: ${f.event}\ndata: ${JSON.stringify(f.data)}\n\n`));
+        };
+        const finish = () => {
+          if (closed) return;
+          closed = true;
+          if (sub) chat.subs.delete(sub);
+          if (ka) clearInterval(ka);
+          try {
+            controller.close();
+          } catch {}
+        };
+        if (chat.ring.length > 0) {
+          const oldest = chat.ring[0].id!;
+          if (after + 1 < oldest) send({ event: "gap", data: { requested: after, oldest, latest: chat.seq } });
+          for (const f of chat.ring) if (f.id! > after) send(f);
+        }
+        if (chat.exited) {
+          finish();
+          return;
+        }
+        sub = (f: Frame) => {
+          send(f);
+          if (f.event === "process_exit") finish();
+        };
+        chat.subs.add(sub);
+        ka = setInterval(() => {
+          if (!closed) controller.enqueue(enc.encode(": ping\n\n"));
+        }, 15_000);
+      },
+      cancel() {
+        closed = true;
+        if (sub) chat.subs.delete(sub);
+        if (ka) clearInterval(ka);
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      },
+    });
+  }
+
+  async function route(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    const path = url.pathname;
+    const method = req.method;
+
+    let m: RegExpExecArray | null;
+    if (method === "GET" && path === "/sessions") {
+      return json(200, { sessions: await listSessions(cfg) });
+    }
+    if (method === "GET" && path === "/models") {
+      const chat = [...live.values()].find((c) => !c.exited);
+      const models = await listModelsOnce(cfg, chat ? { send: (c, t) => chat.send(c, t) } : undefined);
+      return json(200, { models });
+    }
+    if (method === "DELETE" && (m = /^\/chats\/([^/]+)$/.exec(path))) {
+      const id = requireChatId(m[1]);
+      const chat = live.get(id);
+      if (!chat) throw new HttpError(404, "no live chat with that id");
+      await drop(chat);
+      return json(200, { ok: true });
+    }
+    if (method === "GET" && (m = /^\/chats\/([^/]+)\/events$/.exec(path))) {
+      return events(requireChatId(m[1]), url);
+    }
+    if (method === "GET" && (m = /^\/chats\/([^/]+)\/commands$/.exec(path))) {
+      const chat = requireLive(requireChatId(m[1]));
+      const resp = await chat.send({ type: "get_commands" });
+      if (!resp.success) throw rpcError(resp);
+      return json(200, { commands: resp.data?.commands ?? [] });
+    }
+    if (method === "POST" && (m = /^\/chats\/([^/]+)\/(start|prompt|steer|follow_up|abort|ui_response|command)$/.exec(path))) {
+      const id = requireChatId(m[1]);
+      const action = m[2];
+      const body = await readBody(req);
+      switch (action) {
+        case "start":
+          return start(id, body);
+        case "prompt":
+        case "steer":
+        case "follow_up":
+          return prompt(id, action === "follow_up" ? "follow_up" : action, body);
+        case "abort": {
+          const chat = requireLive(id);
+          chat.touch();
+          await chat.expectOk({ type: "abort" });
+          chat.touch();
+          return json(200, { ok: true });
+        }
+        case "ui_response": {
+          const chat = requireLive(id);
+          if (typeof body.id !== "string" || body.id === "") throw new HttpError(400, "id is required");
+          let cmd: Record<string, unknown>;
+          if (typeof body.confirmed === "boolean") cmd = { type: "extension_ui_response", id: body.id, confirmed: body.confirmed };
+          else if (typeof body.value === "string") cmd = { type: "extension_ui_response", id: body.id, value: body.value };
+          else if (body.cancelled === true) cmd = { type: "extension_ui_response", id: body.id, cancelled: true };
+          else throw new HttpError(400, "send confirmed (boolean), value (string) or cancelled: true");
+          chat.touch();
+          chat.write(cmd);
+          return json(200, { ok: true });
+        }
+        case "command":
+          return command(id, body);
+      }
+    }
+    throw new HttpError(404, "not found");
+  }
+
+  return {
+    chats: { size: () => live.size },
+    async fetch(req: Request): Promise<Response> {
+      const provided = bearerFrom(req);
+      if (provided === null || !tokenMatches(provided, cfg.token)) return json(401, { error: "unauthorized" });
+      try {
+        return await route(req);
+      } catch (e) {
+        if (e instanceof HttpError) return json(e.status, { error: e.message });
+        console.error("pi-bridge: unhandled error:", (e as Error).message);
+        return json(500, { error: "internal error" });
+      }
+    },
+    async shutdown() {
+      clearInterval(reaper);
+      for (const chat of [...live.values()]) await drop(chat);
+      for (const g of grave.values()) clearTimeout(g.timer);
+      grave.clear();
+    },
+  };
+}
