@@ -19,6 +19,8 @@ export type SessionsProps = {
   onPatch: (id: string, p: Partial<ChatSession>) => void;
   onDeleted: (id: string) => void;
   onError: (msg: string) => void;
+  /** Phone drawer only: shows the "Chats" title row with a close button. */
+  onClose?: () => void;
 };
 
 export function Sessions(p: SessionsProps) {
@@ -35,6 +37,14 @@ export function Sessions(p: SessionsProps) {
 
   return (
     <>
+      {p.onClose && (
+        <div className="side-head">
+          <h2>Chats</h2>
+          <button className="ib" type="button" aria-label="Close chats" onClick={p.onClose}>
+            <Icon name="x" />
+          </button>
+        </div>
+      )}
       <div className="side-top">
         <button className="btn primary" type="button" onClick={p.onNew}>
           <Icon name="plus" className="i sm" />New chat
@@ -47,7 +57,7 @@ export function Sessions(p: SessionsProps) {
 
       <div className="side-list">
         <div className="side-scroll">
-          {groups.length === 0 && <p className="meta" style={{ padding: "12px 10px" }}>{p.archived ? "No archived chats." : p.query ? "No chats match." : "No chats yet."}</p>}
+          {groups.length === 0 && <p className="meta side-empty">{p.archived ? "No archived chats." : p.query ? "No chats match." : "No chats yet."}</p>}
           {groups.map(g => (
             <div key={g.label}>
               <div className="sec">{g.label}</div>

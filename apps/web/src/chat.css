@@ -1,6 +1,6 @@
 /* Chat chunk styles. Generated from docs/mockups/chat.html (scoped under .chatx).
    Colours come only from the tokens in styles.css. Imported only from the lazy chat chunk. */
-.chatx{height:var(--vvh,calc(100dvh - 60px));min-height:0;display:flex;flex-direction:column;background:var(--bg);color:var(--text);container-type:inline-size;min-width:0}
+.chatx{height:var(--vvh,calc(100dvh - 60px));min-height:0;display:flex;flex-direction:column;background:var(--bg);color:var(--text);min-width:0;--ctl-line:color-mix(in srgb,var(--mut) 70%,var(--surface))}
 .chatx .shell{flex:1;min-height:0;display:grid;grid-template-columns:280px minmax(0,1fr);position:relative}
 .chatx .sess-toggle{display:none}
 .chatx .muted{color:var(--mut)}
@@ -57,7 +57,7 @@
 .chatx .ttl-text[contenteditable=true]{outline:1px solid var(--accent);background:var(--surface);text-overflow:clip}
 .chatx .head-right{display:flex;align-items:center;gap:6px;flex:none}
 .chatx .pop-wrap{position:relative;display:inline-flex}
-.chatx .pill{height:34px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;white-space:nowrap}
+.chatx .pill{height:34px;padding:0 12px;border:1px solid var(--ctl-line);border-radius:999px;background:var(--surface);display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;white-space:nowrap}
 .chatx .pill:hover{background:var(--surface2)}
 .chatx .pill[aria-expanded=true]{border-color:var(--accent)}
 .chatx .prov{font-size:13px;color:var(--mut);font-weight:400}
@@ -67,12 +67,12 @@
 .chatx .ib{width:36px;height:36px;border:0;background:transparent;color:var(--mut);border-radius:10px;display:inline-grid;place-items:center;padding:0;flex:none}
 .chatx .ib:hover{background:var(--surface2);color:var(--text)}
 .chatx .ib[aria-expanded=true]{background:var(--surface2);color:var(--text)}
-.chatx .thread-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable both-edges}
+.chatx .thread-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:auto;scrollbar-width:thin}
 .chatx .col{max-width:760px;width:100%;margin:0 auto;padding:28px var(--gut) 32px;min-height:100%;display:flex;flex-direction:column;gap:28px}
 .chatx .empty{margin:auto 0;text-align:center;display:flex;flex-direction:column;align-items:center;gap:28px;padding:24px 0}
 .chatx .empty h2{font-size:26px}
 .chatx .sugg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:560px;text-align:left}
-.chatx .sugg{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:14px 16px;color:var(--text);min-height:64px;display:flex;flex-direction:column;gap:2px;font-size:14px}
+.chatx .sugg{border:1px solid var(--ctl-line);background:var(--surface);border-radius:14px;padding:14px 16px;color:var(--text);min-height:64px;display:flex;flex-direction:column;gap:2px;font-size:14px}
 .chatx .sugg:hover{border-color:var(--accent)}
 .chatx .sugg small{font-size:13px;color:var(--mut)}
 .chatx .msg{position:relative;display:flex;flex-direction:column;gap:8px;min-width:0}
@@ -143,11 +143,10 @@
 .chatx .cmdblk{margin:0;background:var(--surface2);border-radius:10px;padding:12px 14px;font-size:13px;overflow-x:auto;white-space:pre;border:1px solid var(--line)}
 .chatx .appr-btns{display:flex;gap:8px;flex-wrap:wrap}
 .chatx .composer-wrap{flex:none;position:relative;background:var(--bg)}
-.chatx .composer-wrap::before{content:"";position:absolute;left:0;right:0;top:-28px;height:28px;background:linear-gradient(to bottom,transparent,var(--bg));pointer-events:none}
 .chatx .comp-inner{max-width:760px;margin:0 auto;position:relative;padding:8px var(--gut) 12px}
 .chatx .jump{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:20;height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .chatx .jump:hover{background:var(--surface2)}
-.chatx .composer{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 10px 8px;display:flex;flex-direction:column;gap:6px;transition:border-color .15s}
+.chatx .composer{background:var(--surface);border:1px solid var(--ctl-line);border-radius:14px;padding:10px 10px 8px;display:flex;flex-direction:column;gap:6px;transition:border-color .15s}
 .chatx .composer:focus-within{border-color:var(--accent)}
 .chatx .attach-row{display:flex;flex-wrap:wrap;gap:8px;padding:2px 2px 4px}
 .chatx .achip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface2);border-radius:10px;padding:4px 6px 4px 4px;font-size:13px;max-width:100%;min-width:0}
@@ -175,7 +174,7 @@
 .chatx .seg button[aria-pressed=true]{background:var(--surface);color:var(--text);border-color:var(--line)}
 .chatx .think-pw{display:none}
 .chatx .send, .chatx .stop{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;padding:0;flex:none;border:1px solid transparent}
-.chatx .send{background:transparent;color:var(--mut);border-color:var(--line)}
+.chatx .send{background:var(--surface);color:var(--mut);border-color:var(--ctl-line)}
 .chatx .send:not(:disabled){background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 .chatx .send:not(:disabled):hover{background:var(--accent-ink);border-color:var(--accent-ink)}
 .chatx .send:disabled{cursor:default}
@@ -214,6 +213,23 @@
 .chatx .menu-item.danger .i{color:var(--err)}
 .chatx .menu-item.danger:hover{background:var(--err-bg)}
 .chatx .menu-sep{height:1px;background:var(--line);margin:6px 4px}
+/* Text dropdown trigger: text + chevron only. Border, background and focus ring come from the global focus-visible rule. */
+.chatx .tmenu-wrap{position:relative;display:inline-flex;min-width:0;max-width:100%}
+.chatx .ptrig{display:inline-flex;align-items:center;gap:4px;min-height:44px;max-width:100%;min-width:0;padding:0 4px;border:0;background:none;color:var(--mut);font-size:13px;font-weight:500;white-space:nowrap;cursor:pointer;border-radius:8px}
+.chatx .ptrig:hover,.chatx .ptrig[aria-expanded=true]{color:var(--text)}
+.chatx .ptrig-txt{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.chatx .ptrig .chev{width:12px;height:12px;stroke-width:2;color:currentColor;flex:none}
+/* Popup opens above the trigger. Fixed to the viewport: left/bottom are set inline by TextMenu after clamping to the 16px gutters. */
+.chatx .pop.tmenu{position:fixed;top:auto;right:auto;min-width:200px;max-width:calc(100vw - 32px);max-height:50vh;overflow-y:auto;padding:6px;border-radius:14px;box-shadow:var(--shadow);background:var(--surface);border:1px solid var(--line)}
+.chatx .titem{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:8px 10px;border:0;background:transparent;border-radius:10px;text-align:left;color:var(--text);font-size:14px;cursor:pointer}
+.chatx .titem:hover,.chatx .titem:focus-visible{background:var(--surface2)}
+.chatx .titem:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.chatx .titem:disabled{color:var(--mut);background:transparent;cursor:default}
+.chatx .titem-main{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px}
+.chatx .titem-name{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chatx .titem-sub,.chatx .titem-note{font-size:13px;color:var(--mut);white-space:nowrap}
+.chatx .titem .chk{width:16px;height:16px;color:var(--accent);opacity:0;flex:none}
+.chatx .titem[aria-checked=true] .chk{opacity:1}
 .chatx .cmd-item{display:flex;align-items:center;gap:12px;width:100%;min-height:40px;padding:6px 10px;border:0;background:transparent;border-radius:8px;text-align:left;color:var(--text)}
 .chatx .cmd-item:hover{background:var(--surface2)}
 .chatx .cmd-item code{font-size:13px;color:var(--accent-ink);background:none;padding:0;min-width:84px}
@@ -221,71 +237,101 @@
 .chatx .dropzone{position:absolute;inset:12px;z-index:15;border:1.5px dashed var(--accent);border-radius:14px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;pointer-events:none}
 .chatx .dz-in{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--accent-ink);font-weight:600;background:var(--surface);padding:18px 22px;border-radius:14px;border:1px solid var(--line)}
 .chatx .dz-in .i{width:28px;height:28px}
-@container (max-width:389px){.chatx.phone .pill .chev{display:none}}
-@container (max-width:359px){.chatx.phone .mpct{display:none}}
+/* ---- Added for the layout pass ---- */
+.chatx .side-head{display:none;align-items:center;justify-content:space-between;min-height:44px;padding:0 4px 0 16px}
+.chatx .side-head h2{margin:0;font-size:16px;font-weight:600;line-height:1.3}
+.chatx .side-scroll{display:flex;flex-direction:column}
+.chatx .side-empty{margin:auto;padding:16px;text-align:center;color:var(--mut)}
+.chatx .empty-head{display:flex;flex-direction:column;gap:4px}
+.chatx .empty-head h2{margin:0}
+.chatx .sugg{text-align:left}
+.chatx .sugg>span{font-weight:500}
+.chatx .sugg small{font-size:13px;color:var(--mut)}
+.chatx .btn.primary:disabled,.chatx .btn.primary:disabled:hover{background:var(--surface);border-color:var(--ctl-line);color:var(--mut);opacity:1;cursor:default}
+/* Icon-only send at <=480px: 44px round, solid accent when enabled (white icon, >=3:1), surface + bordered muted icon when disabled. */
+@media (max-width:480px){
+  .chatx .send-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .chatx .icon-send{width:44px;height:44px;min-height:44px;padding:0;border-radius:50%;flex:none}
+  .chatx .icon-send .i{width:18px;height:18px;margin:0}
+}
+/* Composer toolbar: left group (attach, camera, meter), right group (thinking, model, send). Right group wraps as a unit and stays right-aligned. */
+.chatx .comp-bottom{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;min-height:44px;position:relative;min-width:0}
+.chatx .comp-left,.chatx .comp-right{display:flex;align-items:center;gap:8px;min-width:0}
+.chatx .comp-right{margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+.chatx .comp-right .pop-wrap{min-width:0;max-width:100%}
+.chatx .comp-right .pill{min-width:0;max-width:100%;overflow:hidden}
+.chatx .pshort{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chatx .composer textarea{width:100%;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:inherit;line-height:1.45;resize:none;padding:6px 4px;box-sizing:border-box}
+.chatx .composer textarea::placeholder{color:var(--mut);opacity:1}
+.chatx .body a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+.chatx .body a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 
-/* Phone layout: applied via the .phone class (set from a 760px media query in Chat.tsx). */
-.chatx.phone{--gut:16px}
-.chatx.phone .hdr{display:none}
-.chatx.phone .tabbar{display:grid}
-.chatx.phone .sess-toggle{display:inline-grid;width:44px;height:44px}
+/* ---- Phone (max-width 760px; .phone is set in Chat.tsx). Chat sits inside .app, which already supplies the 16px header gutter.
+   Inner blocks use no extra horizontal inset, so header divider, cards, messages and composer share the header's left/right edges. ---- */
 .chatx.phone .shell{grid-template-columns:minmax(0,1fr)}
-.chatx.phone .side{position:absolute;top:0;bottom:0;left:0;width:min(300px,84%);transform:translateX(-102%);transition:transform .2s ease;z-index:40;box-shadow:none}
-.chatx.phone .side.open{transform:none;box-shadow:var(--shadow)}
-.chatx.phone .more{opacity:1;width:44px;height:44px;right:0}
-.chatx.phone .row{min-height:48px;padding-right:48px}
-.chatx.phone .row-wrap .pop{right:8px}
+.chatx.phone .sess-toggle,.chatx.phone .ib,.chatx.phone .more,.chatx.phone .msg-actions .ib,.chatx.phone .achip .x{width:44px;height:44px}
+/* 44px hit box with an 18px glyph: the 13px inset is cancelled so the glyph sits on the header gutter. */
+.chatx.phone .sess-toggle{display:inline-grid;margin-left:-13px}
+.chatx.phone .more{opacity:1;right:0}
 .chatx.phone .msg-actions{opacity:1}
-.chatx.phone .msg-actions .ib{width:44px;height:44px}
 .chatx.phone .prov{display:none}
-.chatx.phone .ib{width:44px;height:44px}
-.chatx.phone .thread-head{padding:0 8px;gap:4px;height:56px}
-.chatx.phone .head-right{gap:4px}
-.chatx.phone .pill{height:40px}
-.chatx.phone .pname{display:none}
-.chatx.phone .pshort{display:inline}
-.chatx.phone .think-pw{display:inline-flex}
-.chatx.phone .effort-lbl,.chatx.phone .seg{display:none}
-.chatx.phone .col{padding:20px var(--gut) 28px;gap:22px}
+
+/* Drawer: viewport-level overlay. Scrim and drawer sit above the header and the tab bar (tabbar z-index 30). */
+.chatx.phone .side{position:fixed;top:0;bottom:0;left:0;z-index:40;width:min(300px,84%);border-right:0;border-radius:0 16px 16px 0;overflow:hidden;padding-top:env(safe-area-inset-top);transform:translateX(-102%);visibility:hidden;transition:transform .2s ease,visibility 0s linear .2s}
+.chatx.phone .side.open{transform:none;visibility:visible;box-shadow:var(--shadow);transition:transform .2s ease}
+.chatx.phone .scrim{position:fixed;inset:0;z-index:39;background:var(--scrim);border:0;padding:0;cursor:default}
+.chatx.phone .side-head{display:flex}
+.chatx.phone .side-top{padding:8px 16px 12px;gap:8px}
+.chatx.phone .side-top .btn{width:100%;min-height:44px}
+.chatx.phone .search{height:44px}
+.chatx.phone .side-scroll{padding:0 0 8px}
+.chatx.phone .sec{padding:12px 16px 4px}
+.chatx.phone .row{min-height:48px;padding:8px 48px 8px 16px;border-radius:0}
+.chatx.phone .row[aria-current=true]{box-shadow:inset 3px 0 0 var(--accent)}
+.chatx.phone .row-wrap .pop{right:8px}
+.chatx.phone .rename{margin:0;border-radius:0;padding:8px 16px}
+.chatx.phone .side-foot{padding:0 0 env(safe-area-inset-bottom)}
+.chatx.phone .side-foot .link-btn{display:flex;width:100%;min-height:44px;padding:0 16px;border-radius:0;color:var(--text)}
+@media (hover:none){.chatx.phone .thread-scroll{scrollbar-width:none}}
+
+/* Sub-header: 44px row, no horizontal padding (see gutter note above). */
+.chatx.phone .thread-head{height:44px;padding:0;gap:4px}
+.chatx.phone .ttl{font-size:15px}
+.chatx.phone .head-right{gap:0;margin-right:-13px}
+
+.chatx.phone .col{padding:12px 0 24px;gap:16px}
 .chatx.phone .bubble{max-width:90%}
-.chatx.phone .sugg-grid{grid-template-columns:1fr}
-.chatx.phone .comp-inner{padding:8px var(--gut) 10px}
-.chatx.phone .comp-bottom{flex-wrap:nowrap;gap:4px;min-height:40px}
-.chatx.phone .composer{padding:8px 8px 8px}
-.chatx.phone #modelWrap,.chatx.phone .think-pw{position:static}
-.chatx.phone #modelWrap .pill,.chatx.phone #thinkBtn{height:40px;padding:0 8px;gap:4px;min-width:0}
-.chatx.phone .attach-pw .ib{width:40px;height:40px}
-.chatx.phone .tk-word,.chatx.phone .mlab{display:none}
-.chatx.phone .meter{gap:6px}
-.chatx.phone .bar{width:28px}
-@container (max-width:389px){.chatx.phone .pill .chev{display:none}}
-@container (max-width:359px){.chatx.phone .mpct{display:none}}
-.chatx.phone .send,.chatx.phone .stop{width:44px;height:44px}
-.chatx.phone .achip .x{width:44px;height:44px}
-.chatx.phone .comp-foot .hint{display:none}
-.chatx.phone .comp-foot{padding:8px 2px 0}
+
+/* Empty state: heading, then four compact cards that fit above the composer at 390x844. */
+.chatx.phone .empty{margin:8px 0 auto;padding:0;gap:16px;align-items:stretch;text-align:left}
+.chatx.phone .empty-head h2{font-size:24px}
+.chatx.phone .sugg-grid{grid-template-columns:1fr;gap:8px;max-width:none}
+.chatx.phone .sugg{padding:10px 14px;min-height:0;border-radius:14px;gap:2px}
+
+/* Composer: row 1 textarea (auto-grow, one line minimum); row 2 [attach][camera] [Thinking][model] ... [Send]. */
+.chatx.phone .comp-inner{padding:8px 0 10px}
+.chatx.phone .composer{position:relative;padding:6px;gap:4px;border-radius:14px}
+/* Textarea text starts at the same x as the attach/camera glyphs (6px composer padding + 13px icon inset). */
+.chatx.phone .composer textarea{font-size:16px;line-height:1.4;padding:8px 13px 4px;min-height:36px}
+.chatx.phone .comp-bottom{flex-wrap:nowrap;justify-content:flex-start;gap:4px;min-height:44px}
+.chatx.phone .comp-left,.chatx.phone .comp-right{gap:4px;min-width:0}
+.chatx.phone .comp-left{flex:none}
+.chatx.phone .comp-right{margin-left:auto;flex-wrap:nowrap;justify-content:flex-end}
+.chatx.phone .comp-right .pop-wrap{position:static}
+.chatx.phone .pill{height:44px;padding:0 10px;gap:4px;font-size:13px;color:var(--text)}
+.chatx.phone .pshort{display:inline}
+.chatx.phone .comp-right .pill{flex:none}
+/* Text-only dropdown triggers (phone composer): muted text, chevron, no border or background. 44px tall hit box. */
+.chatx.phone .comp-right{margin-right:13px}
+.chatx.phone .tmenu-wrap{flex:none;margin:0 -2px}
+.chatx.phone .ptrig{min-height:44px;padding:0 2px}
+.chatx.phone .effort{display:none}
+.chatx.phone .comp-foot{padding:4px 8px 0}
+/* Context meter: a 3px strip along the composer's bottom edge, so it takes no toolbar width. */
+.chatx.phone .composer .meter{position:absolute;left:0;right:0;bottom:0;height:3px;overflow:hidden;border-radius:0 0 14px 14px}
+.chatx.phone .composer .meter .bar{width:100% !important;height:100%;border-radius:0}
+@media (max-width:339px){.chatx.phone .comp-bottom,.chatx.phone .comp-right{flex-wrap:wrap}}
+
 .chatx.phone .pop.model{top:auto;bottom:calc(100% + 8px);left:0;right:0;width:auto;max-height:min(46vh,340px);overflow-y:auto}
 .chatx.phone .opt,.chatx.phone .menu-item,.chatx.phone .cmd-item{min-height:44px}
 .chatx.phone .jump{bottom:calc(100% + 6px)}
-
-
-
-/* Composer toolbar: wrap instead of overflowing; the model pill truncates; Send always stays on the row. */
-.chatx .comp-bottom{flex-wrap:wrap;row-gap:6px;min-width:0}
-.chatx .comp-bottom .pop-wrap{min-width:0;max-width:100%}
-.chatx .comp-bottom .pill{max-width:100%;min-width:0;overflow:hidden}
-.chatx .comp-bottom .pill .pname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chatx .comp-bottom .btn.primary{flex:0 0 auto}
-.chatx .comp-bottom .spacer{flex:1 1 0;min-width:0}
-/* The phone pills and the composer toolbar must not clip: pills keep their label width on wide phones. */
-@media (max-width: 389px){.chatx .comp-bottom .pill .pname{display:none}}
-/* Closed phone drawer: fully off-canvas and out of the tab order. */
-.chatx.phone .side:not(.open){transform:translateX(-100%);visibility:hidden;transition:transform .2s ease,visibility 0s .2s}
-.chatx.phone .side.open{visibility:visible}
-/* Composer input: token-only, no browser chrome. */
-.chatx .composer textarea{width:100%;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:inherit;line-height:1.45;resize:none;padding:6px 4px;box-sizing:border-box}
-.chatx .composer textarea::placeholder{color:var(--muted)}
-.chatx .composer textarea:focus-visible{outline:none}
-/* Assistant links read as links. */
-.chatx .body a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
-.chatx .body a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}

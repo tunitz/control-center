@@ -3,6 +3,9 @@ import { Icon } from "./Icon";
 import { ACCEPTED_TYPES, MAX_BYTES, prepareImage } from "../../chat/imaging";
 import { effortOptions, parseEffort, parseSlash, suggestions, type Parsed } from "../../chat/slash";
 import { contextMeter } from "../../chat/context";
+import { shortModelLabel } from "./label";
+import { TextMenu } from "./TextMenu";
+import { effortLabel, effortMenuItems } from "../../chat/menu";
 import type { ChatModel, Effort } from "../../chat/types";
 
 export type Pending = { key: string; file: File; name: string; kind: "image" | "file"; status: "preparing" | "ready" | "error"; error: string; note: string };
@@ -37,6 +40,7 @@ export function Composer(p: ComposerProps) {
   const [notice, setNotice] = useState("");
   const [drag, setDrag] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [effortOpen, setEffortOpen] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileIn = useRef<HTMLInputElement>(null);
   const camIn = useRef<HTMLInputElement>(null);
@@ -139,7 +143,7 @@ export function Composer(p: ComposerProps) {
   };
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Escape") { setModelOpen(false); return; }
+    if (e.key === "Escape") { setModelOpen(false); setEffortOpen(false); return; }
     if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
     // Phone: Enter is a newline. Desktop: Enter sends, Shift+Enter is a newline.
     if (p.phone || e.shiftKey) return;
@@ -205,48 +209,46 @@ export function Composer(p: ComposerProps) {
             onPaste={onPaste}
           />
           <div className="comp-bottom">
-            <button className="ib" type="button" aria-label="Attach file" title="Attach" onClick={() => fileIn.current?.click()}>
-              <Icon name="clip" />
-            </button>
-            {p.phone && (
-              <button className="ib" type="button" aria-label="Take a photo" title="Camera" onClick={() => camIn.current?.click()}>
-                <Icon name="camera" />
+            <div className="comp-left">
+              <button className="ib" type="button" aria-label="Attach file" title="Attach" onClick={() => fileIn.current?.click()}>
+                <Icon name="clip" />
               </button>
-            )}
+              {p.phone && (
+                <button className="ib" type="button" aria-label="Take photo" title="Camera" onClick={() => camIn.current?.click()}>
+                  <Icon name="camera" />
+                </button>
+              )}
+              {meter && (
+                <span className="meter" title={`Context ${meter.label}`} aria-label={`Context ${meter.label}`}>
+                  <span className="bar" style={{ width: `${meter.pct}%` }} />
+                </span>
+              )}
+            </div>
             <input ref={fileIn} type="file" hidden multiple accept={[...ACCEPTED_TYPES, "application/pdf", ".txt,.md,.log,.csv,.json,.yaml,.yml,.sh,.py,.ts,.js,.sql,.xml,.html,.css,.docx"].join(",")} onChange={e => { if (e.target.files) void addFiles(e.target.files); e.target.value = ""; }} />
             <input ref={camIn} type="file" hidden accept="image/*" capture="environment" onChange={e => { if (e.target.files) void addFiles(e.target.files); e.target.value = ""; }} />
 
+            <div className={`comp-right${busy ? " busy" : ""}`}>
             {p.phone && efforts.length > 0 && (
-              <button className="pill" type="button" aria-label="Thinking level" onClick={() => p.onEffort(efforts[(efforts.indexOf(p.effort ?? efforts[0]) + 1) % efforts.length])}>
-                Thinking: {p.effort ?? efforts[0]}
-              </button>
+              <TextMenu
+                ariaLabel="Thinking level"
+                trigger={`Think: ${effortLabel(p.effort ?? efforts[0])}`}
+                items={effortMenuItems(model).map(i => ({ value: i.value, label: i.label }))}
+                value={p.effort ?? efforts[0]}
+                open={effortOpen}
+                onOpenChange={setEffortOpen}
+                onSelect={v => p.onEffort(v as Effort)}
+              />
             )}
             {p.phone && (
-            <div className="pop-wrap">
-              <button className="pill" type="button" aria-haspopup="listbox" aria-expanded={modelOpen} onClick={() => setModelOpen(o => !o)}>
-                <span className="pshort">{model?.label ?? p.model}</span>
-                <span className="pname">{model?.label ?? p.model}</span>
-                <Icon name="chev" className="i chev" />
-              </button>
-              {modelOpen && (
-                <div className="pop model" role="listbox" aria-label="Model">
-                  {Array.from(new Set(p.models.map(m => m.provider))).map(prov => (
-                    <div key={prov}>
-                      <div className="grp">{prov}</div>
-                      {p.models.filter(m => m.provider === prov).map(m => (
-                        <button key={m.id} type="button" role="option" aria-selected={m.id === p.model} className="opt" disabled={!m.online}
-                          onClick={() => { p.onModel(m.id); setModelOpen(false); }}>
-                          <span className="opt-main"><span className="opt-name">{m.label}</span>
-                            {!m.online && <span className="chip">offline</span>}
-                          </span>
-                          {m.id === p.model && <Icon name="check" className="i chk" />}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+              <TextMenu
+                ariaLabel="Model"
+                trigger={shortModelLabel(model?.label ?? p.model)}
+                items={p.models.map(m => ({ value: m.id, label: shortModelLabel(m.label), sub: m.provider, note: m.online ? undefined : "offline", disabled: !m.online }))}
+                value={p.model}
+                open={modelOpen}
+                onOpenChange={setModelOpen}
+                onSelect={id => p.onModel(id)}
+              />
             )}
 
             {efforts.length > 0 && (
@@ -260,24 +262,19 @@ export function Composer(p: ComposerProps) {
               </div>
             )}
 
-            <span className="spacer" />
-            {meter && (
-              <span className="meter" title={`Context ${meter.label}`} aria-label={`Context ${meter.label}`}>
-                <span className="bar" style={{ width: `${meter.pct}%` }} />
-              </span>
-            )}
             {busy && p.runId && (
-              <button className="btn" type="button" onClick={p.onStop}>
-                <Icon name="stop" className="i sm" />Stop
+              <button className="btn stop icon-send" type="button" aria-label="Stop" onClick={p.onStop}>
+                <Icon name="stop" className="i sm" /><span className="send-lbl">Stop</span>
               </button>
             )}
             {busy ? (
-              <button className="btn primary" type="button" disabled={!canSteer} onClick={() => void steer()}>Steer</button>
+              <button className="btn primary icon-send" type="button" aria-label="Steer" disabled={!canSteer} onClick={() => void steer()}><Icon name="up" className="i sm" /><span className="send-lbl">Steer</span></button>
             ) : (
-              <button className="btn primary" type="button" disabled={!canSend} onClick={() => void submit()}>
-                <Icon name="up" className="i sm" />Send
+              <button className="btn primary icon-send" type="button" aria-label="Send" disabled={!canSend} onClick={() => void submit()}>
+                <Icon name="up" className="i sm" /><span className="send-lbl">Send</span>
               </button>
             )}
+            </div>
           </div>
         </div>
         <div className="comp-foot">

@@ -22,7 +22,7 @@ const PHONE_QUERY = "(max-width: 760px)";
 const SUGGESTIONS: { title: string; sub: string; prompt: string }[] = [
   { title: "Check unit health", sub: "systemd services on tun-minipc", prompt: "Check the health of the systemd units on tun-minipc." },
   { title: "Summarise today's alerts", sub: "Alerts from the last 24 hours", prompt: "Summarise today's alerts from the last 24 hours." },
-  { title: "Restart a service", sub: "Runs on this machine", prompt: "Restart the service I name, and ask me before running anything." },
+  { title: "Restart a service", sub: "Asks Hermes to restart it", prompt: "Restart the service I name, and ask me before running anything." },
   { title: "Explain this log", sub: "Attach a file or paste output", prompt: "Explain this log. I will attach it." },
 ];
 
@@ -190,6 +190,7 @@ export default function Chat({ hash }: { hash: string }) {
       if (id === activeId) navigate("#/chat");
     },
     onError: setPageErr,
+    onClose: phone ? () => setDrawer(false) : undefined,
   };
 
   const title = active?.title || "New chat";
@@ -218,7 +219,7 @@ export default function Chat({ hash }: { hash: string }) {
                 </select>
               </div>}
               <div className="pop-wrap">
-                <button className="ib" type="button" aria-haspopup="menu" aria-expanded={menu} aria-label="More thread options" onClick={() => setMenu(m => !m)}>
+                <button className="ib" type="button" aria-haspopup="menu" aria-expanded={menu} aria-label="Chat menu" onClick={() => setMenu(m => !m)}>
                   <Icon name="dots" />
                 </button>
                 {menu && (
@@ -243,8 +244,10 @@ export default function Chat({ hash }: { hash: string }) {
 
               {emptyView && !thread.loading && (
                 <div className="empty">
-                  <h2>What can I help with?</h2>
-                  <p className="meta" role="note">Hermes can run commands on this machine.</p>
+                  <div className="empty-head">
+                    <h2>What can I help with?</h2>
+                    <p className="meta" role="note">Hermes can run commands on this machine.</p>
+                  </div>
                   <div className="sugg-grid">
                     {SUGGESTIONS.map(s => (
                       <button key={s.title} className="sugg" type="button" onClick={() => setPrefill(s.prompt)}>
