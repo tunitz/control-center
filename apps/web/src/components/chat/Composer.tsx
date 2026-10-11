@@ -27,6 +27,8 @@ export type ComposerProps = {
   onSteer: (text: string) => Promise<"ok" | "finished">;
   /** Page-level slash commands (retry, title, export, pin, archive, delete). Returns a short notice. */
   onAction: (name: string, arg: string) => Promise<string>;
+  /** Long command output goes into the thread as a collapsible row, not under the composer. */
+  onNote: (title: string, body: string) => void;
   onStop: () => void;
   onNew: () => void;
   onModel: (id: string) => void;
@@ -48,6 +50,12 @@ export function Composer(p: ComposerProps) {
   const efforts = effortOptions(model);
   const meter = contextMeter(p.ctxInput, p.ctxWindow);
   const slash = suggestions(text);
+  // Short notices clear themselves; they used to stay under the composer until the next send.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(""), 5000);
+    return () => clearTimeout(t);
+  }, [notice]);
   const busy = p.running;
 
   // Autogrow up to ~8 lines.
@@ -87,7 +95,7 @@ export function Composer(p: ComposerProps) {
 
   const runCommand = (cmd: Exclude<Parsed, null>) => {
     if (cmd.kind === "unknown") { setNotice(unknownText(cmd.name)); return true; }
-    if (cmd.name === "help") { setNotice(helpText()); setText(""); return true; }
+    if (cmd.name === "help") { p.onNote("/help", helpText()); setText(""); return true; }
     if ((PAGE_COMMANDS as readonly string[]).includes(cmd.name)) {
       const keep = text;
       setText("");

@@ -172,8 +172,19 @@ export default function Chat({ hash }: { hash: string }) {
     catch (e) { if ((e as { status?: number }).status === 409) return "finished"; throw e; }
   };
 
+  const [notes, setNotes] = useState<{ id: number; title: string; body: string }[]>([]);
+  const [noteOpen, setNoteOpen] = useState<number | null>(null);
+  const noteSeq = useRef(0);
+  useEffect(() => { setNotes([]); setNoteOpen(null); }, [activeId]);
+  const addNote = (title: string, body: string) => {
+    const id = ++noteSeq.current;
+    setNotes(prev => [...prev, { id, title, body }]);
+    setNoteOpen(id);
+    requestAnimationFrame(() => scrollToEnd());
+  };
+
   const onAction = async (name: string, arg: string): Promise<string> => {
-    if (name === "credits") return (await chat.credits()).text.split(" | ").join("\n");
+    if (name === "credits") { addNote("/credits", (await chat.credits()).text.split(" | ").join("\n")); return ""; }
     if (name === "steer") {
       if (!arg) return "Usage: /steer <note for the running task>";
       return (await onSteer(arg)) === "ok" ? "Steer sent to the running task." : "Nothing is running.";
@@ -313,6 +324,18 @@ export default function Chat({ hash }: { hash: string }) {
                 ),
               )}
 
+              {notes.map(n => (
+                <div className="fold-wrap" key={n.id}>
+                  <button type="button" className="fold" aria-expanded={noteOpen === n.id} aria-controls={`note-${n.id}`} onClick={() => setNoteOpen(noteOpen === n.id ? null : n.id)}>
+                    <Icon name="chevr" className="chev" />
+                    <Icon name="term" className="i sm" />
+                    <span className="tname">{n.title}</span>
+                    <span className="stat-ok">local</span>
+                  </button>
+                  {noteOpen === n.id && <pre className="out" id={`note-${n.id}`} style={{ whiteSpace: "pre-wrap" }}>{n.body}</pre>}
+                </div>
+              ))}
+
               {!thread.runId && (active?.awaiting ?? 0) > 0 && (
                 <div className="fold static" role="status" aria-live="polite">
                   <span className="spin" aria-hidden="true" />
@@ -339,6 +362,7 @@ export default function Chat({ hash }: { hash: string }) {
             onSend={onSend}
             onSteer={onSteer}
             onAction={onAction}
+            onNote={addNote}
             onStop={() => { thread.stop().catch(e => setPageErr((e as Error).message)); }}
             onNew={() => void newChat()}
             onModel={id => void onModel(id)}
