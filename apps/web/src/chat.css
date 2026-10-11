@@ -327,9 +327,8 @@
 .chatx.phone .ptrig{min-height:44px;padding:0 2px}
 .chatx.phone .effort{display:none}
 .chatx.phone .comp-foot{padding:4px 8px 0}
-/* Context meter: a 3px strip along the composer's bottom edge, so it takes no toolbar width. */
-.chatx.phone .composer .meter{position:absolute;left:0;right:0;bottom:0;height:3px;overflow:hidden;border-radius:0 0 14px 14px}
-.chatx.phone .composer .meter .bar{width:100% !important;height:100%;border-radius:0}
+/* Phone: no meter bar (unlabeled, confusing). The footer says "Context N% full" once usage passes 70%. */
+.chatx.phone .composer .meter{display:none}
 @media (max-width:339px){.chatx.phone .comp-bottom,.chatx.phone .comp-right{flex-wrap:wrap}}
 
 .chatx.phone .pop.model{top:auto;bottom:calc(100% + 8px);left:0;right:0;width:auto;max-height:min(46vh,340px);overflow-y:auto}
