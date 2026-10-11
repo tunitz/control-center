@@ -76,3 +76,19 @@ Global, shared by every Pi chat; stored by the bridge as files in Pi's agent dir
 - `gate` can only add rules: `extraProtectedPaths` (paths under the home directory, no `..`) and `extraRisky` (patterns that must compile). Loosening keys are rejected.
 - Per-chat `tools` (`string[] | null`) is part of `pi-settings` (GET/PATCH) and overrides `defaultTools`; `null` removes the override.
 - Pi's own config files (prompt, notes, gate and tool config, extensions) are on the gate's protected list, so a Pi chat cannot rewrite its own rules.
+
+## Pi working directory (additive)
+
+A Pi chat may start in a directory the user picks, instead of `workspace/<chatId>`. The choice is fixed when the chat is created.
+
+- **Browse**: `GET /api/chat/pi/dirs?path=<abs>` (default: the bridge user's HOME) → `200 {path, parent|null, entries:[{name,path}]}`. Only subdirectories, sorted by name case-insensitively, dot-folders omitted. `parent` is null at HOME.
+- **Create folder**: `POST /api/chat/pi/dirs {parent, name}` → `201 {path,name}`. `name`: 1–64 chars, no `/`, no NUL, not starting with `.`. `409` if it exists. Needs `x-cc`.
+- The bridge's `400`/`409` pass through with their `{error}` message; they are not wrapped as `502`. With Pi off, both routes answer `503`.
+- **Create**: `POST /api/chat/sessions {backend:"pi", model, cwd?}`. `cwd` is an optional string, allowed only for `backend:"pi"` (`400` otherwise). `cwd` is validated by the bridge (same rules as browse, plus the chosen-cwd rule below). Invalid → `400`, nothing is stored.
+- **Session JSON**: `cwd: string | null`. `null` for Hermes chats and for default-workspace Pi chats. The stored value is `chat_sessions.cwd` (nullable TEXT, additive migration).
+- **Rules** (enforced by the bridge, pi-bridge/src/pi-dirs.ts):
+  - Paths are absolute, resolved with realpath, and must lie inside HOME. Symlinks that escape HOME are rejected.
+  - Protected: `~/.hermes`, `~/.ssh`, `~/.local/share/cc-pi` (the Pi agent dir), `~/projects/control-center/data`, and anything under them. Listing skips protected entries.
+  - A chosen cwd must not be, contain, or sit inside a protected path. HOME itself is allowed as a cwd.
+- **Resume**: every Pi `/start` sent by the server carries the chat's stored `cwd`, so a reaped chat resumes in the same directory. The bridge keeps the cwd for the chat's life; a `/start` with a different cwd returns `409`.
+- **Bridge**: `GET /dirs?path=`, `POST /dirs {parent,name}`, and `POST /chats/:id/start {cwd?}`. `/start` echoes `cwd` (and `state.cwd`). Without `cwd`, the chat runs in `workspace/<chatId>` as before.

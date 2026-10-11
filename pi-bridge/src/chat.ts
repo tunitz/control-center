@@ -46,8 +46,11 @@ export class Chat {
     private readonly onGone: (chat: Chat) => void,
   ) {}
 
+  /** The directory the user chose at creation (fixed for the chat's life). null = workspace/<chatId>. */
+  chosenCwd: string | null = null;
+
   get cwd(): string {
-    return join(this.cfg.workspaceRoot, this.id);
+    return this.chosenCwd ?? join(this.cfg.workspaceRoot, this.id);
   }
 
   touch(): void {

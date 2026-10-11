@@ -8,6 +8,8 @@ export interface BridgeConfig {
   agentDir: string;
   sessionDir: string;
   workspaceRoot: string;
+  /** The bridge user's HOME. The directory picker (GET/POST /dirs) never leaves it. */
+  homeDir: string;
   piPackageDir: string;
   deepseekApiKey?: string;
   /** Claude subscription token or API key for Pi's Anthropic provider. Passed to Pi only. */
@@ -44,6 +46,7 @@ export function loadConfig(env: Env = process.env): BridgeConfig {
     agentDir,
     sessionDir: join(agentDir, "sessions"),
     workspaceRoot: join(piHome, "workspace"),
+    homeDir: home,
     piPackageDir: join(piHome, "node_modules/@earendil-works/pi-coding-agent"),
     deepseekApiKey: env.DEEPSEEK_API_KEY || undefined,
     anthropicOAuthToken: env.ANTHROPIC_OAUTH_TOKEN || undefined,

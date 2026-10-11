@@ -13,6 +13,8 @@ export type ChatSession = {
   titleAuto: boolean;
   model: string;
   provider: string;
+  /** Pi chats started in a chosen directory: that path. null for Hermes and for default-workspace Pi chats. */
+  cwd: string | null;
   effort: Effort | null;
   pinned: boolean;
   archived: boolean;
@@ -88,12 +90,12 @@ export type NewAttachment = {
 };
 
 const PREVIEW_SQL = "(SELECT substr(m.text, 1, 140) FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.seq DESC LIMIT 1)";
-const SESSION_COLS = `s.id, s.title, s.title_auto, s.model, s.provider, s.effort, s.pinned, s.archived,
+const SESSION_COLS = `s.id, s.title, s.title_auto, s.model, s.provider, s.cwd, s.effort, s.pinned, s.archived,
   s.created_at, s.updated_at, s.run_state, s.run_id, s.unread, ${PREVIEW_SQL} AS preview,
   COALESCE((SELECT a.expected FROM chat_await a WHERE a.session_id = s.id), 0) AS awaiting`;
 
 type SessionRow = {
-  id: string; title: string; title_auto: number; model: string; provider: string; effort: string | null;
+  id: string; title: string; title_auto: number; model: string; provider: string; cwd: string | null; effort: string | null;
   pinned: number; archived: number; created_at: number; updated_at: number; run_state: string;
   run_id: string | null; unread: number; preview: string | null; awaiting: number;
 };
@@ -105,6 +107,7 @@ function toSession(r: SessionRow): ChatSession {
     titleAuto: r.title_auto === 1,
     model: r.model,
     provider: r.provider,
+    cwd: r.cwd ?? null,
     effort: (r.effort as Effort | null) ?? null,
     pinned: r.pinned === 1,
     archived: r.archived === 1,
@@ -132,14 +135,14 @@ export function listSessions(db: Database, opts: { archived?: boolean } = {}): C
 
 export function createSession(
   db: Database,
-  s: { id: string; model: string; provider: string; effort: Effort | null; now: number; title?: string; lockedModel?: string | null; backend?: "hermes" | "pi"; backendRef?: string | null },
+  s: { id: string; model: string; provider: string; effort: Effort | null; now: number; title?: string; lockedModel?: string | null; backend?: "hermes" | "pi"; backendRef?: string | null; cwd?: string | null },
 ): ChatSession {
   db.query(
     `INSERT INTO chat_sessions (id, title, title_auto, model, provider, model_locked, effort, pinned, archived,
-       created_at, updated_at, run_state, run_id, unread, backend, backend_ref)
-     VALUES (?, ?, 1, ?, ?, ?, ?, 0, 0, ?, ?, 'idle', NULL, 0, ?, ?)`,
+       created_at, updated_at, run_state, run_id, unread, backend, backend_ref, cwd)
+     VALUES (?, ?, 1, ?, ?, ?, ?, 0, 0, ?, ?, 'idle', NULL, 0, ?, ?, ?)`,
   ).run(s.id, s.title ?? "New chat", s.model, s.provider, s.lockedModel ?? null, s.effort, s.now, s.now,
-    s.backend ?? "hermes", s.backendRef ?? null);
+    s.backend ?? "hermes", s.backendRef ?? null, s.cwd ?? null);
   return getSession(db, s.id)!;
 }
 

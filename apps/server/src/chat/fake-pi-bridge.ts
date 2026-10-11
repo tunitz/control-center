@@ -13,6 +13,9 @@
  *   otherwise        streams "Hello" + " world", settles stopReason "stop"
  */
 import type { Server } from "bun";
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, sep } from "node:path";
 
 export type FakeModel = { provider: string; id: string; name?: string; reasoning?: boolean; input?: string[] };
 type Frame = { id: number; event: string; data: any };
@@ -21,6 +24,8 @@ type Sub = { send(f: Frame): void; close(): void };
 type ChatRec = {
   id: string;
   sessionFile: string;
+  /** Fixed at creation. null = the default workspace (reported as-is, not created on disk). */
+  cwd: string | null;
   live: boolean;
   busy: boolean;
   aborted: boolean;
@@ -63,6 +68,8 @@ export class FakePiBridge {
   /** The next N GET /models calls fail with 500 (for the no-cache-on-failure test). */
   failModels = 0;
   readonly url: string;
+  /** A fake HOME on disk, with the same protected rules as the real bridge (pi-bridge/src/pi-dirs.ts). */
+  readonly home: string;
   private readonly server: Server<undefined>;
 
   private constructor(server: Server<undefined>, token: string, models: FakeModel[]) {
@@ -70,6 +77,13 @@ export class FakePiBridge {
     this.token = token;
     this.models = models;
     this.url = `http://127.0.0.1:${server.port}`;
+    this.home = mkdtempSync(join(tmpdir(), "fake-pi-home-"));
+    for (const d of ["projects/alpha", "projects/control-center/data", "Beta", "gamma", ".hidden", ".hermes", ".ssh", ".local/share/cc-pi/agent"]) {
+      mkdirSync(join(this.home, d), { recursive: true });
+    }
+    writeFileSync(join(this.home, "notes.txt"), "x");
+    symlinkSync("/etc", join(this.home, "escape-link"));
+    this.home = realpathSync(this.home);
   }
 
   static start(opts: { token?: string; models?: FakeModel[] } = {}): FakePiBridge {
@@ -114,6 +128,8 @@ export class FakePiBridge {
       return json(200, { models: this.models });
     }
     if (p === "/config" && method === "GET") return json(200, { ...this.config, knownTools: ["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"] });
+    if (method === "GET" && p === "/dirs") return this.listDirs(url.searchParams.get("path"));
+    if (method === "POST" && p === "/dirs") return this.makeDir(body);
     if (p === "/config" && method === "PUT") {
       const tools = body?.defaultTools;
       if (Array.isArray(tools) && tools.some((t: string) => !["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"].includes(t))) {
@@ -138,14 +154,70 @@ export class FakePiBridge {
     return json(404, { error: "not found" });
   }
 
+  /** Listing rule (as the bridge): a path inside HOME that is not itself protected. */
+  private listableDir(raw: unknown): { path: string; error?: undefined } | { error: string; path?: undefined } {
+    if (typeof raw !== "string" || !isAbsolute(raw)) return { error: "path must be an absolute path" };
+    let real: string;
+    try { real = realpathSync(raw); } catch { return { error: "path does not exist" }; }
+    if (!statSync(real).isDirectory()) return { error: "path is not a directory" };
+    if (!(real === this.home || real.startsWith(this.home + sep))) return { error: "path is outside HOME" };
+    if (this.protectedRoots().some((r) => real === r || real.startsWith(r + sep))) return { error: "path is a protected directory" };
+    return { path: real };
+  }
+
+  private protectedRoots(): string[] {
+    return [".hermes", ".ssh", ".local/share/cc-pi", "projects/control-center/data"].map((r) => join(this.home, r));
+  }
+
+  /** Chosen-cwd rule (as the bridge): listable, and must not contain a protected folder (HOME itself is allowed). */
+  private validateCwd(raw: unknown): { path: string; error?: undefined } | { error: string; path?: undefined } {
+    const v = this.listableDir(raw);
+    if (v.path === undefined) return v;
+    if (v.path !== this.home && this.protectedRoots().some((r) => r.startsWith(v.path + sep))) {
+      return { error: "cwd cannot contain a protected directory" };
+    }
+    return { path: v.path };
+  }
+
+  private listDirs(raw: string | null): Response {
+    const dir = raw === null ? this.home : this.listableDir(raw).path;
+    if (dir === undefined) return json(400, { error: this.listableDir(raw)!.error });
+    const entries = readdirSync(dir, { withFileTypes: true })
+      .filter((d) => !d.name.startsWith("."))
+      .map((d) => ({ name: d.name, path: join(dir, d.name) }))
+      .filter((e) => { try { return statSync(e.path).isDirectory() && this.listableDir(e.path).path !== undefined; } catch { return false; } })
+      .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    return json(200, { path: dir, parent: dir === this.home ? null : dirname(dir), entries });
+  }
+
+  private makeDir(body: any): Response {
+    const parent = this.validateCwd(body.parent);
+    if (parent.path === undefined) return json(400, { error: parent.error });
+    const name = body.name;
+    if (typeof name !== "string" || name.length < 1 || name.length > 64) return json(400, { error: "name must be 1-64 characters" });
+    if (name.includes("/") || name.includes("\0")) return json(400, { error: "name cannot contain / or NUL" });
+    if (name.startsWith(".")) return json(400, { error: "name cannot start with ." });
+    const path = join(parent.path, name);
+    try { mkdirSync(path); } catch { return json(409, { error: `${name} already exists` }); }
+    return json(201, { path, name });
+  }
+
   private post(id: string, action: string, body: any): Response {
     if (action === "start") {
       let rec = this.chats.get(id);
+      let cwd: string | null = null;
+      if (body.cwd !== undefined && body.cwd !== null) {
+        const v = this.validateCwd(body.cwd);
+        if (v.path === undefined) return json(400, { error: v.error });
+        cwd = v.path;
+      }
+      if (rec && rec.live && cwd !== null && cwd !== rec.cwd) return json(409, { error: "cwd is fixed when the chat is created" });
       if (!rec || !rec.live) {
         const sessionFile = typeof body.sessionPath === "string" ? body.sessionPath : `/fake/sessions/${id}.jsonl`;
         rec = {
           id, sessionFile, live: true, busy: false, aborted: false, abort: null, seq: 0, ring: [],
           subs: new Set(), model: null, prompts: [], steers: [], answer: null, compactions: 0,
+          cwd: cwd ?? (rec?.cwd ?? null),
         };
         this.chats.set(id, rec);
       }
@@ -154,7 +226,7 @@ export class FakePiBridge {
         if (!found) return json(502, { error: `Model not found: ${body.model.provider}/${body.model.modelId}` });
         rec.model = { provider: found.provider, modelId: found.id };
       }
-      return json(200, { sessionFile: rec.sessionFile, state: { sessionFile: rec.sessionFile, isStreaming: rec.busy } });
+      return json(200, { sessionFile: rec.sessionFile, cwd: rec.cwd, state: { sessionFile: rec.sessionFile, isStreaming: rec.busy, cwd: rec.cwd } });
     }
     const rec = this.chats.get(id);
     if (!rec || !rec.live) return json(404, { error: "no live chat with that id" });

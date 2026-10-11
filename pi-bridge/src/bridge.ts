@@ -3,6 +3,7 @@ import { tokenMatches, bearerFrom } from "./auth";
 import { type BridgeConfig } from "./config";
 import { Chat, HttpError, rpcError, type Frame } from "./chat";
 import { listModelsOnce, listSessions } from "./sessions";
+import { chosenCwd, listDirs, makeDir } from "./pi-dirs";
 
 export interface Bridge {
   fetch(req: Request): Promise<Response>;
@@ -163,24 +164,31 @@ export function createBridge(cfg: BridgeConfig): Bridge {
     const thinking = parseThinking(body.thinking);
     const settings = parseSettings(body.settings);
     const sessionPath = body.sessionPath === undefined ? undefined : checkSessionPath(body.sessionPath);
+    // A chat's cwd is fixed when it is created. Absent keeps what the live chat has (or the workspace).
+    const requested = body.cwd === undefined || body.cwd === null ? undefined : chosenCwd(cfg, body.cwd);
+    const running = live.get(id);
+    const liveChat = running && !running.exited ? running : undefined;
+    if (liveChat && requested !== undefined && requested !== liveChat.chosenCwd) {
+      throw new HttpError(409, "cwd is fixed when the chat is created");
+    }
+    const cwd = liveChat ? liveChat.chosenCwd : requested ?? null;
 
     // What Pi reads only at startup: the tool list and the config files. A start that names `tools`
     // sets them (null = the global default). A start that does not, keeps what the running process
     // has, so a model change or a settings read never resets a chat's tools. If the tools or the
     // config files changed since launch, the process is restarted (idle only).
     const namesTools = settings !== undefined && "tools" in settings;
-    const existing = live.get(id);
-    const running = existing && !existing.exited ? existing : undefined;
+    const existing = liveChat;
     const tools = namesTools ? settings!.tools ?? readConfig(cfg.agentDir).defaultTools
-      : running ? running.launchTools : readConfig(cfg.agentDir).defaultTools;
+      : running && liveChat ? liveChat.launchTools : readConfig(cfg.agentDir).defaultTools;
     const key = JSON.stringify([tools, fingerprint(cfg.agentDir)]);
 
     let resumeFrom = sessionPath;
-    if (existing && !existing.exited) {
+    if (existing) {
       await existing.ready;
       if (existing.launchKey === key) {
         await applySettings(existing, model, thinking, settings);
-        return json(200, { sessionFile: existing.sessionFile, state: await existing.state() });
+        return json(200, { sessionFile: existing.sessionFile, state: await existing.state(), cwd: existing.chosenCwd });
       }
       if (existing.busy) throw new HttpError(409, "run active");
       resumeFrom = existing.sessionFile ?? sessionPath;
@@ -200,6 +208,7 @@ export function createBridge(cfg: BridgeConfig): Bridge {
       grave.delete(id);
     }
     const chat = new Chat(cfg, id, onGone);
+    chat.chosenCwd = cwd;
     live.set(id, chat); // reserve the slot before any await
     try {
       chat.launch(resumeFrom, tools, key);
@@ -210,7 +219,7 @@ export function createBridge(cfg: BridgeConfig): Bridge {
       if (e instanceof HttpError) throw e;
       throw new HttpError(502, `pi failed to start: ${(e as Error).message}`);
     }
-    return json(200, { sessionFile: chat.sessionFile, state: await chat.state() });
+    return json(200, { sessionFile: chat.sessionFile, state: await chat.state(), cwd: chat.chosenCwd });
   }
 
   async function prompt(id: string, kind: "prompt" | "steer" | "follow_up", body: Record<string, any>) {
@@ -334,6 +343,13 @@ export function createBridge(cfg: BridgeConfig): Bridge {
       let body: unknown;
       try { body = await req.json(); } catch { throw new HttpError(400, "body must be JSON"); }
       return json(200, { ...applyConfigPatch(cfg.agentDir, body), knownTools: KNOWN_TOOLS });
+    }
+    if (method === "GET" && path === "/dirs") {
+      return json(200, listDirs(cfg, url.searchParams.get("path") ?? undefined));
+    }
+    if (method === "POST" && path === "/dirs") {
+      const body = await readBody(req);
+      return json(201, makeDir(cfg, body.parent, body.name));
     }
     if (method === "GET" && path === "/sessions") {
       return json(200, { sessions: await listSessions(cfg) });

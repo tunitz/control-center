@@ -37,6 +37,8 @@ export type StartRunArgs = {
   /** Pi only: the model's provider and the session's backend ref. Hermes never receives these. */
   provider?: string;
   ref?: string | null;
+  /** Pi cwd chosen at creation. Passed on every start so a reaped chat resumes in the same directory. */
+  cwd?: string | null;
   /** Pi only: the chat's stored live settings, sent with every start. */
   piSettings?: Record<string, unknown>;
 };

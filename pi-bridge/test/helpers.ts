@@ -24,6 +24,7 @@ export function makeConfig(root: string, over: Partial<BridgeConfig> = {}): Brid
     agentDir: join(root, "agent"),
     sessionDir: join(root, "sessions"),
     workspaceRoot: join(root, "ws"),
+    homeDir: join(root, "home"),
     piPackageDir: join(root, "no-sdk-here"),
     deepseekApiKey: "sk-test-not-a-real-key",
     anthropicOAuthToken: "test-oauth-token",

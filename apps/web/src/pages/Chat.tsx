@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import "../chat.css";
 import { chat } from "../chat/api";
+import { PickCancelled, folderTag, sessionCreatePayload } from "../chat/dirs";
 import { navigate } from "../route";
 import { sendEffort } from "../chat/effort";
 import { backendOfKey, effortChoices, keyOf, modelUsable, splitKey, swapBackend, tokenNote, viewModels } from "../chat/pi";
@@ -15,6 +16,7 @@ import { Composer } from "../components/chat/Composer";
 import { AssistantMessage, UserMessage } from "../components/chat/Message";
 import { Sessions } from "../components/chat/Sessions";
 import { PiSheet } from "../components/chat/PiSheet";
+import { FolderSheet } from "../components/chat/FolderSheet";
 import { Icon } from "../components/chat/Icon";
 import type { Attachment, Backend, ChatConfig, ChatModel, ChatSession, Effort } from "../chat/types";
 
@@ -51,6 +53,10 @@ export default function Chat({ hash }: { hash: string }) {
   const [rawModels, setModels] = useState<ChatModel[]>([]);
   const models = useMemo(() => viewModels(rawModels), [rawModels]);
   const [piSheet, setPiSheet] = useState(false);
+  // Pi chats ask for a working folder before they are created. Resolves with the folder, or null for the default workspace.
+  const [folderAsk, setFolderAsk] = useState<{ resolve: (cwd: string | null) => void; reject: (e: Error) => void } | null>(null);
+  const askFolder = () => new Promise<string | null>((resolve, reject) => setFolderAsk({ resolve, reject }));
+  const closeFolderAsk = () => { folderAsk?.reject(new PickCancelled()); setFolderAsk(null); };
   const [piLevels, setPiLevels] = useState<string[] | null>(null);
   const [config, setConfig] = useState<ChatConfig | null>(null);
   const [pageErr, setPageErr] = useState("");
@@ -162,10 +168,11 @@ export default function Chat({ hash }: { hash: string }) {
     navigate(`#/chat/${encodeURIComponent(id)}`);
   };
 
-  /** A new chat takes the backend of the selected model; Hermes is the default. */
-  const createChat = (): Promise<ChatSession> => {
+  /** A new chat takes the backend of the selected model; Hermes is the default. Pi asks for a working folder first. */
+  const createChat = async (): Promise<ChatSession> => {
     const { backend, id } = splitKey(modelId);
-    return chat.createSession({ model: id || undefined, effort: effortFor(), ...(backend === "pi" ? { backend } : {}) });
+    const cwd = backend === "pi" ? await askFolder() : null;
+    return chat.createSession(sessionCreatePayload({ model: id || undefined, effort: effortFor(), backend, cwd }));
   };
 
   const newChat = async () => {
@@ -174,14 +181,14 @@ export default function Chat({ hash }: { hash: string }) {
       const s: ChatSession = await createChat();
       sessions.setList(prev => [s, ...prev]);
       navigate(`#/chat/${encodeURIComponent(s.id)}`);
-    } catch (e) { setPageErr((e as Error).message); }
+    } catch (e) { if (!(e instanceof PickCancelled)) setPageErr((e as Error).message); }
   };
 
   const onSend = async (text: string, files: File[]) => {
     let id = activeId;
     const effortToSend = effortFor();
     if (!id) {
-      const s: ChatSession = await createChat();
+      const s: ChatSession = await createChat(); // a cancelled folder step throws PickCancelled; the composer keeps the text
       sessions.setList(prev => [s, ...prev]);
       navigate(`#/chat/${encodeURIComponent(s.id)}`);
       id = s.id;
@@ -256,12 +263,13 @@ export default function Chat({ hash }: { hash: string }) {
       const old = activeId;
       try {
         const { backend, id: modelId } = splitKey(id);
-        const s: ChatSession = await chat.createSession({ model: modelId, effort: null, ...(backend === "pi" ? { backend } : {}) });
+        const cwd = backend === "pi" ? await askFolder() : null;
+        const s: ChatSession = await chat.createSession(sessionCreatePayload({ model: modelId, effort: null, backend, cwd }));
         sessions.setList(prev => [s, ...prev.filter(x => x.id !== old)]);
         navigate(`#/chat/${encodeURIComponent(s.id)}`);
         void chat.deleteSession(old).catch(() => {});
         setLiveModel(id);
-      } catch (e) { setPageErr((e as Error).message); }
+      } catch (e) { if (!(e instanceof PickCancelled)) setPageErr((e as Error).message); }
       return;
     }
     if (picked && !modelUsable(picked, chatBackend)) return; // a chat keeps its backend
@@ -318,7 +326,7 @@ export default function Chat({ hash }: { hash: string }) {
             <button className="ib sess-toggle" type="button" aria-label="Chats" aria-expanded={drawer} onClick={() => setDrawer(d => !d)}>
               <Icon name="menu" />
             </button>
-            <h1 className="ttl"><span className="ttl-text">{activeId ? title : "New chat"}</span></h1>
+            <h1 className="ttl"><span className="ttl-text">{activeId ? title : "New chat"}</span>{active && folderTag(active.cwd) && <span className="ftag" title={folderTag(active.cwd)!.title}>{folderTag(active.cwd)!.label}</span>}</h1>
             <div className="head-right">
               {!phone && <div className="pop-wrap">
                 <select className="pill" aria-label="Model" value={modelId} disabled={!models.length} onChange={e => void onModel(e.target.value)}
@@ -424,6 +432,8 @@ export default function Chat({ hash }: { hash: string }) {
           />
         </section>
       </div>
+
+      {folderAsk && <FolderSheet onPick={cwd => { folderAsk.resolve(cwd); setFolderAsk(null); }} onCancel={closeFolderAsk} />}
 
       {piSheet && activeId && <PiSheet sid={activeId} running={!!thread.runId} onClose={() => setPiSheet(false)} />}
 

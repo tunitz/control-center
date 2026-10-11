@@ -80,6 +80,7 @@ function sess(id: string, title: string, o: Partial<ChatSession> & { ago: number
     runId: null,
     unread: false,
     preview: "",
+    cwd: null,
     ...rest,
   };
 }

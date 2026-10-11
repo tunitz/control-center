@@ -11,7 +11,7 @@ const mk = (id: string, t: number, extra: Partial<{ title: string }> = {}) =>
 test("createSession returns the contract shape with ms timestamps and idle run state", () => {
   const s = mk("s1", 1000);
   expect(s).toEqual({
-    id: "s1", title: "New chat", titleAuto: true, model: "claude-sonnet-5-5", provider: "anthropic", effort: null,
+    id: "s1", title: "New chat", titleAuto: true, model: "claude-sonnet-5-5", provider: "anthropic", effort: null, cwd: null,
     pinned: false, archived: false, createdAt: 1000, updatedAt: 1000, runState: "idle", runId: null, unread: false, preview: "", awaiting: 0,
   });
 });

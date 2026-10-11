@@ -51,12 +51,24 @@ export class PiClient implements ChatBackend {
     return this.refs.get(id) ?? null;
   }
 
-  async createSession(): Promise<string> {
+  /** Starts a chat. `cwd` (optional) is the directory chosen at creation; the bridge rejects it if invalid. */
+  async createSession(cwd?: string | null): Promise<string> {
     const id = randomUUID();
-    const r = await this.call("POST", `/chats/${id}/start`, {});
+    const r = await this.call("POST", `/chats/${id}/start`, cwd ? { cwd } : {});
     if (typeof r.sessionFile !== "string" || r.sessionFile === "") throw new ChatError(502, "pi bridge returned no session file");
     this.refs.set(id, r.sessionFile);
     return id;
+  }
+
+  /** Pi working-directory picker: the bridge's directory list. */
+  async listDirs(path?: string): Promise<{ path: string; parent: string | null; entries: { name: string; path: string }[] }> {
+    const q = path === undefined ? "" : `?path=${encodeURIComponent(path)}`;
+    return (await this.call("GET", `/dirs${q}`)) as any;
+  }
+
+  /** Pi working-directory picker: create one folder under a parent. The bridge returns 409 when it exists. */
+  async makeDir(parent: unknown, name: unknown): Promise<{ path: string; name: string }> {
+    return (await this.call("POST", "/dirs", { parent, name })) as any;
   }
 
   async deleteSession(id: string, _ref?: string | null): Promise<void> {
@@ -66,9 +78,10 @@ export class PiClient implements ChatBackend {
   }
 
   /** Selects the model on the chat. `start` is idempotent: it applies the model to a live chat and resumes a reaped one. */
-  async lockModel(id: string, model: string, provider: string, ref?: string | null): Promise<void> {
+  async lockModel(id: string, model: string, provider: string, ref?: string | null, cwd?: string | null): Promise<void> {
     await this.call("POST", `/chats/${id}/start`, {
       ...(ref ? { sessionPath: ref } : {}),
+      ...(cwd ? { cwd } : {}),
       model: { provider, modelId: model },
     });
   }
@@ -93,6 +106,7 @@ export class PiClient implements ChatBackend {
     const settings = { ...PI_SETTING_DEFAULTS, ...(args.piSettings ?? {}) };
     await this.call("POST", `/chats/${chat}/start`, {
       ...(args.ref ? { sessionPath: args.ref } : {}),
+      ...(args.cwd ? { cwd: args.cwd } : {}),
       ...(provider ? { model: { provider, modelId: model } } : {}),
       ...(args.effort ? { thinking: args.effort } : {}),
       ...(settings ? { settings } : {}),
@@ -135,16 +149,16 @@ export class PiClient implements ChatBackend {
   }
 
   /** Thinking levels the model supports (starts or resumes the chat on that model first). Empty when unknown. */
-  async thinkingLevels(id: string, ref: string | null, model: string, provider: string): Promise<string[]> {
-    await this.call("POST", `/chats/${id}/start`, { ...(ref ? { sessionPath: ref } : {}), model: { provider, modelId: model } });
+  async thinkingLevels(id: string, ref: string | null, model: string, provider: string, cwd?: string | null): Promise<string[]> {
+    await this.call("POST", `/chats/${id}/start`, { ...(ref ? { sessionPath: ref } : {}), ...(cwd ? { cwd } : {}), model: { provider, modelId: model } });
     const r = await this.call("POST", `/chats/${id}/command`, { name: "get_available_thinking_levels", args: {} });
     const levels = r.data?.levels;
     return Array.isArray(levels) ? levels.filter((l: unknown): l is string => typeof l === "string") : [];
   }
 
   /** Manual compaction. Returns Pi's before/after token estimates. */
-  async compact(id: string, ref: string | null, instructions?: string): Promise<{ tokensBefore: number; tokensAfter: number }> {
-    await this.call("POST", `/chats/${id}/start`, ref ? { sessionPath: ref } : {});
+  async compact(id: string, ref: string | null, instructions?: string, cwd?: string | null): Promise<{ tokensBefore: number; tokensAfter: number }> {
+    await this.call("POST", `/chats/${id}/start`, { ...(ref ? { sessionPath: ref } : {}), ...(cwd ? { cwd } : {}) });
     const r = await this.call("POST", `/chats/${id}/command`, {
       name: "compact",
       args: instructions ? { customInstructions: instructions } : {},

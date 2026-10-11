@@ -12,7 +12,7 @@ export interface ChatBackend {
   createSession(): Promise<string>;
   deleteSession(id: string, ref?: string | null): Promise<void>;
   /** Selects the model for the session's next run (Pi: set_model, or resume with it). */
-  lockModel(id: string, model: string, provider: string, ref?: string | null): Promise<void>;
+  lockModel(id: string, model: string, provider: string, ref?: string | null, cwd?: string | null): Promise<void>;
   startRun(args: StartRunArgs): Promise<{ runId: string; frames: AsyncIterable<HermesFrame> }>;
   stopRun(runId: string): Promise<void>;
   steerRun(runId: string, message: string): Promise<void>;

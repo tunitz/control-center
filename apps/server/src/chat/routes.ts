@@ -94,6 +94,7 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
 
   if (p === "/sessions" && method === "GET") return listSessionsRoute(url, ctx);
   if (p === "/sessions" && method === "POST") return createSessionRoute(req, ctx);
+  if (p === "/pi/dirs" && (method === "GET" || method === "POST")) return piDirsRoute(req, url, ctx);
 
   let m = /^\/sessions\/([^/]+)(\/[a-z]+)?$/.exec(p);
   if (m && !m[2] && (method === "PATCH" || method === "DELETE")) {
@@ -215,7 +216,8 @@ async function createSessionRoute(req: Request, ctx: ChatContext): Promise<Respo
   const body = await readJson(req);
   const backend = body.backend === undefined ? "hermes" : body.backend;
   if (backend !== "hermes" && backend !== "pi") throw new ChatError(400, "backend must be 'hermes' or 'pi'");
-  if (backend === "pi") return createPiSessionRoute(body, ctx);
+  if (backend === "pi") return createPiSessionRoute({ ...body, cwd: parseCwd(body, backend) }, ctx);
+  parseCwd(body, backend); // rejects a cwd on a Hermes session
   const cfg = getConfig(ctx.db);
   const picked = body.model === undefined ? { model: cfg.defaultModel, provider: getModelDef(ctx.db, cfg.defaultModel)!.provider } : resolveModel(ctx, body.model);
   const effort: Effort | null = body.effort === undefined ? cfg.defaultEffort : parseEffort(body.effort);
@@ -239,19 +241,39 @@ async function createPiSessionRoute(body: Record<string, any>, ctx: ChatContext)
   if (typeof body.model !== "string" || body.model === "") throw new ChatError(400, "model is required for pi sessions");
   const model = await piModelDef(ctx, body.model);
   const effort: Effort | null = body.effort === undefined ? null : parseEffort(body.effort);
+  const cwd: string | null = typeof body.cwd === "string" ? body.cwd : null;
 
-  const id = await ctx.pi.createSession();
+  const id = await ctx.pi.createSession(cwd);
   try {
-    await ctx.pi.lockModel(id, model.id, model.provider, ctx.pi.sessionRef(id));
+    await ctx.pi.lockModel(id, model.id, model.provider, ctx.pi.sessionRef(id), cwd);
   } catch (e) {
     await ctx.pi.deleteSession(id).catch(() => {});
     throw e;
   }
   const session = S.createSession(ctx.db, {
     id, model: model.id, provider: model.provider, effort, now: ctx.now(), lockedModel: model.id,
-    backend: "pi", backendRef: ctx.pi.sessionRef(id),
+    backend: "pi", backendRef: ctx.pi.sessionRef(id), cwd,
   });
   return json({ ...session, backend: "pi" }, 201);
+}
+
+/** Pi cwd from a create body: optional string, Pi only. The bridge validates the path itself. */
+function parseCwd(body: Record<string, any>, backend: string): string | null {
+  if (body.cwd === undefined || body.cwd === null) return null;
+  if (backend !== "pi") throw new ChatError(400, "cwd is only allowed for pi sessions");
+  if (typeof body.cwd !== "string" || body.cwd === "") throw new ChatError(400, "cwd must be a non-empty string");
+  return body.cwd;
+}
+
+/** Pi directory picker: list (GET) and create (POST), proxied to the bridge. Bridge 400/409 pass through. */
+export async function piDirsRoute(req: Request, url: URL, ctx: ChatContext): Promise<Response> {
+  if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
+  if (req.method === "GET") {
+    const path = url.searchParams.get("path");
+    return json(await ctx.pi.listDirs(path === null ? undefined : path));
+  }
+  const body = await readJson(req);
+  return json(await ctx.pi.makeDir(body.parent, body.name), 201);
 }
 
 /** Resolves a Pi model from the bridge's live list. Unknown or unreachable is a 400/503; nothing is stored. */
@@ -307,7 +329,7 @@ async function piSettingsGet(id: string, ctx: ChatContext): Promise<Response> {
   const { s, ref, pi } = requirePiChat(ctx, id);
   let thinkingLevels: string[] = [];
   if (s.runState === "idle") {
-    try { thinkingLevels = await pi.thinkingLevels(id, ref, s.model, s.provider); } catch { thinkingLevels = []; }
+    try { thinkingLevels = await pi.thinkingLevels(id, ref, s.model, s.provider, s.cwd); } catch { thinkingLevels = []; }
   }
   return json({ settings: withDefaults(S.getPiSettings(ctx.db, id)), thinkingLevels });
 }
@@ -326,7 +348,7 @@ async function piCompact(req: Request, id: string, ctx: ChatContext): Promise<Re
   if (s.runState !== "idle") throw new ChatError(409, "run active");
   const body = await readJson(req);
   const instructions = typeof body.instructions === "string" && body.instructions.trim() !== "" ? body.instructions.trim().slice(0, 2000) : undefined;
-  return json(await pi.compact(id, ref, instructions));
+  return json(await pi.compact(id, ref, instructions, s.cwd));
 }
 
 async function deleteSessionRoute(id: string, ctx: ChatContext): Promise<Response> {

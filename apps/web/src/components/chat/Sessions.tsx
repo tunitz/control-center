@@ -4,6 +4,7 @@ import { chat } from "../../chat/api";
 import { groupSessions } from "../../chat/sessions";
 import { backendLabel } from "../../chat/pi";
 import type { ChatSession, SessionHit } from "../../chat/types";
+import { folderTag } from "../../chat/dirs";
 
 type Row = ChatSession | SessionHit;
 
@@ -85,7 +86,7 @@ export function Sessions(p: SessionsProps) {
                         {s.runState === "idle" && s.unread && <span className="pulse" style={{ opacity: 0.5 }} aria-label="Unread" />}
                       </span>
                       <span className="row-txt">
-                        <span className="row-title">{s.title}</span>
+                        <span className="row-title">{s.title}{folderTag(s.cwd ?? null) && <span className="ftag" title={folderTag(s.cwd ?? null)!.title}>{folderTag(s.cwd ?? null)!.label}</span>}</span>
                         <span className="row-meta">{(s as SessionHit).snippet || `${s.provider} · ${s.model}`}<span className="btag">{backendLabel(s.backend)}</span></span>
                       </span>
                     </a>

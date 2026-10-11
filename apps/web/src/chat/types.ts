@@ -6,7 +6,7 @@ export type ChatSession = {
   id: string; title: string; titleAuto: boolean; model: string; provider: string; effort: Effort | null;
   pinned: boolean; archived: boolean; createdAt: number; updatedAt: number;
   runState: "idle" | "running" | "needs_approval"; runId: string | null; unread: boolean; preview: string; awaiting: number;
-  backend?: Backend;
+  backend?: Backend; cwd: string | null;
 };
 export type SessionHit = ChatSession & { snippet: string };
 export type Attachment = { id: string; kind: "image" | "file"; name: string; mime: string; size: number; w: number | null; h: number | null; url: string };

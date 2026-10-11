@@ -1,5 +1,8 @@
 import type { Backend, ChatConfig, ChatMessage, ChatModel, ChatSession, Effort, PiConfig, PiSettings, SessionHit } from "./types";
 
+/** GET /api/chat/pi/dirs: subfolders of `path` (root is the home folder, parent null there). */
+export type PiDirList = { path: string; parent: string | null; entries: { name: string; path: string }[] };
+
 export class ChatError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -25,7 +28,9 @@ export const chat = {
     if (q.trim()) p.set("q", q.trim());
     return chatReq<(ChatSession | SessionHit)[]>("GET", `/sessions?${p}`);
   },
-  createSession: (o: { model?: string; effort?: Effort | null; backend?: Backend }) => chatReq<ChatSession>("POST", "/sessions", o),
+  createSession: (o: { model?: string; effort?: Effort | null; backend?: Backend; cwd?: string }) => chatReq<ChatSession>("POST", "/sessions", o),
+  piDirs: (path?: string) => chatReq<PiDirList>("GET", `/pi/dirs${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  piMkdir: (parent: string, name: string) => chatReq<{ path: string; name: string }>("POST", "/pi/dirs", { parent, name }),
   patchSession: (id: string, patch: Partial<Pick<ChatSession, "title" | "pinned" | "archived" | "model" | "effort">>) =>
     chatReq<ChatSession>("PATCH", `/sessions/${encodeURIComponent(id)}`, patch),
   deleteSession: (id: string) => chatReq<{ ok: true }>("DELETE", `/sessions/${encodeURIComponent(id)}`),

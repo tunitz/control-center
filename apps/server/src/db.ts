@@ -19,6 +19,7 @@ function migrateChatSessions(db: Database) {
   if (!have.has("backend")) db.exec("ALTER TABLE chat_sessions ADD COLUMN backend TEXT NOT NULL DEFAULT 'hermes'");
   if (!have.has("backend_ref")) db.exec("ALTER TABLE chat_sessions ADD COLUMN backend_ref TEXT");
   if (!have.has("pi_settings_json")) db.exec("ALTER TABLE chat_sessions ADD COLUMN pi_settings_json TEXT");
+  if (!have.has("cwd")) db.exec("ALTER TABLE chat_sessions ADD COLUMN cwd TEXT");
 }
 
 /** Adds todos_json (Pi's last todo list) and blocks_json (ordered turn body) to an existing chat_messages table. */

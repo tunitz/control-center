@@ -359,3 +359,26 @@
 .chatx .segmented button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);font-weight:600}
 /* A command you are asked to approve must be readable in full: wrap it, never scroll sideways. */
 .chatx .appr .cmdblk{white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:visible}
+
+/* Working folder: small path tag on a chat (header and sidebar) */
+.chatx .ftag{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;margin-left:6px;padding:0 6px;border-radius:6px;border:1px solid var(--line);color:var(--mut);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;font-weight:400;line-height:16px}
+.chatx .ttl .ftag{display:block;width:max-content;margin:2px 0 0;font-size:12px;line-height:18px}
+
+/* Working folder sheet */
+.chatx .folder-sheet{max-height:85vh}
+.chatx .folder-sheet .sheet-body{gap:12px}
+.chatx .folder-sheet:focus{outline:none}
+.chatx .dir-path{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;color:var(--text);overflow-wrap:anywhere}
+.chatx .dir-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;max-height:40vh;overflow-y:auto}
+.chatx .dir-row{min-height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;border:0;border-top:1px solid var(--line);background:var(--surface);color:var(--text);text-align:left;font-size:15px;min-width:0;width:100%}
+.chatx .dir-row:first-child{border-top:0}
+.chatx .dir-row:hover{background:var(--surface2)}
+.chatx .dir-row:disabled{opacity:.6}
+.chatx .dir-row .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.chatx .dir-row .i{color:var(--mut);flex:none}
+.chatx .dir-new{display:flex;gap:8px;align-items:center}
+.chatx .dir-new input{flex:1;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--surface);color:var(--text);font-size:15px;outline:none}
+.chatx .dir-new input:focus{border-color:var(--accent)}
+.chatx .sheet-foot{display:flex;flex-direction:column;gap:8px;padding:12px 16px 16px;border-top:1px solid var(--line)}
+.chatx .btn.lg{min-height:44px;width:100%}
+.chatx .ib.tap{width:44px;height:44px}

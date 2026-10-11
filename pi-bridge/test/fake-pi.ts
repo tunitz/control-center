@@ -166,6 +166,7 @@ async function handle(cmd: any) {
   switch (cmd.type) {
     case "get_state":
       ok("get_state", id, {
+        cwd: process.cwd(),
         model,
         thinkingLevel: thinking,
         isStreaming: busy,
