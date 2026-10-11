@@ -87,7 +87,7 @@ export function Sessions(p: SessionsProps) {
                       </span>
                       <span className="row-txt">
                         <span className="row-title">{s.title}{folderTag(s.cwd ?? null) && <span className="ftag" title={folderTag(s.cwd ?? null)!.title}>{folderTag(s.cwd ?? null)!.label}</span>}</span>
-                        <span className="row-meta">{(s as SessionHit).snippet || `${s.provider} · ${s.model}`}<span className="btag">{backendLabel(s.backend)}</span></span>
+                        <span className="row-meta">{(s as SessionHit).snippet || `${s.provider} · ${s.model}`}<span className="btag">{backendLabel(s.backend)}</span>{s.yolo && <span className="btag yolo" title="Auto-approves risky commands">YOLO</span>}</span>
                       </span>
                     </a>
                     <button className="more" type="button" aria-haspopup="menu" aria-expanded={menu === s.id} aria-label={`Chat actions for ${s.title}`} onClick={() => setMenu(menu === s.id ? null : s.id)}>

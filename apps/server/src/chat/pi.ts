@@ -227,6 +227,25 @@ export class PiClient implements ChatBackend {
     return { tokensBefore: Number(r.data?.tokensBefore) || 0, tokensAfter: Number(r.data?.estimatedTokensAfter) || 0 };
   }
 
+  /**
+   * Rewinds Pi's active branch to the last user message whose text matches, so a retry re-runs from
+   * there instead of stacking on the old reply. Returns null when there is no match (caller falls back).
+   */
+  async forkUserMessage(id: string, ref: string | null, cwd: string | null, text: string): Promise<{ text: string } | null> {
+    await this.call("POST", `/chats/${id}/start`, { ...(ref ? { sessionPath: ref } : {}), ...(cwd ? { cwd } : {}) });
+    const list = await this.call("POST", `/chats/${id}/command`, { name: "get_fork_messages", args: {} });
+    const messages: unknown[] = Array.isArray(list?.data?.messages) ? (list.data.messages as unknown[]) : [];
+    let entryId: string | null = null;
+    for (const m of messages) {
+      const mm = m as { entryId?: unknown; text?: unknown };
+      if (typeof mm.entryId === "string" && mm.text === text) entryId = mm.entryId; // last match wins
+    }
+    if (entryId === null) return null;
+    const r = await this.call("POST", `/chats/${id}/command`, { name: "fork", args: { entryId } });
+    if (r?.data?.cancelled === true) return null;
+    return { text: typeof r?.data?.text === "string" ? r.data.text : text };
+  }
+
   /** Providers Pi can sign in to, with their auth methods and current status. */
   async authProviders(): Promise<PiAuthProvider[]> {
     const r = await this.call("GET", "/auth/providers");

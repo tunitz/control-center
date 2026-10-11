@@ -74,6 +74,18 @@ function protectedHit(p: string, pol: GatePolicy): string | null {
   return null;
 }
 
+/** True when a browser navigation leaves the machine: anything but data:/about: and loopback. */
+export function navigatesOut(url: string): boolean {
+  const u = url.trim();
+  if (/^(data|about):/i.test(u)) return false;
+  try {
+    const host = new URL(u).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return !(host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost"));
+  } catch {
+    return true; // not a parseable URL: treat it as external
+  }
+}
+
 export function evaluate(tool: string, input: Record<string, unknown>, cwd: string, pol: GatePolicy): GateDecision {
   if (tool === "bash") {
     const raw = String(input.command ?? "");
@@ -91,6 +103,16 @@ export function evaluate(tool: string, input: Record<string, unknown>, cwd: stri
       return { confirm: true, title: "Allow command?", message: `Run: ${raw}` };
     }
     return RUN;
+  }
+  // Browser actions reach the network and the page's authenticated session, so navigation and
+  // arbitrary page JavaScript are confirmed. data:/about: and loopback stay silent.
+  if (tool === "browser_navigate") {
+    const url = String(input.url ?? "");
+    if (navigatesOut(url)) return { confirm: true, title: "Open this page?", message: `browser_navigate: ${url.slice(0, 400)}` };
+    return RUN;
+  }
+  if (tool === "browser_eval") {
+    return { confirm: true, title: "Run page JavaScript?", message: `browser_eval: ${String(input.expression ?? "").slice(0, 400)}` };
   }
   if (PATH_TOOLS.has(tool)) {
     const given = String(input.path ?? input.file_path ?? (tool === "read" || WRITE_TOOLS.has(tool) ? "" : "."));

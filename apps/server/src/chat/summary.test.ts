@@ -22,10 +22,11 @@ test("toMarkdown renders title, roles, text, attachments and non-complete marker
   const md = toMarkdown({
     title: "My chat", model: "claude-sonnet-5-5", createdAt: Date.UTC(2026, 9, 11),
     messages: [
-      { role: "user", text: "hi", status: "complete", reasoning: null, attachments: [{ name: "a.png" }] },
-      { role: "assistant", text: "hello", status: "complete", reasoning: "secret thoughts", attachments: [] },
-      { role: "assistant", text: "partial", status: "interrupted", reasoning: null, attachments: [] },
+      { seq: 1, role: "user", text: "hi", status: "complete", reasoning: null, attachments: [{ name: "a.png" }] },
+      { seq: 2, role: "assistant", text: "hello", status: "complete", reasoning: "secret thoughts", attachments: [] },
+      { seq: 3, role: "assistant", text: "partial", status: "interrupted", reasoning: null, attachments: [] },
     ],
+    commands: [{ afterSeq: 1, name: "model", body: "Model set to Claude Sonnet 5.5." }],
   });
   expect(md.startsWith("# My chat")).toBe(true);
   expect(md).toContain("## You");
@@ -35,6 +36,10 @@ test("toMarkdown renders title, roles, text, attachments and non-complete marker
   expect(md).toContain("hello");
   expect(md).not.toContain("secret thoughts");
   expect(md).toContain("_(interrupted)_");
+  // A command row is anchored after its message.
+  expect(md).toContain("**/model**");
+  expect(md.indexOf("**/model**")).toBeGreaterThan(md.indexOf("hi"));
+  expect(md.indexOf("**/model**")).toBeLessThan(md.indexOf("## Assistant"));
 });
 
 test("exportFilename is safe and unicode-friendly", () => {

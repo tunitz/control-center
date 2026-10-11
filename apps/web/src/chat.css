@@ -347,6 +347,7 @@
 .chatx .todo-txt{min-width:0;overflow-wrap:break-word}
 .chatx .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .chatx .btag{display:inline-block;margin-left:6px;padding:0 6px;border-radius:6px;border:1px solid var(--line);color:var(--mut);font-size:11px;line-height:16px;vertical-align:middle}
+.chatx .btag.yolo{border-color:var(--err-line);background:var(--err-bg);color:var(--err);font-weight:700;letter-spacing:.5px}
 
 /* Pi options sheet: viewport-level, above the tab bar (tabbar z-index 30) */
 .chatx .sheet-scrim{position:fixed;inset:0;z-index:49;background:var(--scrim);border:0;padding:0;cursor:default}

@@ -5,7 +5,8 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test test"
+    "test": "bun test test",
+    "test:live": "PI_LIVE=1 bun test test/live.test.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

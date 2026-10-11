@@ -241,6 +241,15 @@ async function handle(cmd: any) {
     case "get_entries":
       ok("get_entries", id, { entries: [] });
       return;
+    case "get_fork_messages":
+      ok("get_fork_messages", id, { messages: [] });
+      return;
+    case "fork":
+      ok("fork", id, { cancelled: true });
+      return;
+    case "clone":
+      ok("clone", id, { cancelled: false });
+      return;
     case "get_commands":
       ok("get_commands", id, {
         commands: [{ name: "cc-ping", description: "ping", source: "extension", sourceInfo: {} }],

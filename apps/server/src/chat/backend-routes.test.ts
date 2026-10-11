@@ -237,6 +237,20 @@ test("PATCH yolo rejects a non-boolean", async () => {
   expect((await js(await run(req("PATCH", `/api/chat/sessions/${s.id}`, { yolo: "yes" })))).status).toBe(400);
 });
 
+test("retry on a Pi chat forks the Pi session before re-running", async () => {
+  const { body: s } = await js(await run(req("POST", "/api/chat/sessions", { backend: "pi", model: "deepseek-pro" })));
+  await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("first"))));
+  await waitIdle(s.id);
+  await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("beta"))));
+  await waitIdle(s.id);
+  const u2 = S.listAllMessages(ctx.db, s.id).find((m) => m.role === "user" && m.text === "beta")!;
+  const r = await js(await run(req("POST", `/api/chat/sessions/${s.id}/messages/${u2.id}/retry`, {})));
+  expect(r.status).toBe(201);
+  await waitIdle(s.id);
+  expect(bridge.requests.some((q) => q.path.endsWith("/command") && (q.body as any)?.name === "fork")).toBe(true);
+  expect(bridge.chats.get(s.id)!.prompts).toEqual(["first", "beta"]);
+});
+
 test("a Pi todo_write is streamed as a todo event and persisted on the assistant message", async () => {
   const { body: s } = await js(await run(req("POST", "/api/chat/sessions", { backend: "pi", model: "deepseek-pro" })));
   const sent = await js(await run(req("POST", `/api/chat/sessions/${s.id}/send`, fd("TODO please"))));

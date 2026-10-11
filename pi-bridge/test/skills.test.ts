@@ -49,6 +49,24 @@ describe("skills", () => {
     expect(rn.description).toBe("Draft release notes.");
   });
 
+  test("skills named in settings.json are discovered (user and project)", async () => {
+    const cwd = join(h.cfg.homeDir, "projects/alpha");
+    mkdirSync(cwd, { recursive: true });
+    // User settings, path relative to the agent dir.
+    skill(join(h.cfg.agentDir, "extra/by-settings"), "by-settings", "From user settings.");
+    writeFileSync(join(h.cfg.agentDir, "settings.json"), JSON.stringify({ skills: ["./extra/by-settings"] }));
+    // Project settings, path relative to the project .pi dir, pointing at the SKILL.md file itself.
+    const projSkill = join(cwd, ".pi/skills/from-project");
+    skill(projSkill, "from-project", "From project settings.");
+    mkdirSync(join(cwd, ".pi"), { recursive: true });
+    writeFileSync(join(cwd, ".pi/settings.json"), JSON.stringify({ skills: ["skills/from-project/SKILL.md"] }));
+
+    const r = await api(h, "GET", `/skills?cwd=${encodeURIComponent(cwd)}`);
+    const byName = new Map(r.json.skills.map((s: any) => [s.name, s]));
+    expect(byName.get("by-settings")).toMatchObject({ scope: "global", enabled: true });
+    expect(byName.get("from-project")).toMatchObject({ scope: "project" });
+  });
+
   test("a disabled skill is reported off and left out of the launch flags", async () => {
     const cwd = join(h.cfg.homeDir, "projects/alpha");
     mkdirSync(cwd, { recursive: true });

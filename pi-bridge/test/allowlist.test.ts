@@ -13,7 +13,7 @@ afterAll(async () => {
 });
 
 describe("command allowlist", () => {
-  test.each(["bash", "get_env", "fork", "clone", "export_html", "cycle_model", "not_a_command", ""])(
+  test.each(["bash", "get_env", "export_html", "cycle_model", "not_a_command", ""])(
     "rejects %p with 400",
     async (name) => {
       const r = await api(h, "POST", "/chats/al-1/command", { name, args: {} });
@@ -29,6 +29,9 @@ describe("command allowlist", () => {
     "get_available_models",
     "get_available_thinking_levels",
     "get_commands",
+    "get_fork_messages",
+    "fork",
+    "clone",
     "new_session",
         "set_session_name",
     "compact",

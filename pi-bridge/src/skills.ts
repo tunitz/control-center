@@ -2,7 +2,7 @@
 // disabling one is done by launching that chat's Pi process with `--no-skills` plus an explicit
 // `--skill` for every skill that stays on. The disabled set lives in <agent>/cc-skills.json; the
 // user's skill files are never touched.
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync, type Dirent } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync, type Dirent } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { BridgeConfig } from "./config";
 import { HttpError } from "./chat";
@@ -94,6 +94,45 @@ function scan(root: string, scope: SkillScope, cwd: string | null, out: Map<stri
   }
 }
 
+/** Adds one path from a settings `skills` list: a SKILL.md file, or a directory to scan. */
+function scanPath(p: string, scope: SkillScope, cwd: string | null, out: Map<string, Omit<PiSkill, "enabled">>): void {
+  try {
+    if (!existsSync(p)) return;
+    if (statSync(p).isFile()) {
+      if (p.endsWith(".md")) {
+        const s = readSkill(p, scope, cwd);
+        if (s && !out.has(s.path)) out.set(s.path, s);
+      }
+      return;
+    }
+    scan(p, scope, cwd, out);
+  } catch {
+    /* unreadable */
+  }
+}
+
+/**
+ * Skill paths named in `<dir>/settings.json`'s `skills` array, resolved from `dir` (`~` allowed).
+ * Glob include/exclude entries (`!`, `+`, `-`) are skipped: discovery covers the default roots.
+ */
+function settingsSkills(dir: string, home: string): string[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"));
+  } catch {
+    return [];
+  }
+  const list = raw && typeof raw === "object" && Array.isArray((raw as { skills?: unknown }).skills) ? (raw as { skills: unknown[] }).skills : [];
+  const out: string[] = [];
+  for (const entry of list) {
+    if (typeof entry !== "string" || entry.trim() === "") continue;
+    const s = entry.trim();
+    if (s.startsWith("!") || s.startsWith("+") || s.startsWith("-")) continue;
+    out.push(resolve(dir, s.replace(/^~/, home)));
+  }
+  return out;
+}
+
 /** User/global skill roots: the agent directory and the Agent Skills location in the home folder. */
 function globalRoots(cfg: BridgeConfig): string[] {
   return [join(cfg.agentDir, "skills"), join(cfg.homeDir, ".agents", "skills")];
@@ -118,6 +157,7 @@ export function listSkills(cfg: BridgeConfig, cwds: string[]): PiSkill[] {
   const disabled = readSkillsConfig(cfg.agentDir);
   const found = new Map<string, Omit<PiSkill, "enabled">>();
   for (const root of globalRoots(cfg)) scan(root, "global", null, found);
+  for (const p of settingsSkills(cfg.agentDir, cfg.homeDir)) scanPath(p, "global", null, found);
   const seen = new Set<string>();
   for (const raw of cwds) {
     let cwd: string;
@@ -129,6 +169,7 @@ export function listSkills(cfg: BridgeConfig, cwds: string[]): PiSkill[] {
     if (seen.has(cwd)) continue;
     seen.add(cwd);
     for (const root of projectRoots(cwd)) scan(root, "project", cwd, found);
+    for (const p of settingsSkills(join(cwd, ".pi"), cfg.homeDir)) scanPath(p, "project", cwd, found);
   }
   return [...found.values()]
     .map((s) => ({ ...s, enabled: !disabled.has(s.path) }))

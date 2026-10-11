@@ -2,13 +2,13 @@
 // cc-browser: first-class browser tools backed by the `agent-browser` CLI and a local Chromium.
 // One session per Pi process (= one chat). Loaded with `-e` only when the bridge's browser toggle is on.
 import { execFile } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { browserEnv, cleanOutput, resolveAgentBrowser, resolveChromium, sessionName } from "../src/browser";
+import { browserEnv, cleanOutput, resolveAgentBrowser, resolveChromium, sessionName, unwrapJs } from "../src/browser";
 
 const TIMEOUT_MS = 60_000;
 
@@ -43,14 +43,14 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  const tool = (name: string, label: string, description: string, parameters: unknown, build: (p: any) => string[]) =>
+  const tool = (name: string, label: string, description: string, parameters: unknown, build: (p: any) => string[], transform: (s: string) => string = (s) => s) =>
     pi.registerTool({
       name,
       label,
       description,
       parameters,
       async execute(_id: string, params: any) {
-        return { content: [{ type: "text", text: await run(build(params)) }] };
+        return { content: [{ type: "text", text: transform(await run(build(params))) }] };
       },
     });
 
@@ -105,4 +105,37 @@ export default function (pi: ExtensionAPI) {
     () => ["screenshot"],
   );
   tool("browser_close", "Browser Close", "Close this chat's browser session.", Type.Object({}), () => ["close"]);
+  tool(
+    "browser_get_images",
+    "Browser Get Images",
+    "List the images on the current page with their URLs and alt text.",
+    Type.Object({}),
+    () => ["eval", "JSON.stringify(Array.from(document.images).map(i=>({src:i.currentSrc||i.src,alt:i.alt||''})))"],
+    unwrapJs,
+  );
+  tool(
+    "browser_eval",
+    "Browser Eval",
+    "Run a JavaScript expression in the current page and return its result. Needs approval from the gate.",
+    Type.Object({ expression: Type.String({ description: "JavaScript expression, e.g. document.title" }) }),
+    (p) => ["eval", p.expression],
+    unwrapJs,
+  );
+  // Screenshot as an image for a vision-capable model. Text-only models just see the note.
+  pi.registerTool({
+    name: "browser_vision",
+    label: "Browser Vision",
+    description: "Screenshot the current page and return it as an image so a vision model can inspect the layout. Needs browser_navigate first.",
+    parameters: Type.Object({}),
+    async execute() {
+      const path = join(mkdtempSync(join(tmpdir(), "cc-shot-")), "page.png");
+      const out = await run(["screenshot", path]);
+      try {
+        const data = readFileSync(path).toString("base64");
+        return { content: [{ type: "text", text: out }, { type: "image", data, mimeType: "image/png" }] };
+      } catch {
+        return { content: [{ type: "text", text: out }] };
+      }
+    },
+  });
 }

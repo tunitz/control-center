@@ -496,6 +496,12 @@ async function retryMessageRoute(sid: string, mid: string, ctx: ChatContext): Pr
   let started = false;
   try {
     await runs.ensureModel(sid, s.model, s.provider);
+    // Pi keeps its own session, so rewind its active branch too: the retry then starts from the
+    // retried message with no memory of the reply we just dropped. Best effort; mirror truncation stands alone.
+    const backend = S.getBackend(ctx.db, sid);
+    if (backend?.backend === "pi" && ctx.pi) {
+      await ctx.pi.forkUserMessage(sid, backend.ref, s.cwd, text).catch(() => null);
+    }
     S.deleteCommandsFrom(ctx.db, sid, meta.seq);
     for (const p of S.truncateFrom(ctx.db, sid, meta.seq)) rmSync(p, { force: true });
     const prompt = buildPrompt({ text, attachments: [] });
@@ -513,8 +519,9 @@ function exportRoute(id: string, ctx: ChatContext): Response {
   const md = toMarkdown({
     title: s.title, model: s.model, createdAt: s.createdAt,
     messages: S.listAllMessages(ctx.db, id).map(m => ({
-      role: m.role, text: m.text, status: m.status, reasoning: m.reasoning, attachments: m.attachments,
+      seq: m.seq, role: m.role, text: m.text, status: m.status, reasoning: m.reasoning, attachments: m.attachments,
     })),
+    commands: S.listCommands(ctx.db, id).map(c => ({ afterSeq: c.afterSeq, name: c.name, body: c.body })),
   });
   const fname = exportFilename(s.title);
   const enc = encodeURIComponent(fname).replace(/['()*]/g, c => "%" + c.charCodeAt(0).toString(16).toUpperCase());

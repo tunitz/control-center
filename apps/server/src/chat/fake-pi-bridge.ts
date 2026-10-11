@@ -318,6 +318,16 @@ export class FakePiBridge {
       if (body.name === "get_available_thinking_levels") {
         return json(200, { success: true, data: { levels: ["off", "low", "high"] } });
       }
+      if (body.name === "get_fork_messages") {
+        return json(200, { success: true, data: { messages: rec.prompts.map((t, i) => ({ entryId: `e${i + 1}`, text: t })) } });
+      }
+      if (body.name === "fork") {
+        const idx = rec.prompts.findIndex((_, i) => `e${i + 1}` === body.args?.entryId);
+        if (idx < 0) return json(200, { success: true, data: { cancelled: true } });
+        const text = rec.prompts[idx];
+        rec.prompts = rec.prompts.slice(0, idx);
+        return json(200, { success: true, data: { text, cancelled: false } });
+      }
       if (body.name !== "set_model") return json(400, { error: `command not allowed: ${String(body.name)}` });
       const args = body.args ?? {};
       const found = this.models.find((x) => x.provider === args.provider && x.id === args.modelId);

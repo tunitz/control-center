@@ -81,3 +81,17 @@ export function cleanOutput(raw: string, limit = 20_000): string {
   if (text.length <= limit) return text || "(no output)";
   return `${text.slice(0, limit)}\n\n…[${text.length - limit} chars trimmed]`;
 }
+
+/** `agent-browser eval` prints the JS result as JSON; unwrap a quoted string so it reads plainly. */
+export function unwrapJs(raw: string): string {
+  const t = raw.trim();
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+    try {
+      const v = JSON.parse(t);
+      if (typeof v === "string") return v;
+    } catch {
+      /* not JSON, keep as-is */
+    }
+  }
+  return t;
+}

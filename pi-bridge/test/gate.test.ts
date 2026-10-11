@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { evaluate, askWithTimeout, loadPolicy, DEFAULT_POLICY } from "../extensions/cc-gate";
+import { evaluate, askWithTimeout, loadPolicy, navigatesOut, DEFAULT_POLICY } from "../extensions/cc-gate";
 
 const HOME = "/home/u";
 const CWD = `${HOME}/.local/share/cc-pi/workspace/chat1`;
@@ -122,5 +122,31 @@ describe("loadPolicy: the config file can only make the gate stricter", () => {
   test("a bad regex or a corrupt file never loosens or crashes", () => {
     expect(loadPolicy(dirWith({ extraRisky: ["("] })).bashRisky).toBe(DEFAULT_POLICY.bashRisky);
     expect(loadPolicy(dirWith("{nope"))).toEqual(DEFAULT_POLICY);
+  });
+});
+
+describe("browser tools through the gate", () => {
+  test("navigating off the machine asks; loopback and data: URLs run", () => {
+    for (const url of ["https://example.com", "http://10.0.0.5/x", "https://localhost.evil.com"]) {
+      expect(ev("browser_navigate", { url }).confirm).toBe(true);
+    }
+    for (const url of ["data:text/html,<h1>x</h1>", "about:blank", "http://localhost:3000", "http://127.0.0.1/x"]) {
+      expect(ev("browser_navigate", { url }).confirm).toBe(false);
+    }
+  });
+
+  test("browser_eval always asks, and the read-only browser tools do not", () => {
+    expect(ev("browser_eval", { expression: "document.title" }).confirm).toBe(true);
+    for (const tool of ["browser_snapshot", "browser_get_images", "browser_click", "browser_type", "browser_scroll", "browser_screenshot", "browser_vision", "browser_close"]) {
+      expect(ev(tool, {}).confirm).toBe(false);
+    }
+  });
+
+  test("navigatesOut classifies URLs", () => {
+    expect(navigatesOut("https://example.com/x")).toBe(true);
+    expect(navigatesOut("data:text/html,x")).toBe(false);
+    expect(navigatesOut("http://127.0.0.1:1")).toBe(false);
+    expect(navigatesOut("http://[::1]:1")).toBe(false);
+    expect(navigatesOut("not a url")).toBe(true);
   });
 });

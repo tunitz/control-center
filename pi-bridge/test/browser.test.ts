@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { browserEnv, cleanOutput, resolveAgentBrowser, resolveChromium, sessionName } from "../src/browser";
+import { browserEnv, cleanOutput, resolveAgentBrowser, resolveChromium, sessionName, unwrapJs } from "../src/browser";
 
 const home = () => mkdtempSync(join(tmpdir(), "cc-browser-"));
 const touch = (p: string) => { mkdirSync(join(p, ".."), { recursive: true }); writeFileSync(p, ""); };
@@ -52,4 +52,11 @@ test("sessionName, browserEnv and cleanOutput", () => {
   expect(cleanOutput("")).toBe("(no output)");
   expect(cleanOutput("x".repeat(20), 5)).toContain("trimmed");
   expect(cleanOutput("x".repeat(5), 5)).toBe("xxxxx");
+});
+
+test("unwrapJs unwraps a JSON string, leaves arrays and plain text", () => {
+  expect(unwrapJs('"hello"')).toBe("hello");
+  expect(unwrapJs('  "[{\\"a\\":1}]"  ')).toBe('[{"a":1}]');
+  expect(unwrapJs('[{"a":1}]')).toBe('[{"a":1}]');
+  expect(unwrapJs("plain text")).toBe("plain text");
 });
