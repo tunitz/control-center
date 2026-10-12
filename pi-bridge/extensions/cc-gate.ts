@@ -33,7 +33,7 @@ export const DEFAULT_POLICY: GatePolicy = {
   protectedPaths: [
     ".hermes", ".ssh", ".local/share/cc-pi/env", "projects/control-center/data",
     // Pi's own configuration: a chat must not rewrite its own rules, prompt, or extensions.
-    ".local/share/cc-pi/agent/auth.json", ".local/share/cc-pi/agent/SYSTEM.md", ".local/share/cc-pi/agent/APPEND_SYSTEM.md",
+    ".local/share/cc-pi/agent/auth.json", ".local/share/cc-pi/agent/SYSTEM.md", ".local/share/cc-pi/agent/APPEND_SYSTEM.md", ".local/share/cc-pi/agent/cc-append-system.md",
     ".local/share/cc-pi/agent/AGENTS.md", ".local/share/cc-pi/agent/cc-gate.json", ".local/share/cc-pi/agent/cc-config.json",
     ".local/share/cc-pi/agent/settings.json", ".local/share/cc-pi/agent/models.json", ".local/share/cc-pi/agent/extensions",
   ],

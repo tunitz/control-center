@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { BridgeConfig } from "./config";
 import { PiProcess } from "./pi-process";
+import { appendPromptArgs } from "./pi-config";
 
 export interface Frame {
   id?: number;
@@ -62,6 +63,7 @@ export class Chat {
     this.launchTools = tools && tools.length > 0 ? tools : null;
     const args = ["--mode", "rpc", "--session-dir", this.cfg.sessionDir];
     if (sessionPath) args.push("--session", sessionPath);
+    args.push(...appendPromptArgs(this.cfg.agentDir));
     if (tools && tools.length > 0) args.push("--tools", tools.join(","));
     for (const ext of opts.extensions ?? []) args.push("-e", ext);
     // A disabled skill means Pi's own discovery is off; the enabled ones are named explicitly.

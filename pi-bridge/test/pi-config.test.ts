@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { api, harness, type Harness } from "./helpers";
+import { appendPromptArgs } from "../src/pi-config";
 
 let h: Harness;
 beforeEach(async () => { h = await harness(); });
@@ -29,19 +31,19 @@ describe("GET/PUT /config", () => {
     const r = await api(h, "GET", "/config");
     expect(r.json.appendSystemPrompt).toBe("Reply in Taglish.");
     expect(r.json.agentsMd).toBe("Use bun.");
-    expect(readFileSync(join(h.cfg.agentDir, "APPEND_SYSTEM.md"), "utf8")).toBe("Reply in Taglish.");
+    expect(readFileSync(join(h.cfg.agentDir, "cc-append-system.md"), "utf8")).toBe("Reply in Taglish.");
     expect(readFileSync(join(h.cfg.agentDir, "AGENTS.md"), "utf8")).toBe("Use bun.");
   });
 
   test("an empty string removes the file", async () => {
     await put({ appendSystemPrompt: "x" });
     await put({ appendSystemPrompt: "" });
-    expect(existsSync(join(h.cfg.agentDir, "APPEND_SYSTEM.md"))).toBe(false);
+    expect(existsSync(join(h.cfg.agentDir, "cc-append-system.md"))).toBe(false);
   });
 
   test("files are private (mode 600) and no temp files are left behind", async () => {
     await put({ appendSystemPrompt: "x", agentsMd: "y", defaultTools: ["read"], gate: { extraRisky: ["git push"] } });
-    for (const f of ["APPEND_SYSTEM.md", "AGENTS.md", "cc-config.json", "cc-gate.json"]) {
+    for (const f of ["cc-append-system.md", "AGENTS.md", "cc-config.json", "cc-gate.json"]) {
       expect((statSync(join(h.cfg.agentDir, f)).mode & 0o777).toString(8)).toBe("600");
     }
     const left = (await Array.fromAsync(new Bun.Glob("*.tmp*").scan({ cwd: h.cfg.agentDir })));
@@ -71,7 +73,7 @@ describe("GET/PUT /config", () => {
     for (const bad of [{ shell: "x" }, { appendSystemPrompt: 5 }, { agentsMd: "x".repeat(40_000) }, { appendSystemPrompt: "x".repeat(40_000) }, {}, [] ]) {
       expect((await put(bad)).status).toBe(400);
     }
-    expect(existsSync(join(h.cfg.agentDir, "APPEND_SYSTEM.md"))).toBe(false);
+    expect(existsSync(join(h.cfg.agentDir, "cc-append-system.md"))).toBe(false);
   });
 
   test("a corrupt cc-config.json reads as no override instead of breaking the bridge", async () => {
@@ -266,5 +268,16 @@ describe("Claude Code bridge", () => {
     expect((await argvOf("br-1")).filter((a) => a === "-e").length).toBe(1);
     expect(await argvOf("br-1")).toContain(h.cfg.browserExtension);
     expect((await put({ browser: "yes" })).status).toBe(400);
+  });
+});
+
+describe("extra instructions stay out of subagents", () => {
+  test("appendPromptArgs moves the old APPEND_SYSTEM.md and names the new file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ccap-"));
+    expect(appendPromptArgs(dir)).toEqual([]);
+    writeFileSync(join(dir, "APPEND_SYSTEM.md"), "old rule");
+    expect(appendPromptArgs(dir)).toEqual(["--append-system-prompt", join(dir, "cc-append-system.md")]);
+    expect(existsSync(join(dir, "APPEND_SYSTEM.md"))).toBe(false);
+    expect(readFileSync(join(dir, "cc-append-system.md"), "utf8")).toBe("old rule");
   });
 });

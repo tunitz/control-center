@@ -1,6 +1,8 @@
 // Global Pi configuration the bridge owns on disk (docs/pi-plan.md T6b). One place that validates
 // and writes the files Pi and the cc-gate extension read at startup:
-//   <agent>/APPEND_SYSTEM.md  extra system-prompt text
+//   <agent>/cc-append-system.md  extra system-prompt text, passed to Pi as --append-system-prompt. Not named
+//                             APPEND_SYSTEM.md: Pi discovers that file by itself, and subagents (pi-subagents)
+//                             would load it too. Under this name only chats the bridge launches see it.
 //   <agent>/AGENTS.md         standing notes Pi loads as context
 //   <agent>/cc-config.json    { defaultTools, claudeBridge, browser }
 //   <agent>/cc-gate.json      { extraProtectedPaths, extraRisky }  (stricter-only; see cc-gate.ts)
@@ -180,12 +182,25 @@ function readJson(path: string): Record<string, unknown> {
 
 const strList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
+export const APPEND_FILE = "cc-append-system.md";
+
+/** Pi arguments that hand the extra instructions to a chat's own process. Moves the pre-rename APPEND_SYSTEM.md over first. */
+export function appendPromptArgs(agentDir: string): string[] {
+  const legacy = file(agentDir, "APPEND_SYSTEM.md");
+  const path = file(agentDir, APPEND_FILE);
+  if (existsSync(legacy)) {
+    if (!existsSync(path)) renameSync(legacy, path);
+    else rmSync(legacy);
+  }
+  return existsSync(path) && readText(path).trim() !== "" ? ["--append-system-prompt", path] : [];
+}
+
 export function readConfig(agentDir: string): PiConfig {
   const cc = readJson(file(agentDir, "cc-config.json"));
   const tools = strList(cc.defaultTools).filter((t) => (KNOWN_TOOLS as readonly string[]).includes(t));
   const gate = readJson(file(agentDir, "cc-gate.json"));
   return {
-    appendSystemPrompt: readText(file(agentDir, "APPEND_SYSTEM.md")),
+    appendSystemPrompt: readText(file(agentDir, APPEND_FILE)),
     agentsMd: readText(file(agentDir, "AGENTS.md")),
     defaultTools: Array.isArray(cc.defaultTools) && tools.length > 0 ? tools : null,
     gate: { extraProtectedPaths: strList(gate.extraProtectedPaths), extraRisky: strList(gate.extraRisky) },
@@ -197,7 +212,7 @@ export function readConfig(agentDir: string): PiConfig {
 /** Hash of everything a running Pi has already read at startup. A change means "restart me". */
 export function fingerprint(agentDir: string): string {
   const h = createHash("sha256");
-  for (const n of ["APPEND_SYSTEM.md", "AGENTS.md", "cc-gate.json"]) h.update(n).update("\0").update(readText(file(agentDir, n))).update("\0");
+  for (const n of [APPEND_FILE, "AGENTS.md", "cc-gate.json"]) h.update(n).update("\0").update(readText(file(agentDir, n))).update("\0");
   return h.digest("hex");
 }
 
@@ -284,7 +299,7 @@ export function applyConfigPatch(agentDir: string, body: unknown): PiConfig {
   if (touched === 0) throw new HttpError(400, "no config given");
 
   mkdirSync(agentDir, { recursive: true });
-  writeOrRemove(file(agentDir, "APPEND_SYSTEM.md"), next.appendSystemPrompt);
+  writeOrRemove(file(agentDir, APPEND_FILE), next.appendSystemPrompt);
   writeOrRemove(file(agentDir, "AGENTS.md"), next.agentsMd);
   writeAtomic(file(agentDir, "cc-config.json"), JSON.stringify({ defaultTools: next.defaultTools, claudeBridge: next.claudeBridge, browser: next.browser }, null, 2));
   writeAtomic(file(agentDir, "cc-gate.json"), JSON.stringify(next.gate, null, 2));

@@ -118,7 +118,7 @@ describe("no user-facing compaction config", () => {
     expect(r.json.error).toContain("compaction");
     const mixed = await api(h, "PUT", "/config", { appendSystemPrompt: "x", compaction: { enabled: false } });
     expect(mixed.status).toBe(400);
-    expect(existsSync(join(h.cfg.agentDir, "APPEND_SYSTEM.md"))).toBe(false);
+    expect(existsSync(join(h.cfg.agentDir, "cc-append-system.md"))).toBe(false);
   });
 
   test("a PUT /config leaves a hand-edited compaction block alone until the next start, which resets it", async () => {

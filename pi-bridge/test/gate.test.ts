@@ -87,7 +87,7 @@ describe("askWithTimeout", () => {
 });
 
 describe("Pi's own config files are protected", () => {
-  for (const f of ["APPEND_SYSTEM.md", "SYSTEM.md", "AGENTS.md", "cc-gate.json", "cc-config.json", "extensions/cc-gate.ts"]) {
+  for (const f of ["APPEND_SYSTEM.md", "cc-append-system.md", "SYSTEM.md", "AGENTS.md", "cc-gate.json", "cc-config.json", "extensions/cc-gate.ts"]) {
     test(`write to agent dir ${f} asks`, () => {
       expect(ev("write", { path: `${HOME}/.local/share/cc-pi/agent/${f}`, content: "x" }).confirm).toBe(true);
       expect(ev("bash", { command: `echo hi > ~/.local/share/cc-pi/agent/${f}` }).confirm).toBe(true);
