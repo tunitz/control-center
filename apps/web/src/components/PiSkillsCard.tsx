@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { chat, ChatError } from "../chat/api";
 import type { PiSkill } from "../chat/types";
+import { filterSkills } from "../chat/subagents";
 
 /** Last two path segments, so a project folder fits on one line. */
 const shortPath = (p: string): string => p.split("/").filter(Boolean).slice(-2).join("/");
@@ -11,6 +12,7 @@ export default function PiSkillsCard({ onMsg }: { onMsg: (m: string) => void }) 
   const [state, setState] = useState<"loading" | "ready" | "off" | "down">("loading");
   const [saving, setSaving] = useState("");
   const [err, setErr] = useState("");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     chat.piSkills().then(r => { setSkills(r.skills); setState("ready"); })
@@ -33,7 +35,7 @@ export default function PiSkillsCard({ onMsg }: { onMsg: (m: string) => void }) 
     }
   };
 
-  const group = (scope: PiSkill["scope"]) => skills.filter(s => s.scope === scope);
+  const group = (scope: PiSkill["scope"]) => filterSkills(skills, query).filter(s => s.scope === scope);
   const row = (s: PiSkill) => (
     <label className="pi-skill" key={s.path}>
       <input type="checkbox" checked={s.enabled} disabled={saving === s.path} onChange={() => void toggle(s)} />
@@ -42,7 +44,7 @@ export default function PiSkillsCard({ onMsg }: { onMsg: (m: string) => void }) 
           <span className="pi-skill-name">{s.name}</span>
           <span className={`pi-skill-tag${s.enabled ? "" : " off"}`}>{s.enabled ? "On" : "Off"}</span>
         </span>
-        <span className="pi-skill-desc">{s.description}</span>
+        <span className="pi-skill-desc pi-tool-desc">{s.description}</span>
         {s.scope === "project" && s.cwd && <span className="pi-skill-where">Project · {shortPath(s.cwd)}</span>}
       </span>
     </label>
@@ -60,6 +62,13 @@ export default function PiSkillsCard({ onMsg }: { onMsg: (m: string) => void }) 
         <>
           <p className="muted">Skills Pi can use. A toggle applies to every Pi chat on its next message.</p>
           {skills.length === 0 && <p className="muted">No skills found. Add a folder with a <code>SKILL.md</code> under <code>~/.agents/skills</code> or a project's <code>.pi/skills</code>.</p>}
+          {skills.length > 0 && (
+            <>
+              <label htmlFor="pi-skill-q" className="muted">Search skills</label>
+              <input id="pi-skill-q" type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by name or description" autoComplete="off" />
+              {globals.length + projects.length === 0 && <p className="muted">No skills match.</p>}
+            </>
+          )}
           {globals.length > 0 && (
             <>
               <h4 className="pi-skill-group">Global</h4>

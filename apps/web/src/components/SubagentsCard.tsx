@@ -154,7 +154,7 @@ export default function SubagentsCard({ onMsg }: { onMsg: (m: string) => void })
               {shownSkills.map(s => (
                 <label className="pi-tool" key={s.name}>
                   <input type="checkbox" checked={d.skills.includes(s.name)} onChange={() => patch({ skills: toggleIn(d.skills, s.name) })} />
-                  <span className="pi-tool-main"><code>{s.name}</code>{s.description && <span className="muted">{s.description}</span>}</span>
+                  <span className="pi-tool-main"><code>{s.name}</code>{s.description && <span className="muted pi-tool-desc">{s.description}</span>}</span>
                 </label>
               ))}
               {shownSkills.length === 0 && <p className="muted">No skills match.</p>}
