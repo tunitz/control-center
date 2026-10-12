@@ -19,6 +19,8 @@ export interface BridgeConfig {
   claudeBridgeExtension: string;
   /** Entry point of the cc-browser extension, loaded with `-e` when the browser tools are on. */
   browserExtension: string;
+  /** Entry point of extensions/probe-list-tools.ts: answers the tool-discovery probe. Never a chat extension. */
+  probeExtension: string;
   maxLive: number;
   idleMs: number;
   reapIntervalMs: number;
@@ -57,6 +59,7 @@ export function loadConfig(env: Env = process.env): BridgeConfig {
     anthropicApiKey: env.ANTHROPIC_API_KEY || undefined,
     claudeBridgeExtension: env.PI_BRIDGE_CLAUDE_BRIDGE_EXTENSION ?? join(home, ".pi/agent/npm/node_modules/pi-claude-bridge/src/index.ts"),
     browserExtension: env.PI_BRIDGE_BROWSER_EXTENSION ?? join(import.meta.dir, "..", "extensions", "browser.ts"),
+    probeExtension: env.PI_BRIDGE_PROBE_EXTENSION ?? join(import.meta.dir, "..", "extensions", "probe-list-tools.ts"),
     maxLive: num(env, "PI_BRIDGE_MAX_LIVE", 3),
     idleMs: num(env, "PI_BRIDGE_IDLE_MS", 10 * 60_000),
     reapIntervalMs: num(env, "PI_BRIDGE_REAP_MS", 30_000),

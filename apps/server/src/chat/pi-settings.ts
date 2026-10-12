@@ -6,8 +6,11 @@
 import { ChatError } from "./http";
 
 export type QueueMode = "all" | "one-at-a-time";
-/** Tools a Pi chat can have. Must match KNOWN_TOOLS in pi-bridge/src/pi-config.ts. */
-export const PI_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"] as const;
+/**
+ * A tool name is any well-formed string. The bridge owns the list of tools Pi offers (GET /tools),
+ * so new tools need no change here.
+ */
+export const TOOL_NAME_RE = /^[a-z][a-z0-9_.-]*$/;
 
 export type PiSettings = {
   /** Per-chat tool selection; null = the global default. Applied when the chat's Pi process (re)starts. */
@@ -39,8 +42,8 @@ export function parsePiSettingsPatch(body: unknown): Partial<PiSettings> {
     } else if (k === "tools") {
       if (v === null) out.tools = null;
       else {
-        if (!Array.isArray(v) || v.length === 0 || new Set(v).size !== v.length || !v.every((t) => typeof t === "string" && (PI_TOOLS as readonly string[]).includes(t))) {
-          throw new ChatError(400, "tools must be a non-empty list of distinct known tool names, or null");
+        if (!Array.isArray(v) || v.length === 0 || new Set(v).size !== v.length || !v.every((t) => typeof t === "string" && TOOL_NAME_RE.test(t))) {
+          throw new ChatError(400, "tools must be a non-empty list of distinct tool names, or null");
         }
         out.tools = v as string[];
       }

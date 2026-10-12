@@ -93,6 +93,27 @@ export class FakePiBridge {
   readonly authLogins = new Map<string, AuthRec>();
   readonly authAnswers: { id: string; value: string; promptId?: string }[] = [];
   authStarts = 0;
+  /** Tools the bridge offers (GET /tools). Dynamic in the real bridge; a fixed set here. */
+  readonly tools: { name: string; description: string }[] = [
+    { name: "read", description: "Read a file from disk." },
+    { name: "bash", description: "Run a shell command." },
+    { name: "edit", description: "Edit a file by exact text replacement." },
+    { name: "write", description: "Create or overwrite a file." },
+    { name: "grep", description: "Search file contents." },
+    { name: "find", description: "Find files by name." },
+    { name: "ls", description: "List a directory." },
+    { name: "todo_write", description: "Update the todo list." },
+    { name: "subagent", description: "Delegate a task to a named subagent." },
+    { name: "bg_wait", description: "Wait for a background task to finish." },
+    { name: "web_search", description: "Search the web." },
+    { name: "browser_navigate", description: "Open a page in the browser." },
+  ];
+  private toolNames(): string[] {
+    return this.tools.map((t) => t.name);
+  }
+
+  /** Subagents (in memory), keyed by name. */
+  readonly agents = new Map<string, any>();
   config: Record<string, any> = { appendSystemPrompt: "", agentsMd: "", defaultTools: null, gate: { extraProtectedPaths: [], extraRisky: [] }, claudeBridge: false, browser: false };
   modelsCalls = 0;
   /** The next N GET /models calls fail with 500 (for the no-cache-on-failure test). */
@@ -166,7 +187,26 @@ export class FakePiBridge {
       if (this.failModels > 0) { this.failModels--; return json(500, { error: "internal error" }); }
       return json(200, { models: this.models });
     }
-    if (p === "/config" && method === "GET") return json(200, { ...this.config, knownTools: ["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"], claudeCode: { found: false, path: null, extension: true }, browserStatus: { extension: true, agent: false, chromium: false } });
+    if (p === "/config" && method === "GET") return json(200, { ...this.config, knownTools: this.toolNames(), claudeCode: { found: false, path: null, extension: true }, browserStatus: { extension: true, agent: false, chromium: false } });
+    if (method === "GET" && p === "/tools") return json(200, { tools: this.tools });
+    if (method === "GET" && p === "/agents") return json(200, { agents: [...this.agents.values()] });
+    const agentM = /^\/agents\/([^/]+)$/.exec(p);
+    if (agentM && method === "PUT") {
+      const name = decodeURIComponent(agentM[1]);
+      if (!/^[a-z][a-z0-9-]{0,39}$/.test(name)) return json(400, { error: "agent name must be lowercase letters, digits and dashes" });
+      if (!body || typeof body !== "object" || body.name !== name) return json(400, { error: "agent name in body must match the URL" });
+      if (!Array.isArray(body.tools) || body.tools.some((t: unknown) => typeof t !== "string" || !this.toolNames().includes(t))) {
+        return json(400, { error: "agent has an unknown tool" });
+      }
+      const saved = { name, description: String(body.description ?? ""), model: String(body.model ?? "inherit"), thinking: String(body.thinking ?? ""), instructions: String(body.instructions ?? ""), notes: String(body.notes ?? ""), tools: body.tools, skills: Array.isArray(body.skills) ? body.skills : [] };
+      this.agents.set(name, saved);
+      return json(200, saved);
+    }
+    if (agentM && method === "DELETE") {
+      const name = decodeURIComponent(agentM[1]);
+      if (!this.agents.delete(name)) return json(404, { error: "no agent with that name" });
+      return json(200, { ok: true });
+    }
     if (p === "/skills" && method === "GET") return json(200, { skills: this.skills });
     if (p === "/skills" && method === "PUT") {
       const disabled = Array.isArray(body?.disabled) ? body.disabled : null;
@@ -185,7 +225,7 @@ export class FakePiBridge {
     if (method === "POST" && p === "/dirs") return this.makeDir(body);
     if (p === "/config" && method === "PUT") {
       const tools = body?.defaultTools;
-      if (Array.isArray(tools) && tools.some((t: string) => !["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"].includes(t))) {
+      if (Array.isArray(tools) && tools.some((t: string) => !this.toolNames().includes(t))) {
         return json(400, { error: "defaultTools: unknown tool rm" });
       }
       if (body && "compaction" in body) return json(400, { error: "unknown config key: compaction" });

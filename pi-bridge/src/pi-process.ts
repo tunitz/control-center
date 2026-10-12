@@ -23,14 +23,16 @@ export class PiProcess {
   private seq = 0;
   private closed = false;
 
-  constructor(cfg: BridgeConfig, cwd: string, args: string[], handlers: PiHandlers, opts: { hideAnthropic?: boolean } = {}) {
+  constructor(cfg: BridgeConfig, cwd: string, args: string[], handlers: PiHandlers, opts: { hideAnthropic?: boolean; extraEnv?: Record<string, string> } = {}) {
     mkdirSync(cwd, { recursive: true });
     const cmd = cfg.piBin.endsWith(".ts") ? [process.execPath, cfg.piBin, ...args] : [cfg.piBin, ...args];
-    // Only what Pi needs. CC_* and PI_BRIDGE_TOKEN are never passed on.
+    // Only what Pi needs. CC_* and PI_BRIDGE_TOKEN are never passed on, except the explicit extraEnv
+    // the tool probe sets (a temp output path for the probe extension; no secret).
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
       HOME: process.env.HOME ?? "",
       PI_CODING_AGENT_DIR: cfg.agentDir,
+      ...(opts.extraEnv ?? {}),
     };
     if (cfg.deepseekApiKey) env.DEEPSEEK_API_KEY = cfg.deepseekApiKey;
     // Claude Code hits its own auth error when ANTHROPIC_* overrides are exported (pi-claude-bridge

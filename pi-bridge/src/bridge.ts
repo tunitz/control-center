@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { applyConfigPatch, claudeCodeStatus, fingerprint, KNOWN_TOOLS, parseTools, readConfig, syncCompaction } from "./pi-config";
+import { applyConfigPatch, claudeCodeStatus, fingerprint, parseTools, readConfig, syncCompaction } from "./pi-config";
+import { deleteAgent, listAgents, saveAgent } from "./agents";
+import { probePi, toolValidator, ToolRegistry, type Probe } from "./tools";
 import { tokenMatches, bearerFrom } from "./auth";
 import { type BridgeConfig } from "./config";
 import { Chat, HttpError, rpcError, type Frame } from "./chat";
@@ -13,6 +15,8 @@ import { AuthManager, makeDeviceIdLoader, makeRuntimeLoader, type AuthType, type
 export interface BridgeDeps {
   /** Overrides the Pi SDK runtime loader (tests inject a fake). */
   loadAuthRuntime?: LoadRuntime;
+  /** Overrides the tool-discovery probe (tests inject a fake; the default starts `pi --mode rpc`). */
+  probeTools?: Probe;
 }
 
 export interface Bridge {
@@ -60,6 +64,7 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
     console.error("pi-bridge: compaction settings not written:", (e as Error).message);
   }
   const live = new Map<string, Chat>();
+  const registry = new ToolRegistry(cfg, deps.probeTools ?? probePi);
   const auth = new AuthManager({
     loadRuntime: deps.loadAuthRuntime ?? makeRuntimeLoader(cfg),
     getDeviceId: makeDeviceIdLoader(cfg.agentDir),
@@ -104,9 +109,9 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
   const json = (status: number, body: unknown) => Response.json(body, { status });
 
   /** The global config plus the Claude Code bridge status, so the UI can warn when a prerequisite is missing. */
-  const configBody = () => ({
+  const configBody = async () => ({
     ...readConfig(cfg.agentDir),
-    knownTools: KNOWN_TOOLS,
+    knownTools: (await registry.snapshot({}, "swr")).tools.map((t) => t.name),
     claudeCode: claudeCodeStatus(cfg.claudeBridgeExtension),
     browserStatus: {
       extension: existsSync(cfg.browserExtension),
@@ -176,7 +181,14 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
   }
   const QUEUE_MODES = ["all", "one-at-a-time"];
 
-  function parseSettings(v: unknown): LiveSettings | undefined {
+  /** Names of the tools a chat may get, checked against the discovered list (only when settings name tools). */
+  async function knownToolsFor(settings: unknown): Promise<((name: string) => boolean) | undefined> {
+    if (!settings || typeof settings !== "object" || Array.isArray(settings) || !("tools" in settings)) return undefined;
+    const cc = readConfig(cfg.agentDir);
+    return toolValidator(await registry.snapshot({ browser: cc.browser, claudeBridge: cc.claudeBridge }, "wait"));
+  }
+
+  function parseSettings(v: unknown, known?: (name: string) => boolean): LiveSettings | undefined {
     if (v === undefined) return undefined;
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new HttpError(400, "settings must be an object");
     const out: LiveSettings = {};
@@ -185,7 +197,7 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
         if (typeof val !== "string" || !QUEUE_MODES.includes(val)) throw new HttpError(400, `${k} must be all or one-at-a-time`);
         out[k] = val;
       } else if (k === "tools") {
-        out.tools = val === null ? null : parseTools(val, "tools");
+        out.tools = val === null ? null : parseTools(val, "tools", known);
       } else if (k === "autoCompaction" || k === "autoRetry") {
         if (typeof val !== "boolean") throw new HttpError(400, `${k} must be a boolean`);
         out[k] = val;
@@ -208,7 +220,7 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
   async function start(id: string, body: Record<string, any>) {
     const model = parseModel(body.model);
     const thinking = parseThinking(body.thinking);
-    const settings = parseSettings(body.settings);
+    const settings = parseSettings(body.settings, await knownToolsFor(body.settings));
     const sessionPath = body.sessionPath === undefined ? undefined : checkSessionPath(body.sessionPath);
     // A chat's cwd is fixed when it is created. Absent keeps what the live chat has (or the workspace).
     const requested = body.cwd === undefined || body.cwd === null ? undefined : chosenCwd(cfg, body.cwd);
@@ -397,13 +409,45 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
 
     let m: RegExpExecArray | null;
     if (path === "/config" && method === "GET") {
-      return json(200, configBody());
+      return json(200, await configBody());
     }
     if (path === "/config" && method === "PUT") {
       let body: unknown;
       try { body = await req.json(); } catch { throw new HttpError(400, "body must be JSON"); }
-      applyConfigPatch(cfg.agentDir, body);
-      return json(200, configBody());
+      // The names are checked against the list the new config will really offer, so a toggle that
+      // adds extension tools (browser) is validated in the same request.
+      const cur = readConfig(cfg.agentDir);
+      const patch = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+      const over = {
+        browser: typeof patch.browser === "boolean" ? patch.browser : cur.browser,
+        claudeBridge: typeof patch.claudeBridge === "boolean" ? patch.claudeBridge : cur.claudeBridge,
+      };
+      const snap = await registry.snapshot(over, "wait");
+      applyConfigPatch(cfg.agentDir, body, toolValidator(snap));
+      return json(200, await configBody());
+    }
+    if (path === "/tools" && method === "GET") {
+      return json(200, { tools: (await registry.snapshot({}, "swr")).tools });
+    }
+    if (path === "/agents" && method === "GET") {
+      return json(200, { agents: listAgents(cfg.agentDir) });
+    }
+    if ((m = /^\/agents\/([^/]+)$/.exec(path))) {
+      let name: string;
+      try {
+        name = decodeURIComponent(m[1]);
+      } catch {
+        throw new HttpError(400, "agent name must match ^[a-z][a-z0-9-]{0,39}$");
+      }
+      if (method === "PUT") {
+        let body: unknown;
+        try { body = await req.json(); } catch { throw new HttpError(400, "body must be JSON"); }
+        return json(200, saveAgent(cfg.agentDir, name, body));
+      }
+      if (method === "DELETE") {
+        deleteAgent(cfg.agentDir, name);
+        return json(200, { ok: true });
+      }
     }
     if (path === "/skills" && method === "GET") {
       return json(200, { skills: listSkills(cfg, url.searchParams.getAll("cwd")) });

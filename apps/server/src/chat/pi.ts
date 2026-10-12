@@ -45,6 +45,24 @@ export type PiSkill = {
   enabled: boolean;
 };
 
+/** A tool Pi offers, from the bridge's GET /tools. */
+export type PiTool = { name: string; description: string };
+
+/** A subagent the main Pi agent can delegate to. Mirrors the bridge's agents store. */
+export type PiAgent = {
+  name: string;
+  description: string;
+  model: string;
+  thinking: string;
+  instructions: string;
+  notes: string;
+  tools: string[];
+  skills: string[];
+};
+
+const isTool = (v: unknown): v is PiTool =>
+  !!v && typeof (v as PiTool).name === "string" && typeof (v as PiTool).description === "string";
+
 /** Provider sign-in (the chat's `/login`). Mirrors the bridge's login.ts types. */
 export type PiAuthType = "oauth" | "api_key";
 export type PiAuthProvider = {
@@ -202,6 +220,30 @@ export class PiClient implements ChatBackend {
     const q = cwds.map((c) => `cwd=${encodeURIComponent(c)}`).join("&");
     const r = await this.call("GET", `/skills${q === "" ? "" : `?${q}`}`);
     return Array.isArray(r.skills) ? (r.skills as PiSkill[]) : [];
+  }
+
+  /** Every tool the bridge says Pi offers (built-in, subagent, browser, ...). */
+  async getTools(): Promise<PiTool[]> {
+    const r = await this.call("GET", "/tools");
+    return Array.isArray(r.tools) ? (r.tools as unknown[]).filter(isTool) : [];
+  }
+
+  /** Subagents defined on the bridge. */
+  async getAgents(): Promise<PiAgent[]> {
+    const r = await this.call("GET", "/agents");
+    return Array.isArray(r.agents) ? (r.agents as PiAgent[]) : [];
+  }
+
+  /** Creates or replaces a subagent. Returns the saved agent. */
+  async putAgent(name: string, agent: PiAgent): Promise<PiAgent> {
+    return (await this.call("PUT", `/agents/${encodeURIComponent(name)}`, agent)) as PiAgent;
+  }
+
+  /** Removes a subagent. An unknown name is a 404. */
+  async deleteAgent(name: string): Promise<void> {
+    const res = await this.raw("DELETE", `/agents/${encodeURIComponent(name)}`);
+    if (res.status === 404) throw new ChatError(404, "no subagent with that name");
+    if (!res.ok) throw await this.failure("delete subagent", res);
   }
 
   /** Replaces the disabled set and returns the recomputed skills. */

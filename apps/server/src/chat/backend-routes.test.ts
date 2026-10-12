@@ -418,11 +418,68 @@ test("per-chat tools: PATCH stores them, null clears them, and every send carrie
   expect(S.getPiSettings(ctx.db, s.id)).toEqual({});
 });
 
-test("per-chat tools: unknown, duplicate and empty lists are 400", async () => {
+test("per-chat tools: malformed names, duplicate and empty lists are 400", async () => {
   const s = await piSession();
-  for (const tools of [["nope"], ["read", "read"], [], "read"]) {
+  for (const tools of [["Bad Name"], ["9lives"], ["rm -rf"], ["read", "read"], [], "read", [""]]) {
     expect((await js(await run(req("PATCH", PI_URL(s.id), { tools })))).status).toBe(400);
   }
+});
+
+test("per-chat tools: any well-formed tool name is accepted (the bridge owns the list), e.g. subagent and bg_wait", async () => {
+  const s = await piSession();
+  const r = await js(await run(req("PATCH", PI_URL(s.id), { tools: ["read", "subagent", "bg_wait", "web_search", "browser_navigate"] })));
+  expect(r.status).toBe(200);
+  expect(r.body.settings.tools).toEqual(["read", "subagent", "bg_wait", "web_search", "browser_navigate"]);
+});
+
+test("GET /tools proxies the bridge's dynamic tool list", async () => {
+  const r = await js(await run(req("GET", "/api/chat/pi/tools")));
+  expect(r.status).toBe(200);
+  expect(r.body.tools.map((t: any) => t.name)).toContain("subagent");
+  expect(r.body.tools.find((t: any) => t.name === "bg_wait")).toMatchObject({ description: expect.any(String) });
+});
+
+test("GET /pi/tools is 503 when no bridge is configured", async () => {
+  ctx = { ...ctx, pi: undefined };
+  expect((await js(await run(req("GET", "/api/chat/pi/tools")))).status).toBe(503);
+});
+
+test("agents: list, create, update and delete go to the bridge; the saved agent comes back", async () => {
+  const empty = await js(await run(req("GET", "/api/chat/pi/agents")));
+  expect(empty).toMatchObject({ status: 200, body: { agents: [] } });
+
+  const body = { name: "reviewer", description: "Reviews diffs", model: "inherit", thinking: "", instructions: "Be strict.", notes: "n", tools: ["read", "grep"], skills: ["pdf-tools"] };
+  const put = await js(await run(req("PUT", "/api/chat/pi/agents/reviewer", body)));
+  expect(put.status).toBe(200);
+  expect(put.body).toMatchObject(body);
+
+  const upd = await js(await run(req("PUT", "/api/chat/pi/agents/reviewer", { ...body, model: "deepseek-pro", tools: ["read"] })));
+  expect(upd.body).toMatchObject({ name: "reviewer", model: "deepseek-pro", tools: ["read"] });
+  expect((await js(await run(req("GET", "/api/chat/pi/agents")))).body.agents).toHaveLength(1);
+
+  const del = await js(await run(req("DELETE", "/api/chat/pi/agents/reviewer")));
+  expect(del).toMatchObject({ status: 200, body: { ok: true } });
+  expect((await js(await run(req("GET", "/api/chat/pi/agents")))).body.agents).toEqual([]);
+});
+
+test("agents: a bad name is 400 and nothing is stored; deleting an unknown agent is 404", async () => {
+  expect((await js(await run(req("PUT", "/api/chat/pi/agents/Bad_Name", { name: "Bad_Name", description: "", model: "inherit", thinking: "", instructions: "", notes: "", tools: [], skills: [] })))).status).toBe(400);
+  expect((await js(await run(req("PUT", "/api/chat/pi/agents/ok-name", { name: "other", description: "", model: "inherit", thinking: "", instructions: "", notes: "", tools: [], skills: [] })))).status).toBe(400);
+  expect((await js(await run(req("DELETE", "/api/chat/pi/agents/ghost")))).status).toBe(404);
+  expect((await js(await run(req("GET", "/api/chat/pi/agents")))).body.agents).toEqual([]);
+});
+
+test("agents: writes need the x-cc header; the bridge token never appears in a response", async () => {
+  const r = new Request("http://cc.local/api/chat/pi/agents/x", { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" });
+  expect((await js(await run(r))).status).toBe(403);
+  const body = { name: "tok", description: "", model: "inherit", thinking: "", instructions: "", notes: "", tools: [], skills: [] };
+  const put = await js(await run(req("PUT", "/api/chat/pi/agents/tok", body)));
+  expect(JSON.stringify([put])).not.toContain(bridge.token);
+});
+
+test("agents: 503 when no bridge is configured", async () => {
+  ctx = { ...ctx, pi: undefined };
+  expect((await js(await run(req("GET", "/api/chat/pi/agents")))).status).toBe(503);
 });
 
 test("send on a Pi chat accepts a model id that only Pi knows (the web always sends the model)", async () => {

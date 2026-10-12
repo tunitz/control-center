@@ -52,6 +52,10 @@ export type PiSettings = { tools: string[] | null; steeringMode: "all" | "one-at
 export type PiConfig = { appendSystemPrompt: string; agentsMd: string; defaultTools: string[] | null; gate: { extraProtectedPaths: string[]; extraRisky: string[] }; knownTools: string[]; claudeBridge: boolean; claudeCode: { found: boolean; path: string | null; extension: boolean }; browser: boolean; browserStatus: { extension: boolean; agent: boolean; chromium: boolean } };
 /** A Pi skill (global or project) with its enable/disable state. Mirrors the server's PiSkill. */
 export type PiSkill = { name: string; description: string; scope: "global" | "project"; path: string; dir: string; cwd: string | null; enabled: boolean };
+/** A tool Pi offers (GET /pi/tools). The list is dynamic; never hardcode names. */
+export type PiTool = { name: string; description: string };
+/** A subagent the main Pi agent can delegate to. Mirrors the server's PiAgent. */
+export type PiAgent = { name: string; description: string; model: string; thinking: string; instructions: string; notes: string; tools: string[]; skills: string[] };
 export type PiAuthType = "oauth" | "api_key";
 /** A provider the chat's `/login` can sign in to (GET /pi/auth/providers). */
 export type PiAuthProvider = { id: string; name: string; authTypes: PiAuthType[]; oauthLabel?: string; subscription: boolean; configured: boolean; source?: string };

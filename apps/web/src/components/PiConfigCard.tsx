@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { chat, ChatError } from "../chat/api";
-import type { PiConfig } from "../chat/types";
+import type { PiConfig, PiTool } from "../chat/types";
+import { toolRows, toggleTool } from "../chat/tools";
+import { PiToolList, usePiTools } from "./PiToolList";
 
 /** Global Pi configuration. Rarely changed, so it lives in Settings and not in the chat. */
 export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) {
@@ -16,6 +18,7 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
   const [newPath, setNewPath] = useState("");
   const [newRisky, setNewRisky] = useState("");
   const [err, setErr] = useState("");
+  const dyn = usePiTools();
 
   const apply = (c: PiConfig) => {
     setCfg(c); setPrompt(c.appendSystemPrompt); setNotes(c.agentsMd); setTools(c.defaultTools);
@@ -43,13 +46,11 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
     catch (e) { setErr((e as Error).message); }
   };
 
-  const known = cfg?.knownTools ?? [];
+  const offered: PiTool[] = dyn ?? (cfg?.knownTools ?? []).map(name => ({ name, description: "" }));
   const usingDefault = tools === null;
-  const effective = tools ?? known;
-  const flip = (t: string) => {
-    const next = effective.includes(t) ? effective.filter(x => x !== t) : [...effective, t];
-    if (next.length > 0) setTools(known.filter(x => next.includes(x)));
-  };
+  const effective = tools ?? offered.map(t => t.name);
+  const rows = toolRows(offered, usingDefault ? null : effective);
+  const flip = (t: string) => setTools(toggleTool(offered, effective, t));
   const addPath = () => { const v = newPath.trim(); if (v && !paths.includes(v)) setPaths([...paths, v]); setNewPath(""); };
   const addRisky = () => { const v = newRisky.trim(); if (v && !risky.includes(v)) setRisky([...risky, v]); setNewRisky(""); };
 
@@ -68,18 +69,18 @@ export default function PiConfigCard({ onMsg }: { onMsg: (m: string) => void }) 
           <label htmlFor="pi-notes" style={{ marginTop: 12, display: "block" }}>Notes for every chat</label>
           <textarea id="pi-notes" rows={4} value={notes} maxLength={32000} onChange={e => setNotes(e.target.value)} placeholder="Standing facts Pi should know, like which tools you use" style={{ width: "100%" }} />
 
-          <fieldset style={{ marginTop: 14, border: 0, padding: 0 }}>
-            <legend style={{ fontWeight: 600 }}>Default tools</legend>
-            <label className="pi-chk"><input type="checkbox" checked={usingDefault} onChange={e => setTools(e.target.checked ? null : known)} />Use Pi's own defaults</label>
-            <div className="pi-grid">
-              {known.map(t => (
-                <label className="pi-chk" key={t}>
-                  <input type="checkbox" checked={effective.includes(t)} disabled={usingDefault || (effective.length === 1 && effective.includes(t))} onChange={() => flip(t)} />
-                  <code>{t}</code>
-                </label>
-              ))}
-            </div>
-            <p className="muted">A chat can override this from its own Pi options.</p>
+          <fieldset style={{ marginTop: 14, border: 0, padding: 0, minWidth: 0 }}>
+          <legend style={{ fontWeight: 600 }}>Default tools for the main Pi</legend>
+          <p className="muted">Subagents don't use this list. Each subagent sets its own tools below.</p>
+          <label className="pi-chk"><input type="checkbox" checked={usingDefault} onChange={e => setTools(e.target.checked ? null : effective)} />Use Pi's own defaults</label>
+          <PiToolList
+            label="Default tools"
+            rows={rows}
+            disabled={usingDefault}
+            isLocked={name => effective.length === 1 && effective.includes(name)}
+            onToggle={flip}
+          />
+          <p className="muted">A chat can override this from its own Pi options.</p>
           </fieldset>
 
           <h4 style={{ margin: "16px 0 4px" }}>Claude subscription</h4>

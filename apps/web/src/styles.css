@@ -252,6 +252,10 @@ td{font-variant-numeric:tabular-nums}
 
 /* Settings: Pi agent card */
 .pi-chk{display:flex;align-items:center;gap:10px;min-height:44px;font-size:14px}
+.pi-tool-list{display:flex;flex-direction:column;gap:2px;max-height:280px;overflow-y:auto;overflow-x:hidden;min-width:0;border:1px solid var(--line);border-radius:10px;padding:6px 10px;background:var(--surface2)}
+.pi-tool{display:flex;align-items:flex-start;gap:10px;min-height:44px;padding:6px 0;font-size:14px;min-width:0;cursor:pointer}
+.pi-tool input{width:20px;height:20px;flex:none;margin-top:2px;accent-color:var(--accent)}
+.pi-tool-main{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}
 .pi-chk input{width:20px;height:20px;flex:none}
 .pi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px}
 .pi-grid>div{display:grid;grid-row:span 2;grid-template-rows:subgrid;row-gap:6px;align-content:start}

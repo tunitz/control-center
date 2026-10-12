@@ -14,7 +14,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writ
 import { join } from "node:path";
 import { HttpError } from "./chat";
 
-export const KNOWN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "todo_write"] as const;
+/** Shape of a tool name Pi can offer. Which names are real comes from discovery (tools.ts), not from here. */
+export const TOOL_NAME = /^[a-z][a-z0-9_.-]*$/;
 const MAX_TEXT = 32_000;
 const MAX_RULES = 50;
 const MAX_RULE_LEN = 200;
@@ -197,7 +198,8 @@ export function appendPromptArgs(agentDir: string): string[] {
 
 export function readConfig(agentDir: string): PiConfig {
   const cc = readJson(file(agentDir, "cc-config.json"));
-  const tools = strList(cc.defaultTools).filter((t) => (KNOWN_TOOLS as readonly string[]).includes(t));
+  // Shape only: the discovered list is not known here, and a stale name is dropped at the next PUT.
+  const tools = strList(cc.defaultTools).filter((t) => TOOL_NAME.test(t));
   const gate = readJson(file(agentDir, "cc-gate.json"));
   return {
     appendSystemPrompt: readText(file(agentDir, APPEND_FILE)),
@@ -216,12 +218,15 @@ export function fingerprint(agentDir: string): string {
   return h.digest("hex");
 }
 
-/** Validates a tool list. Throws HttpError 400. */
-export function parseTools(v: unknown, what: string): string[] {
+/**
+ * Validates a tool list. `known` is the discovered-name check (tools.ts toolValidator); without it
+ * (discovery unavailable) any name of the right shape is accepted. Throws HttpError 400.
+ */
+export function parseTools(v: unknown, what: string, known: (name: string) => boolean = (n) => TOOL_NAME.test(n)): string[] {
   if (!Array.isArray(v) || v.length === 0) throw new HttpError(400, `${what} must be a non-empty list of tool names`);
   const seen = new Set<string>();
   for (const t of v) {
-    if (typeof t !== "string" || !(KNOWN_TOOLS as readonly string[]).includes(t)) throw new HttpError(400, `${what}: unknown tool ${String(t).slice(0, 40)}`);
+    if (typeof t !== "string" || !known(t)) throw new HttpError(400, `${what}: unknown tool ${String(t).slice(0, 40)}`);
     if (seen.has(t)) throw new HttpError(400, `${what}: duplicate tool ${t}`);
     seen.add(t);
   }
@@ -277,7 +282,7 @@ function writeOrRemove(path: string, text: string): void {
 }
 
 /** Validates the whole patch first, then writes. A rejected patch changes nothing. */
-export function applyConfigPatch(agentDir: string, body: unknown): PiConfig {
+export function applyConfigPatch(agentDir: string, body: unknown, known?: (name: string) => boolean): PiConfig {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "body must be an object");
   const cur = readConfig(agentDir);
   const next: PiConfig = { ...cur, gate: { ...cur.gate } };
@@ -286,7 +291,7 @@ export function applyConfigPatch(agentDir: string, body: unknown): PiConfig {
     touched++;
     if (k === "appendSystemPrompt") next.appendSystemPrompt = parseText(v, k);
     else if (k === "agentsMd") next.agentsMd = parseText(v, k);
-    else if (k === "defaultTools") next.defaultTools = v === null ? null : parseTools(v, k);
+    else if (k === "defaultTools") next.defaultTools = v === null ? null : parseTools(v, k, known);
     else if (k === "claudeBridge") {
       if (typeof v !== "boolean") throw new HttpError(400, "claudeBridge must be a boolean");
       next.claudeBridge = v;

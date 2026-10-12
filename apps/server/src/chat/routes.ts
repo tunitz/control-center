@@ -18,6 +18,7 @@ import { assertImageSize, buildPrompt, type PromptAttachment } from "./prompt";
 import { RunManager, recoverRuns } from "./runs";
 import { DelegationWatcher } from "./watcher";
 import { mergeSettings, parsePiSettingsPatch, withDefaults } from "./pi-settings";
+import { AGENT_NAME_RE, parseAgent } from "./pi-agents";
 
 export type ChatContext = {
   db: Database;
@@ -97,6 +98,25 @@ async function route(req: Request, url: URL, ctx: ChatContext): Promise<Response
     const body = await readJson(req);
     if (!Array.isArray(body.disabled) || body.disabled.some((x: unknown) => typeof x !== "string")) throw new ChatError(400, "disabled must be a string[]");
     return json({ skills: await ctx.pi.putSkills(body.disabled, cwds) });
+  }
+  if (p === "/pi/tools" && method === "GET") {
+    if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
+    return json({ tools: await ctx.pi.getTools() });
+  }
+  if (p === "/pi/agents" && method === "GET") {
+    if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
+    return json({ agents: await ctx.pi.getAgents() });
+  }
+  const agm = /^\/pi\/agents\/([^/]+)$/.exec(p);
+  if (agm && (method === "PUT" || method === "DELETE")) {
+    if (!ctx.pi) throw new ChatError(503, "Pi is not configured");
+    const name = decodeURIComponent(agm[1]);
+    if (method === "DELETE") {
+      if (!AGENT_NAME_RE.test(name)) throw new ChatError(400, "invalid subagent name");
+      await ctx.pi.deleteAgent(name);
+      return json({ ok: true });
+    }
+    return json(await ctx.pi.putAgent(name, parseAgent(name, await readJson(req))));
   }
   if (p === "/pi/auth/providers" && method === "GET") {
     if (!ctx.pi) throw new ChatError(503, "Pi is not configured");

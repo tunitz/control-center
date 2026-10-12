@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { chat } from "../../chat/api";
 import { sheetErrorText, tokenNote } from "../../chat/pi";
-import type { PiConfig, PiSettings } from "../../chat/types";
+import { toolRows, toggleTool } from "../../chat/tools";
+import type { PiConfig, PiSettings, PiTool } from "../../chat/types";
+import { PiToolList, usePiTools } from "../PiToolList";
 
 type Props = { sid: string; running: boolean; onClose: () => void };
 
@@ -18,6 +20,7 @@ export function PiSheet({ sid, running, onClose }: Props) {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const dyn = usePiTools();
 
   useEffect(() => {
     let live = true;
@@ -46,13 +49,14 @@ export function PiSheet({ sid, running, onClose }: Props) {
     finally { setBusy(false); }
   };
 
-  const tools = cfg?.knownTools ?? [];
+  const offered: PiTool[] = dyn ?? (cfg?.knownTools ?? []).map(name => ({ name, description: "" }));
   const usingDefault = s ? s.tools === null : true;
-  const effective = s?.tools ?? cfg?.defaultTools ?? tools;
-  const toggleTool = (t: string) => {
-    const next = effective.includes(t) ? effective.filter(x => x !== t) : [...effective, t];
-    if (next.length === 0) return;
-    void save({ tools: tools.filter(x => next.includes(x)) });
+  const effective = s?.tools ?? cfg?.defaultTools ?? offered.map(t => t.name);
+  const rows = toolRows(offered, usingDefault ? null : effective);
+  const toggleTool1 = (t: string) => {
+    const next = toggleTool(offered, effective, t);
+    if (next.length === effective.length && next.every((x, i) => x === effective[i])) return;
+    void save({ tools: next });
   };
   const locked = running;
 
@@ -74,14 +78,13 @@ export function PiSheet({ sid, running, onClose }: Props) {
               <section aria-labelledby="pi-tools">
                 <h3 id="pi-tools">Tools for this chat</h3>
                 <label className="chk"><input type="checkbox" checked={usingDefault} disabled={locked} onChange={e => void save({ tools: e.target.checked ? null : effective })} />Use the default tools</label>
-                <div className="chk-grid" role="group" aria-label="Tools">
-                  {tools.map(t => (
-                    <label className="chk" key={t}>
-                      <input type="checkbox" checked={effective.includes(t)} disabled={locked || usingDefault || (effective.length === 1 && effective.includes(t))} onChange={() => toggleTool(t)} />
-                      <code>{t}</code>
-                    </label>
-                  ))}
-                </div>
+                <PiToolList
+                  label="Tools"
+                  rows={rows}
+                  disabled={locked || usingDefault}
+                  isLocked={name => effective.length === 1 && effective.includes(name)}
+                  onToggle={toggleTool1}
+                />
                 <p className="meta">Tool changes apply on the next message.</p>
               </section>
 
