@@ -137,7 +137,7 @@ Every task ends: `bun run typecheck` + `bun test apps/server apps/web/src` green
 
 ### Workstream C — settings
 
-**T6 Settings model and apply path.** Slice T6a (DONE, live-verified on real Pi): thinking level (from the chat effort), steering mode, follow-up mode, auto compaction, auto retry, manual compact; stored per chat in `pi_settings_json`, sent with every bridge `start`. Slice T6b-server (DONE, live-verified: system prompt took effect and the restart kept the session): global system prompt, AGENTS.md, default and per-chat tools, stricter-only gate rules, restart-on-change in the bridge. Not built, by decision: API keys (set once over SSH), models.json/llama (after the tun-sfx test), advanced settings.json form, extension toggles. The web screens for T6b live in Settings (global card "Pi agent") and a per-chat "Pi options" sheet in the chat menu (tun, 2026-10-11). Coverage table (UI must expose each row):
+**T6 Settings model and apply path.** Slice T6a (DONE, live-verified on real Pi): thinking level (from the chat effort), steering mode, follow-up mode, auto compaction (on/off per chat), auto retry, manual compact; stored per chat in `pi_settings_json`, sent with every bridge `start`. Slice T6b-server (DONE, live-verified: system prompt took effect and the restart kept the session): global system prompt, AGENTS.md, default and per-chat tools, stricter-only gate rules, restart-on-change in the bridge. Not built, by decision: API keys (set once over SSH), models.json/llama (after the tun-sfx test), advanced settings.json form, extension toggles. The web screens for T6b live in Settings (global card "Pi agent") and a per-chat "Pi options" sheet in the chat menu (tun, 2026-10-11). Coverage table (UI must expose each row):
 
 | Setting | Live over RPC? | UI control | Apply |
 |---|---|---|---|
@@ -150,7 +150,7 @@ Every task ends: `bun run typecheck` + `bun test apps/server apps/web/src` green
 | Active tools | no (via cc-bridge `setActiveTools`) | checklist | next message |
 | System prompt (APPEND_SYSTEM.md / SYSTEM.md) | no | text area, append vs replace | next message (restart) |
 | AGENTS.md | no (file) | editor | next message |
-| Compaction thresholds, branch summary, retry limits, image resize/block, shell path/prefix, http proxy, transport, thinking budgets | no (settings.json) | one "Advanced" form generated from a typed schema | restart |
+| Branch summary, retry limits, image resize/block, shell path/prefix, http proxy, transport, thinking budgets | no (settings.json) | one "Advanced" form generated from a typed schema | restart |
 | models.json (custom endpoints incl. llama `192.168.31.15:8080/v1`) | no (file) | provider list: add/edit/remove, test button | restart |
 | API keys | no (auth.json / env) | write-only field per provider, stored only in `~/.local/share/cc-pi/env` (chmod 600) | restart |
 | Skills, prompt templates, extensions enabled | no (files/settings) | enable/disable list | restart |

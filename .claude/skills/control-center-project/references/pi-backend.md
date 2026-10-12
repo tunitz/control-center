@@ -90,12 +90,12 @@
 ## Live gate probe (cheap, real)
 Run a Bun script that spawns the real Pi with DeepSeek flash. Answer each `extension_ui_request` by writing the response back on stdin. Use two prompts: a write to `~/.hermes/cache/scratch/...` (expect a prompt, after Deny the file must not exist) and a write inside the workspace (after Approve the file must contain the text). Delete the probe file afterwards. Scratch scripts go in `~/.hermes/cache/scratch`, not `/tmp`.
 
-## Compaction (context threshold and /compact)
-- Pi compacts once context exceeds `contextWindow - reserveTokens`. Its default reserve is 16K, so a 1M-window model compacts only near 983K. That default is what burned tokens in long chats.
-- Set the threshold per model: `modelOverrides[<id>].reserveTokens = contextWindow - compactAt`. For a 1M model, `reserveTokens: 800000` compacts at 200K. Models with small windows keep Pi's default. Keys are `anthropic/<id>` and `claude-bridge/<id>` for each model.
-- `compaction.keepRecentTokens` sets how much recent context survives a compaction.
-- Write it with the bridge: `PUT /config` on 127.0.0.1:3050 with bearer `PI_BRIDGE_TOKEN` (from `~/.local/share/cc-pi/env`) and body `{"compaction":{"enabled","compactAtTokens","keepRecentTokens"}}`. The bridge merges it into `settings.json` and keeps the other keys. It refuses a corrupt `settings.json` rather than overwriting it. Verify by reading `settings.json` back.
-- The container's Settings card calls the same route. Its login is a separate path, so a script can hit the bridge directly while the web login is unavailable.
+## Compaction (fixed: 256k trigger, 51,200 kept)
+- Not configurable. The bridge hard-codes `COMPACT_AT_TOKENS = 256000` and `KEEP_RECENT_TOKENS = 51200` (`pi-bridge/src/pi-config.ts`). It writes them into Pi's `settings.json` at bridge startup and on every chat start (`syncCompaction`), so models added later are covered with no user action.
+- Per model (from `models-store.json`): window > 256k gets `modelOverrides[provider/id].reserveTokens = window - 256000`. Window <= 256k gets Pi's default reserve 16384 and `keepRecentTokens = min(51200, floor((window - 16384) / 2))`. `anthropic/<id>` also gets `claude-bridge/<id>`.
+- `compaction.enabled` is kept as Pi wrote it (default true). The per-chat auto-compaction toggle and "Compact now" in the Pi options sheet are unchanged.
+- `PUT /config` rejects a `compaction` key with 400 and changes nothing. A corrupt `settings.json` makes chat starts return 400 and is never overwritten; fix the file by hand.
+- Verify with `pi-bridge/test/compaction.test.ts`, or by reading `settings.json` after a chat start.
 - Limit: Pi checks the threshold before each prompt, not inside a long tool loop. One prompt that runs far past the threshold still grows; the user must stop a looping run.
 - `/compact` in a Pi chat calls the compact endpoint. Pi's "Nothing to compact" on a small session is returned as 502 with Pi's message (see the rule above).
 

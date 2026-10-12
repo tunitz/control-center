@@ -15,8 +15,6 @@ import type { ContentPart, HermesFrame, StartRunArgs, TodoItem } from "./hermes"
 import { PI_SETTING_DEFAULTS } from "./pi-settings";
 import { ChatError } from "./http";
 
-export type PiCompaction = { enabled: boolean; compactAtTokens: number; keepRecentTokens: number };
-
 export type PiConfig = {
   appendSystemPrompt: string;
   agentsMd: string;
@@ -29,8 +27,6 @@ export type PiConfig = {
   claudeCode: { found: boolean; path: string | null; extension: boolean };
   /** Register the cc-browser tools for Pi chats. */
   browser: boolean;
-  /** Auto-compaction: `compactAtTokens` is where Pi compacts; `keepRecentTokens` is what it keeps verbatim. */
-  compaction: PiCompaction;
   /** Whether the browser extension, the agent-browser CLI and a Chromium are present. */
   browserStatus: { extension: boolean; agent: boolean; chromium: boolean };
 };

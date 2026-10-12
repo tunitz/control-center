@@ -2,10 +2,10 @@
 // and writes the files Pi and the cc-gate extension read at startup:
 //   <agent>/APPEND_SYSTEM.md  extra system-prompt text
 //   <agent>/AGENTS.md         standing notes Pi loads as context
-//   <agent>/cc-config.json    { defaultTools, compaction: { compactAtTokens } }
+//   <agent>/cc-config.json    { defaultTools, claudeBridge, browser }
 //   <agent>/cc-gate.json      { extraProtectedPaths, extraRisky }  (stricter-only; see cc-gate.ts)
-//   <agent>/settings.json     compaction { enabled, keepRecentTokens, modelOverrides[model].reserveTokens }
-//                             (merged: every other key Pi wrote is kept as it is)
+//   <agent>/settings.json     compaction, FIXED by syncCompaction (not configurable): trigger 256k,
+//                             keep 51,200. Every other key Pi wrote is kept as it is.
 // Every file is written atomically (temp + rename) with mode 600.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -31,36 +31,34 @@ export interface PiConfig {
   claudeBridge: boolean;
   /** Register the cc-browser tools (browser_navigate, browser_snapshot, …) for Pi chats. */
   browser: boolean;
-  compaction: PiCompaction;
 }
 
-/**
- * Auto-compaction for Pi chats. `compactAtTokens` is the context size where Pi compacts; Pi only
- * reads a reserve (window - threshold), so the bridge translates it per model (see compactionReserve).
- */
-export interface PiCompaction {
-  enabled: boolean;
-  compactAtTokens: number;
-  keepRecentTokens: number;
-}
-
-export const COMPACTION_DEFAULTS: PiCompaction = { enabled: true, compactAtTokens: 200_000, keepRecentTokens: 20_000 };
+/** Pi compacts when the context passes this many tokens. Fixed: not configurable. */
+export const COMPACT_AT_TOKENS = 256_000;
+/** Recent context Pi keeps verbatim after a compaction. Fixed: 20% of COMPACT_AT_TOKENS. */
+export const KEEP_RECENT_TOKENS = 51_200;
 /** Pi's own default reserve (core/compaction/compaction.js DEFAULT_COMPACTION_SETTINGS). */
 export const PI_DEFAULT_RESERVE = 16_384;
-const COMPACT_AT_RANGE: [number, number] = [50_000, 900_000];
-const KEEP_RECENT_RANGE: [number, number] = [5_000, 100_000];
 
 const file = (dir: string, name: string) => join(dir, name);
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
-const inRange = (v: unknown, [lo, hi]: [number, number]): v is number => Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi;
 
 /**
- * Pi reserve for one model: its window minus the wanted compaction point. A window that is not
- * larger than the threshold has nothing to reserve, so Pi's default applies.
+ * Pi reserve for one model: its window minus the fixed compaction point. A window not larger than
+ * that has nothing to reserve, so Pi's default applies.
  */
-export function compactionReserve(contextWindow: number, compactAtTokens: number): number {
-  return contextWindow > compactAtTokens ? contextWindow - compactAtTokens : PI_DEFAULT_RESERVE;
+export function compactionReserve(contextWindow: number): number {
+  return contextWindow > COMPACT_AT_TOKENS ? contextWindow - COMPACT_AT_TOKENS : PI_DEFAULT_RESERVE;
+}
+
+/**
+ * Per-model keepRecentTokens for a window that is not above COMPACT_AT_TOKENS: at most half of what
+ * is left above Pi's reserve, capped at KEEP_RECENT_TOKENS. Larger windows use the global value.
+ */
+export function keepRecentFor(contextWindow: number): number | undefined {
+  if (contextWindow > COMPACT_AT_TOKENS) return undefined;
+  return Math.max(0, Math.min(KEEP_RECENT_TOKENS, Math.floor((contextWindow - PI_DEFAULT_RESERVE) / 2)));
 }
 
 /**
@@ -83,12 +81,6 @@ export function modelWindows(agentDir: string): { provider: string; id: string; 
   return out;
 }
 
-/** The settings.json text for a compaction patch. Reads and validates first; the caller writes. */
-function compactionSettingsText(agentDir: string, c: PiCompaction): string {
-  const settings = readSettingsStrict(agentDir);
-  return JSON.stringify(mergeCompaction(settings, c, modelWindows(agentDir)), null, 2);
-}
-
 /** Pi's settings.json read strictly for a write: missing = {}, corrupt = 400 (never overwritten). */
 function readSettingsStrict(agentDir: string): Record<string, unknown> {
   const path = file(agentDir, "settings.json");
@@ -97,56 +89,45 @@ function readSettingsStrict(agentDir: string): Record<string, unknown> {
   try {
     v = JSON.parse(readFileSync(path, "utf8"));
   } catch {
-    throw new HttpError(400, "settings.json is not valid JSON, so compaction cannot be saved; fix that file first");
+    throw new HttpError(400, "settings.json is not valid JSON, so compaction cannot be written; fix that file first");
   }
   if (!isObj(v)) throw new HttpError(400, "settings.json must be a JSON object");
   return v;
 }
 
-/** Pi's settings with the compaction block set. Every other key, and every other model override, is kept. */
-function mergeCompaction(settings: Record<string, unknown>, c: PiCompaction, windows: ReturnType<typeof modelWindows>): Record<string, unknown> {
+/** Pi's settings with the fixed compaction block set. Every other key, and every other model override, is kept. */
+function mergeCompaction(settings: Record<string, unknown>, windows: ReturnType<typeof modelWindows>): Record<string, unknown> {
   const prev = isObj(settings.compaction) ? settings.compaction : {};
   const prevOverrides = isObj(prev.modelOverrides) ? prev.modelOverrides : {};
   const modelOverrides: Record<string, unknown> = { ...prevOverrides };
   for (const m of windows) {
     const key = `${m.provider}/${m.id}`;
-    const entry = isObj(prevOverrides[key]) ? prevOverrides[key] : {};
-    modelOverrides[key] = { ...entry, reserveTokens: compactionReserve(m.contextWindow, c.compactAtTokens) };
+    const entry: Record<string, unknown> = { ...(isObj(prevOverrides[key]) ? prevOverrides[key] : {}) };
+    entry.reserveTokens = compactionReserve(m.contextWindow);
+    const keep = keepRecentFor(m.contextWindow);
+    if (keep === undefined) delete entry.keepRecentTokens;
+    else entry.keepRecentTokens = keep;
+    modelOverrides[key] = entry;
   }
-  return { ...settings, compaction: { ...prev, enabled: c.enabled, keepRecentTokens: c.keepRecentTokens, modelOverrides } };
+  // `enabled` is kept if Pi wrote it, Pi's default (true) otherwise.
+  return { ...settings, compaction: { ...prev, enabled: prev.enabled ?? true, keepRecentTokens: KEEP_RECENT_TOKENS, modelOverrides } };
 }
 
-function readCompaction(agentDir: string, cc: Record<string, unknown>): PiCompaction {
-  const st = readJson(file(agentDir, "settings.json")).compaction;
-  const pi = isObj(st) ? st : {};
-  const raw = isObj(cc.compaction) ? cc.compaction : {};
-  return {
-    enabled: pi.enabled !== false,
-    compactAtTokens: inRange(raw.compactAtTokens, COMPACT_AT_RANGE) ? raw.compactAtTokens : COMPACTION_DEFAULTS.compactAtTokens,
-    keepRecentTokens: inRange(pi.keepRecentTokens, KEEP_RECENT_RANGE) ? pi.keepRecentTokens : COMPACTION_DEFAULTS.keepRecentTokens,
-  };
-}
-
-function parseCompaction(v: unknown, cur: PiCompaction): PiCompaction {
-  if (!isObj(v)) throw new HttpError(400, "compaction must be an object");
-  const out: PiCompaction = { ...cur };
-  const entries = Object.entries(v);
-  if (entries.length === 0) throw new HttpError(400, "compaction: no setting given");
-  for (const [k, val] of entries) {
-    if (k === "enabled") {
-      if (typeof val !== "boolean") throw new HttpError(400, "compaction.enabled must be a boolean");
-      out.enabled = val;
-    } else if (k === "compactAtTokens") {
-      if (!inRange(val, COMPACT_AT_RANGE)) throw new HttpError(400, "compaction.compactAtTokens must be an integer from 50000 to 900000");
-      out.compactAtTokens = val;
-    } else if (k === "keepRecentTokens") {
-      if (!inRange(val, KEEP_RECENT_RANGE)) throw new HttpError(400, "compaction.keepRecentTokens must be an integer from 5000 to 100000");
-      out.keepRecentTokens = val;
-    } else {
-      throw new HttpError(400, `unknown compaction setting: ${k}`);
-    }
+/**
+ * Writes the fixed compaction block into Pi's settings.json, only when it changed. Runs on every chat
+ * start and once at bridge startup, so a model added later is covered without any user action.
+ * Returns the block as text: the launch key includes it, because Pi reads settings only at process start.
+ * A corrupt settings.json throws 400 and is never overwritten.
+ */
+export function syncCompaction(agentDir: string): string {
+  const path = file(agentDir, "settings.json");
+  const next = mergeCompaction(readSettingsStrict(agentDir), modelWindows(agentDir));
+  const text = JSON.stringify(next, null, 2);
+  if (!existsSync(path) || readFileSync(path, "utf8") !== text) {
+    mkdirSync(agentDir, { recursive: true });
+    writeAtomic(path, text);
   }
-  return out;
+  return JSON.stringify(next.compaction);
 }
 
 /** Claude Code discovery for the Claude-bridge toggle: is the CLI installed, and is the extension present. */
@@ -210,7 +191,6 @@ export function readConfig(agentDir: string): PiConfig {
     gate: { extraProtectedPaths: strList(gate.extraProtectedPaths), extraRisky: strList(gate.extraRisky) },
     claudeBridge: cc.claudeBridge === true,
     browser: cc.browser === true,
-    compaction: readCompaction(agentDir, cc),
   };
 }
 
@@ -287,14 +267,9 @@ export function applyConfigPatch(agentDir: string, body: unknown): PiConfig {
   const cur = readConfig(agentDir);
   const next: PiConfig = { ...cur, gate: { ...cur.gate } };
   let touched = 0;
-  let settingsText: string | undefined;
   for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
     touched++;
-    if (k === "compaction") {
-      next.compaction = parseCompaction(v, cur.compaction);
-      // Validate Pi's settings.json now (a corrupt file refuses the whole patch), write later.
-      settingsText = compactionSettingsText(agentDir, next.compaction);
-    } else if (k === "appendSystemPrompt") next.appendSystemPrompt = parseText(v, k);
+    if (k === "appendSystemPrompt") next.appendSystemPrompt = parseText(v, k);
     else if (k === "agentsMd") next.agentsMd = parseText(v, k);
     else if (k === "defaultTools") next.defaultTools = v === null ? null : parseTools(v, k);
     else if (k === "claudeBridge") {
@@ -304,15 +279,14 @@ export function applyConfigPatch(agentDir: string, body: unknown): PiConfig {
       if (typeof v !== "boolean") throw new HttpError(400, "browser must be a boolean");
       next.browser = v;
     } else if (k === "gate") next.gate = parseGate(v, cur.gate);
-    else throw new HttpError(400, `unknown config key: ${k}`);
+    else throw new HttpError(400, `unknown config key: ${k}`); // includes `compaction`: fixed by the bridge, not configurable
   }
   if (touched === 0) throw new HttpError(400, "no config given");
 
   mkdirSync(agentDir, { recursive: true });
   writeOrRemove(file(agentDir, "APPEND_SYSTEM.md"), next.appendSystemPrompt);
   writeOrRemove(file(agentDir, "AGENTS.md"), next.agentsMd);
-  writeAtomic(file(agentDir, "cc-config.json"), JSON.stringify({ defaultTools: next.defaultTools, claudeBridge: next.claudeBridge, browser: next.browser, compaction: { compactAtTokens: next.compaction.compactAtTokens } }, null, 2));
+  writeAtomic(file(agentDir, "cc-config.json"), JSON.stringify({ defaultTools: next.defaultTools, claudeBridge: next.claudeBridge, browser: next.browser }, null, 2));
   writeAtomic(file(agentDir, "cc-gate.json"), JSON.stringify(next.gate, null, 2));
-  if (settingsText !== undefined) writeAtomic(file(agentDir, "settings.json"), settingsText);
   return next;
 }

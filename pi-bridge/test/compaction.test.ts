@@ -1,178 +1,131 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { api, harness, type Harness } from "./helpers";
-import { compactionReserve, readConfig } from "../src/pi-config";
+import { api, harness, makeConfig, type Harness } from "./helpers";
+import { createBridge } from "../src/bridge";
 
+// Compaction is fixed, not configurable: Pi compacts at 256,000 tokens and keeps 51,200 recent
+// tokens. The bridge writes this into Pi's settings.json on every start and at bridge startup.
 let h: Harness;
 beforeEach(async () => { h = await harness(); });
 afterEach(async () => { await h.close(); });
 
-const put = (body: unknown) => api(h, "PUT", "/config", body);
-const get = async () => (await api(h, "GET", "/config")).json;
 const settingsPath = () => join(h.cfg.agentDir, "settings.json");
 const readSettings = () => JSON.parse(readFileSync(settingsPath(), "utf8"));
-const seedSettings = (obj: unknown) => { mkdirSync(h.cfg.agentDir, { recursive: true }); writeFileSync(settingsPath(), JSON.stringify(obj, null, 2)); };
-const seedModels = (models: Record<string, number>) => {
+const seed = (name: string, obj: unknown) => {
   mkdirSync(h.cfg.agentDir, { recursive: true });
+  writeFileSync(join(h.cfg.agentDir, name), JSON.stringify(obj, null, 2));
+};
+const seedModels = (models: Record<string, number>) => {
   const byProvider: Record<string, { models: unknown[] }> = {};
   for (const [key, contextWindow] of Object.entries(models)) {
     const [provider, id] = key.split("/");
     (byProvider[provider] ??= { models: [] }).models.push({ id, name: id, provider, contextWindow, maxTokens: 1000 });
   }
-  writeFileSync(join(h.cfg.agentDir, "models-store.json"), JSON.stringify(byProvider));
+  seed("models-store.json", byProvider);
+};
+const start = (id: string) => api(h, "POST", `/chats/${id}/start`, {});
+
+// 1M: reserve = window - 256000, global keepRecentTokens applies.
+// 200k and 64k: Pi's default reserve 16384; keepRecentTokens = min(51200, floor((window - 16384) / 2)).
+// anthropic models are also listed under claude-bridge with the same window.
+const MODELS = { "deepseek/big": 1_000_000, "anthropic/mid": 200_000, "anthropic/small": 64_000 };
+const EXPECTED_OVERRIDES = {
+  "deepseek/big": { reserveTokens: 744_000 },
+  "anthropic/mid": { reserveTokens: 16_384, keepRecentTokens: 51_200 },
+  "anthropic/small": { reserveTokens: 16_384, keepRecentTokens: 23_808 },
+  "claude-bridge/mid": { reserveTokens: 16_384, keepRecentTokens: 51_200 },
+  "claude-bridge/small": { reserveTokens: 16_384, keepRecentTokens: 23_808 },
 };
 
-describe("compaction config: defaults and read back", () => {
-  test("defaults: enabled, compact at 200000, keep recent 20000", async () => {
-    const r = await get();
-    expect(r.compaction).toEqual({ enabled: true, compactAtTokens: 200000, keepRecentTokens: 20000 });
+describe("fixed compaction: the generated settings", () => {
+  beforeEach(() => seedModels(MODELS));
+
+  test("a start writes keepRecentTokens 51200 and the exact per-model reserves", async () => {
+    expect((await start("c-1")).status).toBe(200);
+    const c = readSettings().compaction;
+    expect(c).toMatchObject({ enabled: true, keepRecentTokens: 51_200 });
+    expect(c.modelOverrides).toEqual(EXPECTED_OVERRIDES);
   });
 
-  test("a stored raw compactAtTokens reads back exactly as the user set it", async () => {
-    expect((await put({ compaction: { compactAtTokens: 123456 } })).status).toBe(200);
-    expect((await get()).compaction.compactAtTokens).toBe(123456);
-    expect(JSON.parse(readFileSync(join(h.cfg.agentDir, "cc-config.json"), "utf8")).compaction).toMatchObject({ compactAtTokens: 123456 });
-  });
-
-  test("enabled and keepRecentTokens are written to settings.json compaction", async () => {
-    expect((await put({ compaction: { enabled: false, keepRecentTokens: 30000 } })).status).toBe(200);
-    expect(readSettings().compaction).toMatchObject({ enabled: false, keepRecentTokens: 30000 });
-    expect((await get()).compaction).toEqual({ enabled: false, compactAtTokens: 200000, keepRecentTokens: 30000 });
-  });
-
-  test("a partial patch keeps the other compaction fields", async () => {
-    await put({ compaction: { compactAtTokens: 300000, keepRecentTokens: 40000 } });
-    await put({ compaction: { enabled: false } });
-    expect((await get()).compaction).toEqual({ enabled: false, compactAtTokens: 300000, keepRecentTokens: 40000 });
-  });
-});
-
-describe("compaction config: merge preserves other Pi settings", () => {
-  test("unrelated settings.json keys and foreign compaction keys survive a write", async () => {
-    seedSettings({
+  test("cc-config content and old settings values do not change the result", async () => {
+    seed("cc-config.json", { defaultTools: null, claudeBridge: false, browser: false, compaction: { compactAtTokens: 123_456 } });
+    seed("settings.json", {
       steeringMode: "all",
-      retry: { enabled: false, maxRetries: 2 },
-      lastChangelogVersion: "1.1.0",
-      compaction: { enabled: true, customFlag: "keep-me", modelOverrides: { "deepseek/deepseek-flash": { foo: 1, reserveTokens: 5 } } },
+      compaction: { enabled: false, keepRecentTokens: 9_000, modelOverrides: { "deepseek/big": { reserveTokens: 5, keepRecentTokens: 777 } } },
     });
-    seedModels({ "deepseek/deepseek-flash": 1000000 });
-    expect((await put({ compaction: { compactAtTokens: 250000 } })).status).toBe(200);
+    expect((await start("c-2")).status).toBe(200);
     const s = readSettings();
     expect(s.steeringMode).toBe("all");
-    expect(s.retry).toEqual({ enabled: false, maxRetries: 2 });
-    expect(s.lastChangelogVersion).toBe("1.1.0");
-    expect(s.compaction.customFlag).toBe("keep-me");
-    expect(s.compaction.modelOverrides["deepseek/deepseek-flash"].foo).toBe(1);
-    expect(s.compaction.modelOverrides["deepseek/deepseek-flash"].reserveTokens).toBe(750000);
+    expect(s.compaction.enabled).toBe(false); // the on/off state is kept as it is
+    expect(s.compaction.keepRecentTokens).toBe(51_200);
+    expect(s.compaction.modelOverrides).toEqual(EXPECTED_OVERRIDES);
   });
 
-  test("a write leaves no temp files behind and keeps mode 600", async () => {
-    seedSettings({ steeringMode: "all" });
-    await put({ compaction: { enabled: false } });
-    expect(existsSync(settingsPath())).toBe(true);
-    expect((await Array.fromAsync(new Bun.Glob("*.tmp*").scan({ cwd: h.cfg.agentDir })))).toEqual([]);
-  });
-
-  test("a corrupt settings.json is not overwritten with a partial file: the write is refused", async () => {
-    mkdirSync(h.cfg.agentDir, { recursive: true });
-    writeFileSync(settingsPath(), "{not json");
-    const r = await put({ compaction: { enabled: false } });
-    expect(r.status).toBe(400);
-    expect(readFileSync(settingsPath(), "utf8")).toBe("{not json");
-    expect((await get()).compaction.compactAtTokens).toBe(200000);
-  });
-});
-
-describe("compaction config: validation", () => {
-  test("compactAtTokens must be an integer in 50000..900000", async () => {
-    for (const bad of [49999, 900001, 1.5, "200000", null, NaN, Infinity]) {
-      expect((await put({ compaction: { compactAtTokens: bad } })).status).toBe(400);
-    }
-    expect((await put({ compaction: { compactAtTokens: 50000 } })).status).toBe(200);
-    expect((await put({ compaction: { compactAtTokens: 900000 } })).status).toBe(200);
-  });
-
-  test("keepRecentTokens must be an integer in 5000..100000", async () => {
-    for (const bad of [4999, 100001, 2.5, "20000", -1]) {
-      expect((await put({ compaction: { keepRecentTokens: bad } })).status).toBe(400);
-    }
-    expect((await put({ compaction: { keepRecentTokens: 5000 } })).status).toBe(200);
-    expect((await put({ compaction: { keepRecentTokens: 100000 } })).status).toBe(200);
-  });
-
-  test("enabled must be a boolean; unknown compaction keys and non-object compaction are 400", async () => {
-    expect((await put({ compaction: { enabled: "yes" } })).status).toBe(400);
-    expect((await put({ compaction: { reserveTokens: 16384 } })).status).toBe(400);
-    expect((await put({ compaction: "on" })).status).toBe(400);
-    expect((await put({ compaction: [] })).status).toBe(400);
-  });
-
-  test("a rejected compaction patch writes nothing", async () => {
-    await put({ compaction: { compactAtTokens: 300000 } });
-    const before = readFileSync(join(h.cfg.agentDir, "cc-config.json"), "utf8");
-    expect((await put({ appendSystemPrompt: "x", compaction: { compactAtTokens: 1 } })).status).toBe(400);
-    expect(readFileSync(join(h.cfg.agentDir, "cc-config.json"), "utf8")).toBe(before);
-    expect(existsSync(join(h.cfg.agentDir, "APPEND_SYSTEM.md"))).toBe(false);
-  });
-});
-
-describe("per-model reserve math", () => {
-  test("compactionReserve: window minus compactAtTokens; Pi default when the window is not larger", () => {
-    expect(compactionReserve(1000000, 200000)).toBe(800000);
-    expect(compactionReserve(200000, 200000)).toBe(16384);
-    expect(compactionReserve(150000, 200000)).toBe(16384);
-    expect(compactionReserve(200000, 150000)).toBe(50000);
-  });
-
-  test("writes a modelOverrides reserve per known model, default for small windows", async () => {
-    seedModels({ "deepseek/deepseek-flash": 1000000, "anthropic/claude-haiku-4-5": 200000, "anthropic/claude-sonnet-5-5": 1000000 });
-    expect((await put({ compaction: { compactAtTokens: 200000 } })).status).toBe(200);
-    const mo = readSettings().compaction.modelOverrides;
-    expect(mo["deepseek/deepseek-flash"].reserveTokens).toBe(800000);
-    expect(mo["anthropic/claude-sonnet-5-5"].reserveTokens).toBe(800000);
-    expect(mo["anthropic/claude-haiku-4-5"].reserveTokens).toBe(16384);
-  });
-
-  test("changing compactAtTokens rewrites every per-model reserve", async () => {
-    seedModels({ "deepseek/deepseek-flash": 1000000 });
-    await put({ compaction: { compactAtTokens: 200000 } });
-    await put({ compaction: { compactAtTokens: 400000 } });
-    expect(readSettings().compaction.modelOverrides["deepseek/deepseek-flash"].reserveTokens).toBe(600000);
-  });
-
-  test("readConfig reflects the stored compaction values", async () => {
-    await put({ compaction: { enabled: false, compactAtTokens: 400000, keepRecentTokens: 9000 } });
-    expect(readConfig(h.cfg.agentDir).compaction).toEqual({ enabled: false, compactAtTokens: 400000, keepRecentTokens: 9000 });
-  });
-});
-
-describe("compaction changes restart idle chats, and are refused during a run", () => {
-  test("changing compaction restarts an idle chat on the same session file", async () => {
-    const a = await api(h, "POST", "/chats/c-1/start", {});
-    await put({ compaction: { compactAtTokens: 300000 } });
-    const b = await api(h, "POST", "/chats/c-1/start", {});
+  test("a model added later gets its values on the next start, and that restarts an idle chat", async () => {
+    const a = await start("c-3");
+    seedModels({ ...MODELS, "anthropic/new": 1_000_000 });
+    const b = await start("c-3");
+    expect(readSettings().compaction.modelOverrides["anthropic/new"]).toEqual({ reserveTokens: 744_000 });
     expect(b.json.state.pid).not.toBe(a.json.state.pid);
-    expect(b.json.sessionFile).toBe(a.json.sessionFile);
   });
 
-  test("a same-value compaction patch does not restart the chat", async () => {
-    // Baseline: write the files once (a first PUT creates cc-gate.json, which is fingerprinted).
-    await put({ compaction: { compactAtTokens: 200000 } });
-    const a = await api(h, "POST", "/chats/c-2/start", {});
-    await put({ compaction: { compactAtTokens: 200000 } });
-    const b = await api(h, "POST", "/chats/c-2/start", {});
+  test("a start with nothing changed keeps the running chat", async () => {
+    const a = await start("c-4");
+    const b = await start("c-4");
     expect(b.json.state.pid).toBe(a.json.state.pid);
   });
 
-  test("a compaction change while a run is active is 409 and the run keeps going", async () => {
-    const a = await api(h, "POST", "/chats/c-3/start", {});
-    await api(h, "POST", "/chats/c-3/prompt", { message: "SLOW please" });
-    for (let i = 0; i < 100 && !(await api(h, "POST", "/chats/c-3/command", { name: "get_state" })).json.data.isStreaming; i++) await Bun.sleep(10);
-    await put({ compaction: { compactAtTokens: 300000 } });
-    const b = await api(h, "POST", "/chats/c-3/start", {});
-    expect(b.status).toBe(409);
-    expect((await api(h, "POST", "/chats/c-3/command", { name: "get_state" })).json.data.pid).toBe(a.json.state.pid);
-    await api(h, "POST", "/chats/c-3/abort", {});
+  test("the bridge writes the same block at startup, before any chat starts", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-compaction-startup-"));
+    mkdirSync(join(root, "sessions"), { recursive: true });
+    const cfg = makeConfig(root);
+    mkdirSync(cfg.agentDir, { recursive: true });
+    writeFileSync(join(cfg.agentDir, "models-store.json"), JSON.stringify({
+      deepseek: { models: [{ id: "big", contextWindow: 1_000_000 }] },
+      anthropic: { models: [{ id: "mid", contextWindow: 200_000 }, { id: "small", contextWindow: 64_000 }] },
+    }));
+    const bridge = createBridge(cfg);
+    try {
+      const s = JSON.parse(readFileSync(join(cfg.agentDir, "settings.json"), "utf8"));
+      expect(s.compaction).toMatchObject({ enabled: true, keepRecentTokens: 51_200 });
+      expect(s.compaction.modelOverrides).toEqual(EXPECTED_OVERRIDES);
+    } finally {
+      await bridge.shutdown();
+    }
+  });
+
+  test("a corrupt settings.json is never overwritten: the start is refused", async () => {
+    mkdirSync(h.cfg.agentDir, { recursive: true });
+    writeFileSync(settingsPath(), "{not json");
+    const r = await start("c-5");
+    expect(r.status).toBe(400);
+    expect(readFileSync(settingsPath(), "utf8")).toBe("{not json");
+  });
+});
+
+describe("no user-facing compaction config", () => {
+  test("GET /config has no compaction field", async () => {
+    const r = await api(h, "GET", "/config");
+    expect(r.status).toBe(200);
+    expect("compaction" in r.json).toBe(false);
+  });
+
+  test("PUT /config with a compaction key is 400 and changes nothing", async () => {
+    const r = await api(h, "PUT", "/config", { compaction: { compactAtTokens: 300_000 } });
+    expect(r.status).toBe(400);
+    expect(r.json.error).toContain("compaction");
+    const mixed = await api(h, "PUT", "/config", { appendSystemPrompt: "x", compaction: { enabled: false } });
+    expect(mixed.status).toBe(400);
+    expect(existsSync(join(h.cfg.agentDir, "APPEND_SYSTEM.md"))).toBe(false);
+  });
+
+  test("a PUT /config leaves a hand-edited compaction block alone until the next start, which resets it", async () => {
+    seed("settings.json", { compaction: { enabled: false, keepRecentTokens: 9_000 } });
+    expect((await api(h, "PUT", "/config", { appendSystemPrompt: "hi" })).status).toBe(200);
+    expect(readSettings().compaction.keepRecentTokens).toBe(9_000);
+    await start("c-6");
+    expect(readSettings().compaction.keepRecentTokens).toBe(51_200);
   });
 });

@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { applyConfigPatch, claudeCodeStatus, fingerprint, KNOWN_TOOLS, parseTools, readConfig } from "./pi-config";
+import { applyConfigPatch, claudeCodeStatus, fingerprint, KNOWN_TOOLS, parseTools, readConfig, syncCompaction } from "./pi-config";
 import { tokenMatches, bearerFrom } from "./auth";
 import { type BridgeConfig } from "./config";
 import { Chat, HttpError, rpcError, type Frame } from "./chat";
@@ -52,6 +52,13 @@ export const ALLOWED_COMMANDS = new Set([
 ]);
 
 export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
+  // Fixed compaction goes into Pi's settings at startup too, so it holds before any chat starts.
+  // A corrupt settings.json is logged, not fatal: every chat start then refuses with 400 until it is fixed.
+  try {
+    syncCompaction(cfg.agentDir);
+  } catch (e) {
+    console.error("pi-bridge: compaction settings not written:", (e as Error).message);
+  }
   const live = new Map<string, Chat>();
   const auth = new AuthManager({
     loadRuntime: deps.loadAuthRuntime ?? makeRuntimeLoader(cfg),
@@ -231,7 +238,9 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
     const extensions: string[] = [];
     if (useClaudeBridge) extensions.push(cfg.claudeBridgeExtension);
     if (useBrowser) extensions.push(cfg.browserExtension);
-    const key = JSON.stringify([tools, fingerprint(cfg.agentDir), skills, skillsSignature(cfg, skillsCwd), useClaudeBridge, useBrowser, cc.compaction]);
+    // Fixed compaction is written before the launch key is read, so a new model window restarts the chat.
+    const compaction = syncCompaction(cfg.agentDir);
+    const key = JSON.stringify([tools, fingerprint(cfg.agentDir), skills, skillsSignature(cfg, skillsCwd), useClaudeBridge, useBrowser, compaction]);
 
     let resumeFrom = sessionPath;
     if (existing) {
