@@ -430,7 +430,7 @@ export default function Chat({ hash }: { hash: string }) {
               {!phone && <div className="pop-wrap">
                 <select className="pill" aria-label="Model" value={modelId} disabled={!models.length} onChange={e => void onModel(e.target.value)}
                   style={{ appearance: "none", paddingRight: 12 }}>
-                  {models.map(m => (
+                  {models.filter(m => (m.backend ?? "hermes") === (chatBackend ?? backendOfKey(modelId))).map(m => (
                     <option key={m.id} value={m.id} disabled={!m.online || !modelUsable(m, chatBackend)}>{m.backend === "pi" ? "Pi · " : ""}{m.provider} · {m.label}{m.online ? "" : " (offline)"}</option>
                   ))}
                 </select>

@@ -275,7 +275,7 @@ export function Composer(p: ComposerProps) {
               <TextMenu
                 ariaLabel="Model"
                 trigger={shortModelLabel(model?.label ?? p.model)}
-                items={p.models.map(m => {
+                items={p.models.filter(m => (m.backend ?? "hermes") === backend).map(m => {
                   const usable = modelUsable(m, p.chatBackend);
                   const note = !m.online ? "offline" : !usable ? (m.backend === "pi" ? "Pi chats only" : "Hermes chats only") : m.backend === "pi" ? "Pi" : undefined;
                   return { value: m.id, label: shortModelLabel(m.label), sub: m.provider, note, disabled: !m.online || !usable };
