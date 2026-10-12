@@ -54,6 +54,8 @@ class Controlled implements HermesClient {
     if (this.steerConflict) throw new ChatError(409, "run finished");
     this.steered.push({ runId, message });
   }
+  answers: { runId: string; id: string; approve: boolean }[] = [];
+  async respondApproval(runId: string, id: string, approve: boolean): Promise<void> { this.answers.push({ runId, id, approve }); }
   get last(): Stream { return this.streams[this.streams.length - 1]; }
 }
 
@@ -174,6 +176,36 @@ test("approval blocks persist in stream order and resolve when the tool complete
     { kind: "approval", approval: { command: "Run: rm -rf x", note: "Allow command?", id: "u1", options: ["approve", "deny"], status: "approved" } },
     { kind: "text", text: "All done." },
   ]);
+});
+
+test("answering an approval folds the card at once, before the command finishes", async () => {
+  const r = begin("s1", "rm things");
+  await tick();
+  const s = hermes.last;
+  s.push({ type: "tool.started", id: "t1", name: "bash", args: null, preview: null });
+  s.push({ type: "approval", id: "u1", command: "Run: rm -rf x", note: "Allow command?", options: ["approve", "deny"] });
+  await tick();
+  expect(S.getSession(db, "s1")!.runState).toBe("needs_approval");
+  await mgr.respondApproval(r.runId, "u1", true);
+  // The tool has not completed yet, but the card is already approved, persisted and announced.
+  const card = () => S.getMessage(db, r.assistantMessage.id)!.blocks!.find(b => b.kind === "approval");
+  expect(card()).toMatchObject({ approval: { status: "approved" } });
+  expect(S.getSession(db, "s1")!.runState).toBe("running");
+  expect(dbEvents(r.runId).find(e => e.type === "approval.answered")).toBeTruthy();
+  s.push(done("complete")); s.end();
+  await mgr.waitDone(r.runId);
+});
+
+test("a denied approval shows denied immediately", async () => {
+  const r = begin("s1", "rm things");
+  await tick();
+  const s = hermes.last;
+  s.push({ type: "approval", id: "u1", command: "x", note: "Allow?", options: ["approve", "deny"] });
+  await tick();
+  await mgr.respondApproval(r.runId, "u1", false);
+  expect(S.getMessage(db, r.assistantMessage.id)!.blocks!.find(b => b.kind === "approval")).toMatchObject({ approval: { status: "denied" } });
+  s.push(done("complete")); s.end();
+  await mgr.waitDone(r.runId);
 });
 
 test("browser detach does not abort the Hermes stream", async () => {

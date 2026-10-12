@@ -61,6 +61,16 @@ export function applyEvent(view: RunView, ev: RunEvent): RunView {
       }
       return { ...v, message: { ...m, blocks: [...blocks, { kind: "approval", approval: a }] } };
     }
+    case "approval.answered": {
+      const to: ApprovalStatus = d.choice === "approve" ? "approved" : "denied";
+      return {
+        ...v,
+        message: {
+          ...m,
+          blocks: blocks.map(b => (b.kind === "approval" && b.approval.id === d.id && b.approval.status === "pending" ? { ...b, approval: { ...b.approval, status: to } } : b)),
+        },
+      };
+    }
     case "todo": {
       if (!Array.isArray(d.todos)) return v;
       const todos = d.todos.filter((t: any) => typeof t?.id === "string" && typeof t?.content === "string");

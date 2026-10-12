@@ -51,6 +51,7 @@ type CommandNote = { id: number; name: string; body: string; afterSeq: number; b
   - `reasoning` `{ text }` (append)
   - `tool.started` `{ id, name, args, preview }`
   - `tool.completed` `{ id, ok: boolean, durationMs, preview }`
+  - `approval.answered` `{ id, choice: "approve" | "deny" }`: sent as soon as Pi has the answer (a click or `/yolo`), so the card folds to Approved or Denied before the command finishes. `tool.completed` only resolves a card that is still pending.
   - `approval` `{ command: string | null, note: string, id?: string, options?: string[] }`. Pi carries `id`/`options` so the card can be answered; Hermes carries neither and stays a read-only notice.
   - `usage` a `TokenUsage` (cumulative over the run's model calls). Pi sends every field it has: cache read/write, `context` (the last call's prompt, cache included), `calls` and `costUsd`. Hermes sends `input`/`output` and, when it reports them, `cacheRead`/`cacheWrite`. `ttftMs` and `durationMs` are measured by the server (run start to first text/reasoning/tool token, and to the end) and are merged into the stored message at the end of the run, so they appear after the reload that follows `done`.
   - `done` `{ status: "complete" | "failed" | "interrupted", error: string | null, model: string | null }`

@@ -336,6 +336,26 @@ export class RunManager {
     if (!rec.needsApproval || rec.approvalId === null || rec.approvalId !== approvalId) throw new ChatError(409, "no such approval pending");
     if (!rec.hermesRunId) throw new ChatError(409, "run not started");
     await client.respondApproval(rec.hermesRunId, approvalId, approve);
+    this.answerApproval(rec, approvalId, approve);
+  }
+
+  /**
+   * Folds the card as soon as Pi has the answer, instead of when the approved command finishes
+   * (which can be many seconds later). Covers a click and the server's own YOLO answer alike.
+   */
+  private answerApproval(rec: RunRec, approvalId: string, approve: boolean): void {
+    if (rec.finished) return;
+    const b = rec.blocks.find(x => x.kind === "approval" && x.approval.id === approvalId && x.approval.status === "pending");
+    if (!b || b.kind !== "approval") return;
+    b.approval.status = approve ? "approved" : "denied";
+    if (rec.approvalId === approvalId) {
+      rec.needsApproval = false;
+      rec.approvalId = null;
+      S.setRunState(this.db, rec.sessionId, "running", rec.runId, this.now());
+      this.emitRun(rec.sessionId, rec.runId, "running");
+    }
+    this.persist(rec);
+    this.addEvent(rec, "approval.answered", { id: approvalId, choice: approve ? "approve" : "deny" });
   }
 
   /** YOLO enabled mid-approval: approve the run's pending Pi request, if there is one. */

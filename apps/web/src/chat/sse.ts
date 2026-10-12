@@ -1,7 +1,7 @@
 import type { RunEvent } from "./types";
 import { chat } from "./api";
 
-const TYPES = ["run.started", "delta", "reasoning", "tool.started", "tool.completed", "approval", "todo", "usage", "done"] as const;
+const TYPES = ["run.started", "delta", "reasoning", "tool.started", "tool.completed", "approval", "approval.answered", "todo", "usage", "done"] as const;
 
 export type RunStream = { close(): void };
 

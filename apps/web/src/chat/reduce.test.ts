@@ -124,6 +124,18 @@ describe("Pi approvals", () => {
     const v = reduceEvents(newRunView(base), [ev(1, "tool.started", start("t1")), ev(2, "approval", ask), ev(3, "tool.completed", { id: "t1", ok: false })]);
     expect(approvalOf(v)?.status).toBe("denied");
   });
+  test("approval.answered folds the card before the tool completes", () => {
+    const pending = reduceEvents(newRunView(base), [ev(1, "tool.started", start("t1")), ev(2, "approval", ask)]);
+    expect(approvalOf(applyEvent(pending, ev(3, "approval.answered", { id: "u1", choice: "approve" })))?.status).toBe("approved");
+    expect(approvalOf(applyEvent(pending, ev(3, "approval.answered", { id: "u1", choice: "deny" })))?.status).toBe("denied");
+  });
+  test("a late tool.completed does not overwrite an answered approval", () => {
+    const v = reduceEvents(newRunView(base), [
+      ev(1, "tool.started", start("t1")), ev(2, "approval", ask),
+      ev(3, "approval.answered", { id: "u1", choice: "approve" }), ev(4, "tool.completed", { id: "t1", ok: false }),
+    ]);
+    expect(approvalOf(v)?.status).toBe("approved");
+  });
   test("a run that ends while an approval is still pending marks it ended", () => {
     const v = reduceEvents(newRunView(base), [ev(1, "approval", ask), ev(2, "done", { status: "interrupted" })]);
     expect(approvalOf(v)?.status).toBe("ended");
