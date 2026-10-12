@@ -32,7 +32,7 @@ export function PiToolList({ label, rows, disabled, isLocked, onToggle }: {
           <input type="checkbox" checked={r.checked} disabled={disabled || isLocked(r.name)} onChange={() => onToggle(r.name)} />
           <span className="pi-tool-main">
             <code>{r.name}</code>
-            {r.description && <span className="muted">{r.description}</span>}
+            {r.description && <span className="muted pi-tool-desc">{r.description.split("\n")[0]}</span>}
           </span>
         </label>
       ))}

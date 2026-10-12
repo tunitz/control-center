@@ -284,3 +284,5 @@ td{font-variant-numeric:tabular-nums}
 .pi-skill-tag.off{color:var(--mut);border-color:var(--line)}
 .pi-skill-desc{font-size:13px;color:var(--mut);line-height:1.45;overflow-wrap:anywhere}
 .pi-skill-where{font-size:12px;color:var(--mut);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+
+.pi-tool-desc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px}
