@@ -116,7 +116,7 @@ export class FakePiBridge {
     writeFileSync(join(this.home, "notes.txt"), "x");
     symlinkSync("/etc", join(this.home, "escape-link"));
     this.home = realpathSync(this.home);
-    const globalDir = join(this.home, ".local/share/cc-pi/agent/skills/pdf-tools");
+    const globalDir = join(this.home, ".agents/skills/pdf-tools");
     const projectCwd = join(this.home, "projects/alpha");
     const projectDir = join(projectCwd, ".pi/skills/release-notes");
     this.skills.push(

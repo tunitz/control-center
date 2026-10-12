@@ -30,13 +30,13 @@ describe("skills", () => {
   test("lists global then project skills for the given folders; skips skills without a description", async () => {
     const cwd = join(h.cfg.homeDir, "projects/alpha");
     mkdirSync(cwd, { recursive: true });
-    skill(join(h.cfg.agentDir, "skills/pdf-tools"), "pdf-tools", "Extract text from PDFs.");
+    skill(join(h.cfg.homeDir, ".agents/skills/pdf-tools"), "pdf-tools", "Extract text from PDFs.");
     skill(join(h.cfg.homeDir, ".agents/skills/review"), "review", "Review a diff.");
     skill(join(cwd, ".pi/skills/release-notes"), "release-notes", "Draft release notes.");
     skill(join(cwd, ".agents/skills/lint"), "lint", "Lint the project.");
     // A skill with no description is not loaded by Pi, so it is not listed.
-    mkdirSync(join(h.cfg.agentDir, "skills/empty"), { recursive: true });
-    writeFileSync(join(h.cfg.agentDir, "skills/empty/SKILL.md"), "---\nname: empty\n---\n");
+    mkdirSync(join(h.cfg.homeDir, ".agents/skills/empty"), { recursive: true });
+    writeFileSync(join(h.cfg.homeDir, ".agents/skills/empty/SKILL.md"), "---\nname: empty\n---\n");
 
     const r = await api(h, "GET", `/skills?cwd=${encodeURIComponent(cwd)}`);
     expect(r.status).toBe(200);
@@ -70,7 +70,7 @@ describe("skills", () => {
   test("a disabled skill is reported off and left out of the launch flags", async () => {
     const cwd = join(h.cfg.homeDir, "projects/alpha");
     mkdirSync(cwd, { recursive: true });
-    skill(join(h.cfg.agentDir, "skills/pdf-tools"), "pdf-tools", "Extract text from PDFs.");
+    skill(join(h.cfg.homeDir, ".agents/skills/pdf-tools"), "pdf-tools", "Extract text from PDFs.");
     skill(join(cwd, ".pi/skills/release-notes"), "release-notes", "Draft release notes.");
     const before = await api(h, "GET", `/skills?cwd=${encodeURIComponent(cwd)}`);
     const rn = before.json.skills.find((s: any) => s.name === "release-notes");
@@ -83,8 +83,34 @@ describe("skills", () => {
     const argv = await argvOf("sk-disabled", { cwd });
     expect(argv).toContain("--no-skills");
     const enabled = skillArgs(argv);
-    expect(enabled).toContain(join(h.cfg.agentDir, "skills/pdf-tools"));
+    expect(enabled).toContain(join(h.cfg.homeDir, ".agents/skills/pdf-tools"));
     expect(enabled).not.toContain(join(cwd, ".pi/skills/release-notes"));
+  });
+
+  test("the only global root is <home>/.agents/skills: the agent dir's skills folder is not scanned", async () => {
+    skill(join(h.cfg.agentDir, "skills/old-copy"), "old-copy", "Left in the agent dir.");
+    skill(join(h.cfg.homeDir, ".agents/skills/shared"), "shared", "In the shared root.");
+    const r = await api(h, "GET", "/skills");
+    expect(r.json.skills.map((s: any) => s.name)).toEqual(["shared"]);
+  });
+
+  test("dot-directories such as .archive are skipped", async () => {
+    skill(join(h.cfg.homeDir, ".agents/skills/.archive/retired"), "retired", "Archived, not live.");
+    skill(join(h.cfg.homeDir, ".agents/skills/live"), "live", "Live skill.");
+    const r = await api(h, "GET", "/skills");
+    expect(r.json.skills.map((s: any) => s.name)).toEqual(["live"]);
+  });
+
+  test("a disabled path matches through a symlinked root (~/.hermes/skills -> ~/.agents/skills)", async () => {
+    const real = join(h.cfg.homeDir, ".agents/skills");
+    skill(join(real, "linked"), "linked", "Reached through a symlink.");
+    mkdirSync(join(h.cfg.homeDir, ".hermes"), { recursive: true });
+    const { symlinkSync } = await import("node:fs");
+    symlinkSync(real, join(h.cfg.homeDir, ".hermes/skills"));
+    const viaLink = join(h.cfg.homeDir, ".hermes/skills/linked/SKILL.md");
+    await api(h, "PUT", "/skills", { disabled: [viaLink] });
+    const r = await api(h, "GET", "/skills");
+    expect(r.json.skills.find((s: any) => s.name === "linked").enabled).toBe(false);
   });
 
   test("with nothing disabled Pi keeps its own discovery (no --no-skills)", async () => {
@@ -107,14 +133,14 @@ describe("skills", () => {
     expect(await pidOf("sk-live")).toBe(first);
 
     // A new skill appears on disk (nothing is disabled, so only the signature can notice it).
-    skill(join(h.cfg.agentDir, "skills/brand-new"), "brand-new", "Added while the chat was open.");
+    skill(join(h.cfg.homeDir, ".agents/skills/brand-new"), "brand-new", "Added while the chat was open.");
     const afterAdd = await pidOf("sk-live");
     expect(afterAdd).not.toBe(first);
     expect(await pidOf("sk-live")).toBe(afterAdd);
 
     // Editing its description (a newer mtime) restarts it again.
-    const file = join(h.cfg.agentDir, "skills/brand-new/SKILL.md");
-    skill(join(h.cfg.agentDir, "skills/brand-new"), "brand-new", "A new description.");
+    const file = join(h.cfg.homeDir, ".agents/skills/brand-new/SKILL.md");
+    skill(join(h.cfg.homeDir, ".agents/skills/brand-new"), "brand-new", "A new description.");
     const later = new Date(Date.now() + 5_000);
     utimesSync(file, later, later);
     expect(await pidOf("sk-live")).not.toBe(afterAdd);
@@ -124,7 +150,7 @@ describe("skills", () => {
     const a = await api(h, "POST", "/chats/sk-busy/start", {});
     await api(h, "POST", "/chats/sk-busy/prompt", { message: "SLOW please" });
     for (let i = 0; i < 100 && !(await api(h, "POST", "/chats/sk-busy/command", { name: "get_state" })).json.data.isStreaming; i++) await Bun.sleep(10);
-    skill(join(h.cfg.agentDir, "skills/while-busy"), "while-busy", "Created mid-run.");
+    skill(join(h.cfg.homeDir, ".agents/skills/while-busy"), "while-busy", "Created mid-run.");
     expect((await api(h, "POST", "/chats/sk-busy/start", {})).status).toBe(409);
     expect((await api(h, "POST", "/chats/sk-busy/command", { name: "get_state" })).json.data.pid).toBe(a.json.state.pid);
     await api(h, "POST", "/chats/sk-busy/abort", {});

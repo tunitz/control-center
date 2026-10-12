@@ -59,7 +59,7 @@ export default function PiSkillsCard({ onMsg }: { onMsg: (m: string) => void }) 
       {state === "ready" && (
         <>
           <p className="muted">Skills Pi can use. A toggle applies to every Pi chat on its next message.</p>
-          {skills.length === 0 && <p className="muted">No skills found. Add a folder with a <code>SKILL.md</code> under the Pi agent directory or a project's <code>.pi/skills</code>.</p>}
+          {skills.length === 0 && <p className="muted">No skills found. Add a folder with a <code>SKILL.md</code> under <code>~/.agents/skills</code> or a project's <code>.pi/skills</code>.</p>}
           {globals.length > 0 && (
             <>
               <h4 className="pi-skill-group">Global</h4>

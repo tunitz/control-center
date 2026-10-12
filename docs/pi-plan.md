@@ -79,7 +79,7 @@ host, user tunitz  (no container; no CC env; secrets in ~/.local/share/cc-pi/env
                                    ├─ ext cc-todo   (todo_write, details + widget)
                                    ├─ ext cc-gate   (approval: confirm via extension_ui_request)
                                    └─ ext cc-bridge (get/set tools, system prompt, settings snapshot)
-  paths: ~/.local/share/cc-pi/workspace (chat workspaces); ~/.local/share/cc-pi/agent (settings.json, models.json, sessions/, extensions/); pi symlink ~/.local/bin/pi
+  paths: ~/.local/share/cc-pi/workspace (chat workspaces); ~/.local/share/cc-pi/agent (settings.json, models.json, sessions/, extensions/); skills ~/.agents/skills (shared with Hermes); pi symlink ~/.local/bin/pi
 ```
 
 Event mapping (Pi -> existing run events): `agent_start` -> `run.started`; `message_update.text_delta` -> `delta`; `thinking_delta` -> `reasoning`; `tool_execution_start/end` -> `tool.started/completed`; `message_end.usage` -> `usage`; `agent_settled` -> `done`, with the outcome taken from the last assistant message `stopReason` (`aborted` -> `interrupted`, `error` -> `failed` with `errorMessage`; do not rely on `agent_settled.aborted`, unconfirmed for abort); `extension_ui_request confirm` -> `approval` (now actionable); `setWidget cc-todo` -> new `todo` event.

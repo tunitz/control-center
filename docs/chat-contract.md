@@ -99,7 +99,7 @@ Compaction: Pi compacts when context passes `window - reserveTokens`. The bridge
 ## Pi skills (additive)
 
 Pi skills Pi can see, global and project, with a per-skill toggle that applies to every Pi chat.
-Global skills come from `<agent-dir>/skills/` and `~/.agents/skills/`; project skills from `<cwd>/.pi/skills/` and `.agents/skills/` up the tree. A skill is a folder holding a `SKILL.md` with both `name` and `description`; a missing description means it is not listed.
+Global skills come from `~/.agents/skills/` (the one shared root; Hermes reads it through `~/.hermes/skills`, a symlink to it); project skills from `<cwd>/.pi/skills/` and `.agents/skills/` up the tree. A skill is a folder holding a `SKILL.md` with both `name` and `description`; a missing description means it is not listed.
 
 - `GET /api/chat/pi/skills` -> `{ skills: PiSkill[] }`, where `PiSkill = { name, description, scope: "global" | "project", path, dir, cwd: string | null, enabled }`. `path` is the absolute `SKILL.md` path (the toggle id) and `dir` is the skill folder passed to Pi. Project skills are discovered in every distinct `chat_sessions.cwd` of a Pi chat. 503 when no bridge is configured.
 - `PUT /api/chat/pi/skills` `{ disabled: string[] }` -> `{ skills: PiSkill[] }`. The list is the full disabled set of absolute `path`s; every other skill is enabled. 400 when it is not a list of absolute paths. 503 without a bridge.

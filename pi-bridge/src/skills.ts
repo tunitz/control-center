@@ -3,7 +3,7 @@
 // `--skill` for every skill that stays on. The disabled set lives in <agent>/cc-skills.json; the
 // user's skill files are never touched.
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync, type Dirent } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { BridgeConfig } from "./config";
 import { HttpError } from "./chat";
 
@@ -90,7 +90,7 @@ function scan(root: string, scope: SkillScope, cwd: string | null, out: Map<stri
     return;
   }
   for (const e of entries) {
-    if (e.isDirectory() && e.name !== "node_modules") scan(join(root, e.name), scope, cwd, out, depth + 1);
+    if (e.isDirectory() && e.name !== "node_modules" && !e.name.startsWith(".")) scan(join(root, e.name), scope, cwd, out, depth + 1);
   }
 }
 
@@ -133,18 +133,32 @@ function settingsSkills(dir: string, home: string): string[] {
   return out;
 }
 
-/** User/global skill roots: the agent directory and the Agent Skills location in the home folder. */
-function globalRoots(cfg: BridgeConfig): string[] {
-  return [join(cfg.agentDir, "skills"), join(cfg.homeDir, ".agents", "skills")];
+/** The one user/global skill root: the shared Agent Skills folder in the home directory (Hermes and Pi both read it). */
+export function globalRoots(cfg: BridgeConfig): string[] {
+  return [join(cfg.homeDir, ".agents", "skills")];
+}
+
+/** Identity of a skill file for matching: its realpath, or the exact path when it cannot be resolved. */
+export function canonPath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
 }
 
 /** Project skill roots for a working folder: `.pi/skills`, then `.agents/skills` up to the repo root. */
-function projectRoots(cwd: string): string[] {
+function projectRoots(cwd: string, homeDir: string): string[] {
   const roots = [join(cwd, ".pi", "skills")];
+  const home = resolve(homeDir);
   let cur = resolve(cwd);
+  // Walk up to the repo root, but never above the home directory (its ~/.agents/skills is the global root).
+  // A folder outside home gets only its own .agents/skills.
+  const inside = (p: string) => p === home || p.startsWith(home + sep);
   for (;;) {
+    if (cur === home) break; // the global root is already scanned
     roots.push(join(cur, ".agents", "skills"));
-    if (existsSync(join(cur, ".git"))) break;
+    if (existsSync(join(cur, ".git")) || !inside(cur)) break;
     const parent = dirname(cur);
     if (parent === cur) break;
     cur = parent;
@@ -168,11 +182,11 @@ export function listSkills(cfg: BridgeConfig, cwds: string[]): PiSkill[] {
     }
     if (seen.has(cwd)) continue;
     seen.add(cwd);
-    for (const root of projectRoots(cwd)) scan(root, "project", cwd, found);
+    for (const root of projectRoots(cwd, cfg.homeDir)) scan(root, "project", cwd, found);
     for (const p of settingsSkills(join(cwd, ".pi"), cfg.homeDir)) scanPath(p, "project", cwd, found);
   }
   return [...found.values()]
-    .map((s) => ({ ...s, enabled: !disabled.has(s.path) }))
+    .map((s) => ({ ...s, enabled: !disabled.has(canonPath(s.path)) }))
     .sort((a, b) => (a.scope === b.scope ? a.name.localeCompare(b.name) : a.scope === "global" ? -1 : 1));
 }
 
@@ -211,7 +225,7 @@ export function readSkillsConfig(agentDir: string): Set<string> {
   try {
     const raw = JSON.parse(readFileSync(join(agentDir, CONFIG_FILE), "utf8"));
     const list = raw && Array.isArray(raw.disabled) ? raw.disabled : [];
-    return new Set(list.filter((x: unknown): x is string => typeof x === "string" && isAbsolute(x)));
+    return new Set(list.filter((x: unknown): x is string => typeof x === "string" && isAbsolute(x)).map(canonPath));
   } catch {
     return new Set();
   }

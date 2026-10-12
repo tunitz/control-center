@@ -13,7 +13,7 @@ metadata:
 
 # Control Center runbook
 
-This runbook lives in the repo (`.claude/skills/control-center-project/`) and is committed with the code. The global `control-center` skills (`~/.hermes/skills/` and `~/.local/share/cc-pi/agent/skills/`) are short stubs that point here; keep those two identical (`rsync -a --delete`, then `diff -rq`).
+This runbook lives in the repo (`.claude/skills/control-center-project/`) and is committed with the code. The global `control-center` skill lives in `~/.agents/skills` (shared by Hermes and Pi; `~/.hermes/skills` is a symlink to it). It is a short stub that points here; the stub is a single copy there.
 
 ## Pitfall: agent changes need a public release
 When pushing a change under `agent/` or `install.ts`, publish the release in the same step without asking (tun's standing rule). `GITHUB_TOKEN` is in `~/.hermes/.env` (`set -a; . ~/.hermes/.env; set +a`); `gh` needs `GH_TOKEN` set from it. Poll the `latest` URL until it serves the new code (took ~20 s once).
