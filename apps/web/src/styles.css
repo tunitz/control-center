@@ -44,6 +44,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 h3,h4{font-weight:600;letter-spacing:-.01em;line-height:1.3}
 
 .app{max-width:1200px;margin:0 auto;padding:16px 20px 96px}
+/* Desktop chat uses the whole window; phones (max 760px) keep the normal width. */
+@media(min-width:761px){.app.wide{max-width:none}}
 header.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 24px}
 .brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:16px;letter-spacing:-.01em}
 .logo{width:26px;height:26px;border-radius:8px;flex:none;display:block}

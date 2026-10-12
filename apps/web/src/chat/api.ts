@@ -20,6 +20,9 @@ export async function chatReq<T>(method: string, path: string, body?: unknown): 
   return j as T;
 }
 
+/** A started turn, or `queued` when the chat was busy with subagents or a compaction and the message waits its turn. */
+export type SendResult = { runId: string; userMessage: ChatMessage; assistantMessage: ChatMessage; queued?: undefined } | { queued: true; position: number };
+
 export const chat = {
   models: () => chatReq<ChatModel[]>("GET", "/models"),
   config: () => chatReq<ChatConfig>("GET", "/config"),
@@ -40,8 +43,8 @@ export const chat = {
     return chatReq<{ messages: ChatMessage[]; hasMore: boolean; commands: CommandNote[] }>("GET", `/sessions/${encodeURIComponent(id)}/messages?${p}`);
   },
   /** Records a local command row so it survives a reload. Returns the stored row. */
-  addCommand: (id: string, name: string, body: string) =>
-    chatReq<CommandNote>("POST", `/sessions/${encodeURIComponent(id)}/commands`, { name, body }),
+  addCommand: (id: string, name: string, body: string, block: number | null = null) =>
+    chatReq<CommandNote>("POST", `/sessions/${encodeURIComponent(id)}/commands`, { name, body, block }),
   deleteMessage: (id: string, messageId: string) =>
     chatReq<{ ok: true }>("DELETE", `/sessions/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`),
   /** Drops the message and everything after it, then runs it again. Returns the new turn. */
@@ -54,7 +57,7 @@ export const chat = {
     if (o.model) fd.append("model", o.model);
     if (o.effort) fd.append("effort", o.effort);
     for (const f of o.files) fd.append("files", f, f.name);
-    return chatReq<{ runId: string; userMessage: ChatMessage; assistantMessage: ChatMessage }>("POST", `/sessions/${encodeURIComponent(id)}/send`, fd);
+    return chatReq<SendResult>("POST", `/sessions/${encodeURIComponent(id)}/send`, fd);
   },
   stopRun: (runId: string) => chatReq<{ ok: true }>("POST", `/runs/${encodeURIComponent(runId)}/stop`),
   steerRun: (runId: string, message: string) => chatReq<{ ok: true }>("POST", `/runs/${encodeURIComponent(runId)}/steer`, { message }),

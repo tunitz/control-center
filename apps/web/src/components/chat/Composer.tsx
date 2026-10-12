@@ -6,7 +6,7 @@ import { contextMeter } from "../../chat/context";
 import { shortModelLabel } from "./label";
 import { TextMenu } from "./TextMenu";
 import { effortLabel } from "../../chat/menu";
-import { sendMode, routeInput } from "../../chat/sendmode";
+import { sendMode } from "../../chat/sendmode";
 import { effortChoices, modelUsable } from "../../chat/pi";
 import type { Backend, ChatModel, Effort } from "../../chat/types";
 
@@ -30,7 +30,6 @@ export type ComposerProps = {
   ctxWindow: number | undefined;
   maxUploadMb: number;
   onSend: (text: string, files: File[]) => Promise<void>;
-  onSteer: (text: string) => Promise<"ok" | "finished">;
   /** Page-level slash commands (retry, title, export, pin, archive, delete). Returns a short notice. */
   onAction: (name: string, arg: string) => Promise<string>;
   /** Long command output goes into the thread as a collapsible row, not under the composer. */
@@ -154,7 +153,6 @@ export function Composer(p: ComposerProps) {
     const cmd = parseSlash(text, backend);
     setErr(""); setNotice("");
     if (cmd && runCommand(cmd)) return;
-    if (busy) return;
     const ready = files.filter(f => f.status === "ready");
     if (files.some(f => f.status === "preparing")) { setErr("Wait for the attachments to finish."); return; }
     if (!text.trim() && ready.length === 0) return;
@@ -170,31 +168,12 @@ export function Composer(p: ComposerProps) {
     }
   };
 
-  const steer = async () => {
-    if (!text.trim()) return;
-    // The Steer button used to skip this check, so "/yolo" was sent into the run as text.
-    if (routeInput(busy, parseSlash(text, backend)) === "command") { void submit(); return; }
-    const value = text;
-    try {
-      const res = await p.onSteer(value);
-      if (res === "finished") { setErr("Run already finished"); return; } // keep the text
-      setText("");
-      setNotice("Steer sent to the running task.");
-      // A row in the thread, so there is a record of what was sent into the run and when.
-      p.onNote("steer", value.trim());
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-  };
-
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Escape") { setModelOpen(false); setEffortOpen(false); return; }
     if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
     // Phone: Enter is a newline. Desktop: Enter sends, Shift+Enter is a newline.
     if (p.phone || e.shiftKey) return;
     e.preventDefault();
-    // While a task runs the button says Steer, so Enter steers too. A slash command still runs as a command.
-    if (routeInput(busy, parseSlash(text, backend)) === "steer") { if (canSteer) void steer(); return; }
     void submit();
   };
 
@@ -208,8 +187,7 @@ export function Composer(p: ComposerProps) {
   };
 
   const removeFile = (key: string) => setFiles(prev => prev.filter(f => f.key !== key));
-  const canSend = !busy && !files.some(f => f.status === "preparing") && (text.trim() !== "" || files.some(f => f.status === "ready"));
-  const canSteer = busy && text.trim() !== "";
+  const canSend = !files.some(f => f.status === "preparing") && (text.trim() !== "" || files.some(f => f.status === "ready"));
 
   return (
     <div className="composer-wrap" onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={onDrop}>
@@ -256,7 +234,7 @@ export function Composer(p: ComposerProps) {
             rows={1}
             value={text}
             placeholder={mode.placeholder}
-            aria-label={mode.kind === "steer" ? "Steer the running task" : `Message ${backend === "pi" ? "Pi" : "Hermes"}`}
+            aria-label={`Message ${backend === "pi" ? "Pi" : "Hermes"}`}
             onChange={e => setText(e.target.value)}
             onKeyDown={onKey}
             onPaste={onPaste}
@@ -325,15 +303,9 @@ export function Composer(p: ComposerProps) {
                 <Icon name="stop" className="i sm" /><span className="send-lbl">Stop</span>
               </button>
             )}
-            {busy ? (
-              <button className="btn steer icon-send" type="button" aria-label={mode.label} title={mode.title} disabled={!canSteer} onClick={() => void steer()}>
-                <Icon name="steer" className="i sm" /><span className="send-lbl">{mode.label}</span>
-              </button>
-            ) : (
-              <button className="btn primary icon-send" type="button" aria-label={mode.label} title={mode.title} disabled={!canSend} onClick={() => void submit()}>
-                <Icon name="send" className="i sm" /><span className="send-lbl">{mode.label}</span>
-              </button>
-            )}
+            <button className="btn primary icon-send" type="button" aria-label={mode.label} title={mode.title} disabled={!canSend} onClick={() => void submit()}>
+              <Icon name="send" className="i sm" /><span className="send-lbl">{mode.label}</span>
+            </button>
             </div>
           </div>
         </div>

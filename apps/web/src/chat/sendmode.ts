@@ -1,32 +1,26 @@
-// What the composer's main button does right now. While a task runs, typing steers it instead of starting a
-// message, so the button, placeholder and hint all have to say so: a bare arrow looks the same either way.
+// What the composer's main button says. A message sent while a task runs is not a steer: like Hermes, the server
+// interrupts the task and starts the message, or queues it when subagents are running or the chat is compacting.
 export type SendMode = {
-  kind: "send" | "steer";
-  /** Button label (visually hidden on phones, where the icon is alone). */
   label: string;
-  /** Tooltip and accessible description of the button. */
   title: string;
   placeholder: string;
-  /** Line under the composer while steering; null when sending. */
+  /** Line under the composer while a task runs; null when idle. */
   hint: string | null;
 };
 
 export function sendMode(busy: boolean, agent: string): SendMode {
-  if (!busy) return { kind: "send", label: "Send", title: "Send", placeholder: `Message ${agent}…`, hint: null };
   return {
-    kind: "steer",
-    label: "Steer",
-    title: "Steer: send this into the running task",
-    placeholder: "Steer the running task…",
-    hint: "Running. What you send steers the task.",
+    label: "Send",
+    title: busy ? "Send: stops the running task and starts this message" : "Send",
+    placeholder: `Message ${agent}…`,
+    hint: busy ? "Running. A new message stops the task and replaces it, or waits if subagents are running." : null,
   };
 }
 
 /**
- * Where the composer's text goes. A slash command (known or not) is never a prompt and never a steer: it runs
- * as a command whatever the button says. Only plain text steers a running task or starts a message.
+ * Where the composer's text goes. A slash command (known or not) is never a prompt: it runs as a command whatever
+ * the chat is doing. Everything else is a message; the server decides between interrupt and queue.
  */
-export function routeInput(busy: boolean, parsed: unknown): "command" | "steer" | "send" {
-  if (parsed) return "command";
-  return busy ? "steer" : "send";
+export function routeInput(parsed: unknown): "command" | "send" {
+  return parsed ? "command" : "send";
 }

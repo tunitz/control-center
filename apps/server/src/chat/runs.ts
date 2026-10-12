@@ -20,6 +20,10 @@ export const AWAIT_TIMEOUT_MS = 30 * 60_000;
 const RING_SIZE = 500;
 const KEEPALIVE_MS = 15_000;
 const KEEP_FINISHED = 50;
+/** Follow-ups held per chat while it is busy (Hermes caps its own busy queue the same way). */
+const QUEUE_MAX = 10;
+/** How long an interrupt waits for the stopped run to wind down before the new message is refused. */
+const INTERRUPT_WAIT_MS = 20_000;
 
 export type RunInput = {
   text: string;
@@ -102,6 +106,9 @@ export class RunManager {
   private readonly keepaliveMs: number;
   private readonly runs = new Map<string, RunRec>();
   private readonly reserved = new Set<string>();
+  /** Messages sent while the chat was busy and had to wait: each starts its own run when its turn comes. */
+  private readonly queues = new Map<string, (() => Promise<void>)[]>();
+  private readonly compacting = new Set<string>();
 
   constructor(opts: RunManagerOptions) {
     this.db = opts.db;
@@ -122,6 +129,55 @@ export class RunManager {
 
   release(sessionId: string): void {
     this.reserved.delete(sessionId);
+  }
+
+  /* ---------- busy messages: interrupt or queue, as Hermes does ---------- */
+
+  beginCompaction(sessionId: string): void { this.compacting.add(sessionId); }
+  endCompaction(sessionId: string): void { this.compacting.delete(sessionId); this.drain(sessionId); }
+  isCompacting(sessionId: string): boolean { return this.compacting.has(sessionId); }
+  queueLength(sessionId: string): number { return this.queues.get(sessionId)?.length ?? 0; }
+
+  /**
+   * What a message sent to a busy chat does. Hermes interrupts the running task and starts the new message,
+   * except that it queues instead while subagents are running or the context is compacting, because an
+   * interrupt would kill them or orphan the compaction. A chat that already has a queue keeps arrival order.
+   */
+  busyMode(sessionId: string): "interrupt" | "queue" {
+    if (this.compacting.has(sessionId) || this.queueLength(sessionId) > 0) return "queue";
+    if ((S.getSession(this.db, sessionId)?.awaiting ?? 0) > 0) return "queue";
+    for (const r of this.runs.values()) {
+      if (r.sessionId === sessionId && !r.finished && r.tools.some(t => t.name === "delegate_task" && t.status === "running")) return "queue";
+    }
+    return "interrupt";
+  }
+
+  /** Holds a follow-up until the chat is free. Returns its place in line (1 = next). 429 when the line is full. */
+  enqueue(sessionId: string, start: () => Promise<void>): number {
+    const q = this.queues.get(sessionId) ?? [];
+    if (q.length >= QUEUE_MAX) throw new ChatError(429, "too many queued messages");
+    q.push(start);
+    this.queues.set(sessionId, q);
+    return q.length;
+  }
+
+  /** Starts the next queued follow-up once nothing is running or compacting. Called when a run or compaction ends. */
+  private drain(sessionId: string): void {
+    if (this.reserved.has(sessionId) || this.compacting.has(sessionId)) return;
+    const q = this.queues.get(sessionId);
+    const next = q?.shift();
+    if (!q || q.length === 0) this.queues.delete(sessionId);
+    if (!next) return;
+    queueMicrotask(() => { next().catch(e => console.warn(`queued message for ${sessionId} failed: ${errMsg(e)}`)); });
+  }
+
+  /** Stops the running task for a new message and waits until it has wound down, so the new run can claim the slot. */
+  async interrupt(runId: string): Promise<void> {
+    await this.stop(runId, true);
+    const done = this.waitDone(runId);
+    const timedOut = Symbol("timeout");
+    const r = await Promise.race([done, new Promise<symbol>(res => setTimeout(() => res(timedOut), INTERRUPT_WAIT_MS))]);
+    if (r === timedOut) throw new ChatError(409, "could not interrupt the running task");
   }
 
   activeCount(): number {
@@ -254,12 +310,14 @@ export class RunManager {
   }
 
   /** Forwards a stop to Hermes. A stop before Hermes reports its run id is forwarded when it does. */
-  async stop(runId: string): Promise<void> {
+  async stop(runId: string, keepQueue = false): Promise<void> {
     const rec = this.runs.get(runId);
     if (!rec) {
       if (this.runExists(runId)) return;
       throw new ChatError(404, "run not found");
     }
+    // Stop cancels everything, like Hermes's /stop: follow-ups waiting behind this run are dropped too.
+    if (!keepQueue) this.queues.delete(rec.sessionId);
     if (rec.finished) return;
     rec.stopRequested = true;
     if (rec.hermesRunId) await this.clientFor(rec.sessionId).client.stopRun(rec.hermesRunId);
@@ -447,6 +505,7 @@ export class RunManager {
     this.emitRun(rec.sessionId, rec.runId, "idle");
     rec.resolveDone();
     this.prune();
+    this.drain(rec.sessionId);
   }
 
   /** Global chat.run feed. `awaiting` = background subagents still to report in this session. */

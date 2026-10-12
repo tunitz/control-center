@@ -27,6 +27,8 @@ const GRAVE_MS = 5 * 60_000;
 const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 // Only these RPC commands may be passed through /command. bash and anything unknown are refused.
+const COMPACT_TIMEOUT_MS = 5 * 60_000;
+
 export const ALLOWED_COMMANDS = new Set([
   "get_state",
   "get_messages",
@@ -306,7 +308,8 @@ export function createBridge(cfg: BridgeConfig, deps: BridgeDeps = {}): Bridge {
     if (body.name === "switch_session") checkSessionPath(args.sessionPath);
     const chat = requireLive(id);
     chat.touch();
-    const resp = await chat.send({ ...args, type: body.name });
+    // Compaction is an LLM summary of the whole context: it takes far longer than a settings command.
+    const resp = await chat.send({ ...args, type: body.name }, body.name === "compact" ? COMPACT_TIMEOUT_MS : undefined);
     if (!resp.success) throw rpcError(resp);
     chat.touch();
     return json(200, { success: true, data: resp.data ?? null });

@@ -429,7 +429,10 @@ async function piCompact(req: Request, id: string, ctx: ChatContext): Promise<Re
   if (s.runState !== "idle") throw new ChatError(409, "run active");
   const body = await readJson(req);
   const instructions = typeof body.instructions === "string" && body.instructions.trim() !== "" ? body.instructions.trim().slice(0, 2000) : undefined;
-  return json(await pi.compact(id, ref, instructions, s.cwd));
+  const runs = runsOf(ctx);
+  runs.beginCompaction(id);
+  try { return json(await pi.compact(id, ref, instructions, s.cwd)); }
+  finally { runs.endCompaction(id); }
 }
 
 async function deleteSessionRoute(id: string, ctx: ChatContext): Promise<Response> {
@@ -465,7 +468,9 @@ async function createCommandRoute(req: Request, sid: string, ctx: ChatContext): 
   if (name === "") throw new ChatError(400, "name is required");
   if (body.body !== undefined && typeof body.body !== "string") throw new ChatError(400, "body must be a string");
   const text = typeof body.body === "string" ? body.body.slice(0, 8000) : "";
-  return json(S.insertCommand(ctx.db, { sessionId: sid, name, body: text, afterSeq: S.lastSeq(ctx.db, sid), createdAt: ctx.now() }), 201);
+  if (body.block !== undefined && body.block !== null && !(Number.isInteger(body.block) && (body.block as number) >= 0)) throw new ChatError(400, "block must be a non-negative integer");
+  const block = typeof body.block === "number" ? body.block : null;
+  return json(S.insertCommand(ctx.db, { sessionId: sid, name, body: text, afterSeq: S.lastSeq(ctx.db, sid), block, createdAt: ctx.now() }), 201);
 }
 
 /** Removes one mirrored message (and its files). The backend's own history is not touched. */
@@ -550,7 +555,9 @@ function fileRoute(id: string, ctx: ChatContext): Response {
 
 async function sendRoute(req: Request, id: string, ctx: ChatContext): Promise<Response> {
   const s = requireSession(ctx, id);
-  if (s.runState !== "idle") throw new ChatError(409, "run active");
+  const runs = runsOf(ctx);
+  // A busy chat does not refuse the message: it interrupts the running task or queues behind it (see below).
+  const busy = s.runState !== "idle" || runs.isCompacting(id) || runs.queueLength(id) > 0;
   const declared = Number(req.headers.get("content-length") ?? "0");
   if (declared > MAX_BODY_BYTES) throw new ChatError(413, "request too large");
 
@@ -590,7 +597,8 @@ async function sendRoute(req: Request, id: string, ctx: ChatContext): Promise<Re
     blobs.push({ name: f.name || "file", bytes });
   }
 
-  const runs = runsOf(ctx);
+  /** Claims the run slot, stores the uploads and starts the run. Queued messages call this when their turn comes. */
+  const start = async () => {
   runs.reserve(id);
   const saved: SavedUpload[] = [];
   let started = false;
@@ -613,13 +621,25 @@ async function sendRoute(req: Request, id: string, ctx: ChatContext): Promise<Re
       text: trimmed, message: prompt.message, attachments: saved, model: picked.model, effort: sentEffort,
     });
     started = true;
-    return json({ runId: r.runId, userMessage: r.userMessage, assistantMessage: r.assistantMessage }, 201);
+    return { runId: r.runId, userMessage: r.userMessage, assistantMessage: r.assistantMessage };
   } finally {
     if (!started) {
       runs.release(id);
       for (const a of saved) rmSync(a.path, { force: true });
     }
   }
+  };
+
+  if (busy) {
+    // Same rule as Hermes: interrupt the running task and start this message, or queue it when an interrupt
+    // would hurt (subagents running, context compacting).
+    if (runs.busyMode(id) === "queue") {
+      const position = runs.enqueue(id, async () => { await start(); });
+      return json({ queued: true, position }, 202);
+    }
+    if (s.runId) await runs.interrupt(s.runId);
+  }
+  return json(await start(), 201);
 }
 
 /** Whether a model accepts a reasoning effort. Pi's support comes from Pi's own list, not Hermes's. */

@@ -44,7 +44,8 @@ export type ChatMessage = {
   runId: string | null; model: string | null; attachments: Attachment[]; createdAt: number; error: string | null;
 };
 /** A persistent local slash-command row. `afterSeq` anchors it after that message seq. */
-export type CommandNote = { id: number; name: string; body: string; afterSeq: number; createdAt: number };
+/** `block` = how many blocks of that reply existed when the command ran (typed mid-reply); null = after the message. */
+export type CommandNote = { id: number; name: string; body: string; afterSeq: number; block: number | null; createdAt: number };
 export type ChatConfig = { defaultModel: string; newChatModel?: string | null; defaultEffort: Effort | null; maxUploadMb: number; contextWindow: Record<string, number> };
 export type RunEvent = { id: number; type: string; data: any };
 export type PiSettings = { tools: string[] | null; steeringMode: "all" | "one-at-a-time"; followUpMode: "all" | "one-at-a-time"; autoCompaction: boolean; autoRetry: boolean };

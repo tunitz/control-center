@@ -28,8 +28,8 @@ type MessageBlock =
 type ChatMessage = { id: string; seq: number; role: "user" | "assistant"; text: string; reasoning: string | null;
   tools: ToolRow[]; blocks: MessageBlock[]; usage: TokenUsage | null; status: "complete" | "failed" | "interrupted" | "running";
   runId: string | null; model: string | null; attachments: Attachment[]; createdAt: number; error: string | null };
-/** A persistent local slash-command row (`/help`, `/model`, …). `afterSeq` anchors it after that message seq. */
-type CommandNote = { id: number; name: string; body: string; afterSeq: number; createdAt: number };
+/** A persistent local slash-command row (`/help`, `/model`, …). `afterSeq` anchors it after that message seq. `block` = how many blocks of that reply existed when it ran mid-reply (drawn inside the reply after them); null = after the message. */
+type CommandNote = { id: number; name: string; body: string; afterSeq: number; block: number | null; createdAt: number };
 ```
 `blocks` is the ordered body of an assistant turn: text segments, tool rows (by id) and approval cards, in the order they arrived. `text` and `tools` stay for search, export and older rows; a row without `blocks_json` returns `blocks: []` and the UI falls back to tools-then-text.
 
@@ -56,6 +56,7 @@ type CommandNote = { id: number; name: string; body: string; afterSeq: number; c
   - `done` `{ status: "complete" | "failed" | "interrupted", error: string | null, model: string | null }`
 - `POST /runs/:runId/stop` -> `{ ok: true }`
 - `POST /runs/:runId/approval` `{ id, choice: "approve" | "deny" }` -> `{ ok: true }` (Pi only). When the session's `yolo` is on, the run manager answers the request itself the moment it arrives; enabling `yolo` while a request is pending answers it immediately. Because this lives in the run manager, it holds while the app is closed.
+- `POST /sessions/:id/send` while the chat is busy: interrupts the running task and starts the message (201, as usual), or queues it (202 `{ queued: true, position }`) when subagents are running, a compaction is in flight or a queue exists. 429 when 10 are queued. Stop drops the queue.
 - `POST /runs/:runId/steer` `{ message }` -> `{ ok: true }` or 409 `{ error: "run finished" }`
 - `GET /sessions/:id/usage` -> `{ totals: { input, output, cacheRead, cacheWrite, total, calls, costUsd, replies }, avgTtftMs: number | null, last: { context, ttftMs, durationMs } | null }`. Token totals summed over every reply in the chat; `last` is the newest reply that reported usage, and its `context` is the chat's current context size (null for Hermes). The web's `/usage` command prints it.
 - `GET /files/:id` -> bytes. Headers: correct content-type for images, `application/octet-stream` + `Content-Disposition: attachment` otherwise, `X-Content-Type-Options: nosniff`, `Cache-Control: private, max-age=3600`.

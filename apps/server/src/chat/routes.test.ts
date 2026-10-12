@@ -3,7 +3,7 @@ import { mkdtempSync, existsSync, readdirSync, mkdirSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openDb } from "../db";
-import { handleChat, createChatContext, type ChatContext } from "./routes";
+import { handleChat, createChatContext, runsOf, type ChatContext } from "./routes";
 import { FakeHermes } from "./fake-hermes";
 import * as S from "./store";
 
@@ -248,7 +248,7 @@ test("GET export returns markdown attachment", async () => {
   expect((await run(req("GET", "/api/chat/sessions/nope/export"))).status).toBe(404);
 });
 
-test("send: validation errors (400/404/409/413) before anything is stored", async () => {
+test("send: validation errors (400/404/413) before anything is stored", async () => {
   seed("s1");
   const fd = (text: string, files: File[] = [], extra: Record<string, string> = {}) => { const f = new FormData(); f.set("text", text); for (const x of files) f.append("files", x); for (const [k, v] of Object.entries(extra)) f.set(k, v); return f; };
   expect((await run(req("POST", "/api/chat/sessions/zzz/send", { body: fd("hi") }))).status).toBe(404);
@@ -260,8 +260,6 @@ test("send: validation errors (400/404/409/413) before anything is stored", asyn
   expect((await js(await run(req("POST", "/api/chat/sessions/s1/send", { body: fd("look", [new File([SMALL_PNG], "tiny.png", { type: "image/png" })]) })))).body.error).toBe("image too small");
   const bigForm = fd("hi", [new File([new Uint8Array(26 * 1024 * 1024)], "huge.txt", { type: "text/plain" })]);
   expect((await run(req("POST", "/api/chat/sessions/s1/send", { body: bigForm }))).status).toBe(413);
-  ctx.db.query("UPDATE chat_sessions SET run_state='running', run_id='r9' WHERE id='s1'").run();
-  expect(await js(await run(req("POST", "/api/chat/sessions/s1/send", { body: fd("hi") })))).toEqual({ status: 409, body: { error: "run active" } });
   expect(readdirSync(root).length).toBe(0);
 });
 
@@ -339,16 +337,68 @@ test("send: a Hermes lock failure is 502, releases the run slot and writes no fi
   await waitIdle("s1");
 });
 
-test("send: two sends to one session -> second is 409 run active while the first is open", async () => {
+/** A held run whose stop lets it end, like a real backend that honours the stop. */
+class StoppableHermes extends HeldHermes {
+  override async stopRun(runId: string) { await super.stopRun(runId); this.release(); }
+}
+const sendText = (text: string) => req("POST", "/api/chat/sessions/s1/send", { body: (() => { const f = new FormData(); f.set("text", text); return f; })() });
+const userTexts = (id: string) => S.listMessages(ctx.db, id, { limit: 50 }).messages.filter(m => m.role === "user").map(m => m.text);
+
+test("send while busy interrupts the running task and starts the new message (Hermes busy_input_mode: interrupt)", async () => {
+  seed("s1");
+  ctx = { ...ctx, hermes: new StoppableHermes() };
+  const first = await js(await run(sendText("one")));
+  expect(first.status).toBe(201);
+  const second = await js(await run(sendText("two")));
+  expect(second.status).toBe(201);
+  expect(second.body.runId).not.toBe(first.body.runId);
+  await waitIdle("s1");
+  const msgs = S.listMessages(ctx.db, "s1", { limit: 50 }).messages;
+  expect(msgs.filter(m => m.role === "assistant").map(m => m.status)).toEqual(["interrupted", "complete"]);
+  expect(userTexts("s1")).toEqual(["one", "two"]);
+});
+
+test("send while subagents run queues instead of interrupting, and the queued message runs after the task", async () => {
   seed("s1");
   const h = new HeldHermes();
   ctx = { ...ctx, hermes: h };
-  const first = await js(await run(req("POST", "/api/chat/sessions/s1/send", { body: (() => { const f = new FormData(); f.set("text", "one"); return f; })() })));
+  const first = await js(await run(sendText("one")));
   expect(first.status).toBe(201);
-  const second = await js(await run(req("POST", "/api/chat/sessions/s1/send", { body: (() => { const f = new FormData(); f.set("text", "two"); return f; })() })));
-  expect(second).toEqual({ status: 409, body: { error: "run active" } });
+  S.addAwaiting(ctx.db, "s1", 1, 1, Date.now() + 60_000);
+  const queued = await js(await run(sendText("two")));
+  expect(queued).toEqual({ status: 202, body: { queued: true, position: 1 } });
+  expect(userTexts("s1")).toEqual(["one"]); // not stored until its turn
   h.release();
+  for (let i = 0; i < 500 && userTexts("s1").length < 2; i++) await new Promise(r => setTimeout(r, 4));
+  expect(userTexts("s1")).toEqual(["one", "two"]);
   await waitIdle("s1");
+  const msgs = S.listMessages(ctx.db, "s1", { limit: 50 }).messages;
+  expect(msgs.filter(m => m.role === "assistant").map(m => m.status)).toEqual(["complete", "complete"]);
+});
+
+test("send during a compaction queues, and the queue drains when the compaction ends", async () => {
+  seed("s1");
+  const runs = runsOf(ctx);
+  runs.beginCompaction("s1");
+  expect((await js(await run(sendText("later")))).status).toBe(202);
+  expect(userTexts("s1")).toEqual([]);
+  runs.endCompaction("s1");
+  for (let i = 0; i < 500 && userTexts("s1").length < 1; i++) await new Promise(r => setTimeout(r, 4));
+  expect(userTexts("s1")).toEqual(["later"]);
+  await waitIdle("s1");
+});
+
+test("Stop drops the queued follow-ups too", async () => {
+  seed("s1");
+  const h = new StoppableHermes();
+  ctx = { ...ctx, hermes: h };
+  const first = await js(await run(sendText("one")));
+  S.addAwaiting(ctx.db, "s1", 1, 1, Date.now() + 60_000);
+  expect((await js(await run(sendText("two")))).status).toBe(202);
+  await run(req("POST", `/api/chat/runs/${first.body.runId}/stop`));
+  await waitIdle("s1");
+  await new Promise(r => setTimeout(r, 30));
+  expect(userTexts("s1")).toEqual(["one"]);
 });
 
 test("events: SSE id/event/data lines, Last-Event-ID and ?last replay, ends after done", async () => {
@@ -472,3 +522,14 @@ test("GET /sessions/:id/usage returns the chat's token totals; 404 for an unknow
   expect((await js(await run(req("GET", "/api/chat/sessions/nope/usage")))).status).toBe(404);
 });
 
+
+test("POST /commands stores the block a mid-reply command ran at, rejects a bad one", async () => {
+  seed("s1");
+  const ok = await js(await run(req("POST", "/api/chat/sessions/s1/commands", { body: { name: "credits", body: "x", block: 2 } })));
+  expect(ok.status).toBe(201);
+  expect(ok.body.block).toBe(2);
+  const none = await js(await run(req("POST", "/api/chat/sessions/s1/commands", { body: { name: "help", body: "y" } })));
+  expect(none.body.block).toBeNull();
+  const bad = await js(await run(req("POST", "/api/chat/sessions/s1/commands", { body: { name: "help", body: "y", block: -1 } })));
+  expect(bad.status).toBe(400);
+});

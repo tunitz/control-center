@@ -16,13 +16,13 @@ import { creditsMarkdown } from "../chat/credits";
 import { Markdown } from "../components/chat/Markdown";
 import { forgetChat, rememberChat } from "../chat/last";
 import { Composer } from "../components/chat/Composer";
-import { AssistantMessage, UserMessage } from "../components/chat/Message";
+import { AssistantMessage, UserMessage, orderedBlocks } from "../components/chat/Message";
 import { Sessions } from "../components/chat/Sessions";
 import { PiSheet } from "../components/chat/PiSheet";
 import { FolderSheet } from "../components/chat/FolderSheet";
 import { LoginSheet } from "../components/chat/LoginSheet";
 import { Icon } from "../components/chat/Icon";
-import type { Attachment, Backend, ChatConfig, ChatModel, ChatSession, Effort } from "../chat/types";
+import type { Attachment, Backend, ChatConfig, ChatMessage, ChatModel, CommandNote, ChatSession, Effort } from "../chat/types";
 
 // Dev mock: installs only when localStorage cc-chat-mock=1 or ?chatmock=1 (no-op otherwise).
 installChatMock();
@@ -215,7 +215,9 @@ export default function Chat({ hash }: { hash: string }) {
       id = s.id;
     }
     // Pass the id explicitly: on a brand-new chat the thread hook has not seen the new route yet.
-    await thread.send({ sid: id, text, files, model: splitKey(modelId).id, effort: effortToSend });
+    const res = await thread.send({ sid: id, text, files, model: splitKey(modelId).id, effort: effortToSend });
+    // Subagents running or compacting: the message waits instead of interrupting. Leave a row so it is not lost.
+    if (res.queued) await addNote("queued", text, null);
     scrollToEnd();
     void sessions.refresh();
   };
@@ -238,12 +240,17 @@ export default function Chat({ hash }: { hash: string }) {
   /** Persistent command rows live on the server (`thread.commands`); this only tracks which one is expanded. */
   const [noteOpen, setNoteOpen] = useState<number | null>(null);
   /** The command that is running now. It shows as a working row until its result row replaces it. */
-  const [pendingCmd, setPendingCmd] = useState<string | null>(null);
+  const [pendingCmd, setPendingCmd] = useState<CommandNote | null>(null);
   useEffect(() => { setNoteOpen(null); }, [activeId]);
+  /** While a reply is streaming, a command lands after the blocks it has so far; otherwise after the message (null). */
+  const midReplyBlock = (): number | null => {
+    const last = thread.messages[thread.messages.length - 1];
+    return last && last.role === "assistant" && last.status === "running" ? orderedBlocks(last).length : null;
+  };
   /** Records a command row on the server so it survives a reload, then reveals it in the thread. */
-  const addNote = async (name: string, body: string) => {
+  const addNote = async (name: string, body: string, block: number | null = midReplyBlock()) => {
     try {
-      const cmd = await thread.addCommand(name, body);
+      const cmd = await thread.addCommand(name, body, block);
       setNoteOpen(cmd.id);
       requestAnimationFrame(() => scrollToEnd());
     } catch (e) {
@@ -305,10 +312,11 @@ export default function Chat({ hash }: { hash: string }) {
   /** Every command leaves its own row in the thread, so the chat records what ran and what it did. */
   const onAction = async (name: string, arg: string): Promise<string> => {
     // Show a working row at once: /credits waits several seconds on the host, and nothing on screen looked like progress.
-    setPendingCmd(name);
+    const block = midReplyBlock();
+    setPendingCmd({ id: -1, name, body: "", afterSeq: thread.messages[thread.messages.length - 1]?.seq ?? 0, block, createdAt: Date.now() });
     try {
       const result = await runAction(name, arg);
-      if (result.trim() !== "") await addNote(name, result);
+      if (result.trim() !== "") await addNote(name, result, block);
       return result;
     } finally { setPendingCmd(null); }
   };
@@ -370,10 +378,17 @@ export default function Chat({ hash }: { hash: string }) {
   };
 
   /** Persistent command rows, grouped like the tool folds so they read as part of the thread. */
-  const noteRows = (list: { id: number; name: string; body: string }[]) =>
+  const noteRows = (list: CommandNote[]) =>
     list.length === 0 ? null : (
       <div className="fgroup">
-        {list.map(n => (
+        {list.map(n => n.id === -1 ? (
+          <div className="fold static" key="pending" role="status" aria-live="polite">
+            <span className="spin" aria-hidden="true" />
+            <Icon name="term" className="i sm" />
+            <span className="tname">/{n.name}</span>
+            <span className="lbl">working…</span>
+          </div>
+        ) : (
           <div className="fold-wrap" key={n.id}>
             <button type="button" className="fold" aria-expanded={noteOpen === n.id} aria-controls={`note-${n.id}`} onClick={() => setNoteOpen(noteOpen === n.id ? null : n.id)}>
               <Icon name="chevr" className="chev" />
@@ -388,6 +403,11 @@ export default function Chat({ hash }: { hash: string }) {
         ))}
       </div>
     );
+
+  /** Saved command rows plus the one that is still running. */
+  const cmds = pendingCmd ? [...thread.commands, pendingCmd] : thread.commands;
+  /** A command that ran while this reply streamed is drawn inside the reply, after the blocks it had then. */
+  const isInline = (c: CommandNote, m: ChatMessage) => m.role === "assistant" && c.afterSeq === m.seq && c.block !== null;
 
   const title = active?.title || "New chat";
 
@@ -456,7 +476,7 @@ export default function Chat({ hash }: { hash: string }) {
               )}
 
               {/* Rows anchored before the first loaded message: show them when nothing older exists, else they wait for "Load older". */}
-              {!thread.hasMore && noteRows(thread.commands.filter(n => n.afterSeq < (thread.messages[0]?.seq ?? 0)))}
+              {!thread.hasMore && noteRows(cmds.filter(n => n.afterSeq < (thread.messages[0]?.seq ?? 0)))}
 
               {thread.messages.map((m, i) => (
                 <Fragment key={m.id}>
@@ -468,24 +488,14 @@ export default function Chat({ hash }: { hash: string }) {
                         void thread.remove(m.id).catch(e => setPageErr((e as Error).message));
                       } : undefined} />
                   ) : (
-                    <AssistantMessage m={m} agent={chatBackend === "pi" ? "Pi" : "Hermes"} onApprove={onApprove} compactions={countCompactions(thread.messages.slice(0, i + 1))} />
+                    <AssistantMessage m={m} agent={chatBackend === "pi" ? "Pi" : "Hermes"} onApprove={onApprove} compactions={countCompactions(thread.messages.slice(0, i + 1))}
+                      rowsAt={n => noteRows(cmds.filter(c => isInline(c, m) && Math.min(c.block!, orderedBlocks(m).length) === n))} />
                   )}
-                  {noteRows(thread.commands.filter(n => n.afterSeq >= m.seq && n.afterSeq < (thread.messages[i + 1]?.seq ?? Infinity)))}
+                  {noteRows(cmds.filter(n => !isInline(n, m) && n.afterSeq >= m.seq && n.afterSeq < (thread.messages[i + 1]?.seq ?? Infinity)))}
                 </Fragment>
               ))}
 
-              {thread.messages.length === 0 && noteRows(thread.commands)}
-
-              {pendingCmd && (
-                <div className="fgroup">
-                  <div className="fold static" role="status" aria-live="polite">
-                    <span className="spin" aria-hidden="true" />
-                    <Icon name="term" className="i sm" />
-                    <span className="tname">/{pendingCmd}</span>
-                    <span className="lbl">working…</span>
-                  </div>
-                </div>
-              )}
+              {thread.messages.length === 0 && noteRows(cmds)}
 
               {!thread.runId && (active?.awaiting ?? 0) > 0 && (
                 <div className="fold static" role="status" aria-live="polite">
@@ -509,7 +519,6 @@ export default function Chat({ hash }: { hash: string }) {
             ctxWindow={ctxWindow}
             maxUploadMb={config?.maxUploadMb ?? 25}
             onSend={onSend}
-            onSteer={onSteer}
             onAction={onAction}
             onNote={addNote}
             jump={{ show: !atBottom, unseen, onJump: scrollToEnd }}

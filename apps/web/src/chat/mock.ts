@@ -388,7 +388,7 @@ export function installChatMock(): void {
       const name = String(b.name ?? "").replace(/^\//, "");
       if (!name) return json({ error: "name is required" }, 400);
       const afterSeq = (store.messages.get(sid) ?? []).reduce((n, x) => Math.max(n, x.seq), 0);
-      const note: CommandNote = { id: ++counter, name, body: String(b.body ?? ""), afterSeq, createdAt: Date.now() };
+      const note: CommandNote = { id: ++counter, name, body: String(b.body ?? ""), afterSeq, block: typeof b.block === "number" ? b.block : null, createdAt: Date.now() };
       store.commands.set(sid, [...(store.commands.get(sid) ?? []), note]);
       return json(note, 201);
     }

@@ -51,7 +51,7 @@ function App() {
   };
   const signOut = async () => { await api("/auth/logout", { method: "POST" }); clearCache(); writeAuthed(false); setAuthed(false); };
   return (
-    <div className="app">
+    <div className={`app${chatOn ? " wide" : ""}`}>
       <header className="top">
         <div className="brand"><img className="logo" src="/favicon.svg" alt="" width="26" height="26" />Control Center</div>
         <nav className="tabs"><a href="#/" className={!settings && !chatOn ? "on" : ""}>Dashboard</a><a href="#/chat" onClick={onChatTab} className={chatOn ? "on" : ""}>Chat</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>

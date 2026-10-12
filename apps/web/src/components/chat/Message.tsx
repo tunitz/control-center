@@ -70,7 +70,7 @@ function ApprovalNotice({ a }: { a: Approval }) {
 }
 
 /** Messages written before blocks existed (and the dev mock) render from text + tools. */
-function orderedBlocks(m: ChatMessage): MessageBlock[] {
+export function orderedBlocks(m: ChatMessage): MessageBlock[] {
   if (m.blocks?.length) return m.blocks;
   return [
     ...m.tools.map((t): MessageBlock => ({ kind: "tool", id: t.id })),
@@ -79,7 +79,7 @@ function orderedBlocks(m: ChatMessage): MessageBlock[] {
 }
 
 /** Renders the turn body in stream order: consecutive tool rows share one group, text and approvals sit between them. */
-function TurnBody({ m, onApprove }: { m: ChatMessage; onApprove?: (runId: string, approvalId: string, choice: "approve" | "deny") => Promise<void> }) {
+function TurnBody({ m, onApprove, rowsAt }: { m: ChatMessage; onApprove?: (runId: string, approvalId: string, choice: "approve" | "deny") => Promise<void>; rowsAt?: (n: number) => ReactNode }) {
   const tools = new Map(m.tools.map(t => [t.id, t]));
   const out: ReactNode[] = [];
   let group: string[] = [];
@@ -92,14 +92,27 @@ function TurnBody({ m, onApprove }: { m: ChatMessage; onApprove?: (runId: string
     );
     group = [];
   };
+  // Command rows typed mid-reply sit after the n-th block, so they read in the order things happened.
+  const rowsAfter = (n: number) => {
+    const rows = rowsAt?.(n);
+    if (!rows) return;
+    flush(`r${n}`);
+    out.push(<Fragment key={`cmd-${n}`}>{rows}</Fragment>);
+  };
+  rowsAfter(0);
   orderedBlocks(m).forEach((b, i) => {
-    if (b.kind === "tool") { group.push(b.id); return; }
-    flush(String(i));
-    if (b.kind === "text") { out.push(<Markdown key={`t-${i}`} text={b.text} />); return; }
-    const a = b.approval;
-    out.push(a.id && onApprove && m.runId
-      ? <ApprovalCard key={`a-${a.id}`} a={a} onAnswer={c => onApprove(m.runId!, a.id!, c)} />
-      : <ApprovalNotice key={`a-${i}`} a={a} />);
+    if (b.kind === "tool") group.push(b.id);
+    else {
+      flush(String(i));
+      if (b.kind === "text") out.push(<Markdown key={`t-${i}`} text={b.text} />);
+      else {
+        const a = b.approval;
+        out.push(a.id && onApprove && m.runId
+          ? <ApprovalCard key={`a-${a.id}`} a={a} onAnswer={c => onApprove(m.runId!, a.id!, c)} />
+          : <ApprovalNotice key={`a-${i}`} a={a} />);
+      }
+    }
+    rowsAfter(i + 1);
   });
   flush("end");
   return <>{out}</>;
@@ -143,20 +156,23 @@ function UsageRow({ id, u, compactions }: { id: string; u: TokenUsage; compactio
   return (
     <div className="usage-wrap">
       <button type="button" className="usage usage-btn" aria-expanded={open} aria-controls={`usage-${id}`} title="Token details" onClick={() => setOpen(o => !o)}>
-        {[...usageSummary(u), ...(compactions ? [`compacted ${compactions}×`] : [])].map(part => <span key={part}>{part}</span>)}
+        {usageSummary(u).map(part => <span key={part}>{part}</span>)}
         <Icon name="chevr" className="chev" />
       </button>
       {open && (
         <dl className="usage-grid" id={`usage-${id}`}>
           {usageRows(u).map(r => <Fragment key={r.label}><dt>{r.label}</dt><dd>{r.value}</dd></Fragment>)}
+          {compactions ? <><dt>Compacted</dt><dd>{compactions}×</dd></> : null}
         </dl>
       )}
     </div>
   );
 }
 
-export function AssistantMessage({ m, agent = "Hermes", onApprove, compactions }: {
+export function AssistantMessage({ m, agent = "Hermes", onApprove, compactions, rowsAt }: {
   m: ChatMessage; agent?: string;
+  /** Command rows that ran mid-reply: what to show after the first n blocks. */
+  rowsAt?: (n: number) => ReactNode;
   /** Times the chat had compacted as of this reply. */
   compactions?: number;
   /** Answers a Pi approval for this message's run. */
@@ -194,7 +210,7 @@ export function AssistantMessage({ m, agent = "Hermes", onApprove, compactions }
         <div className="fold static" role="status" aria-live="polite"><span className="spin" aria-hidden="true" /><span className="lbl">Working</span></div>
       )}
 
-      <TurnBody m={m} onApprove={onApprove} />
+      <TurnBody m={m} onApprove={onApprove} rowsAt={rowsAt} />
 
       {running && <span className="caret" aria-hidden="true" />}
 

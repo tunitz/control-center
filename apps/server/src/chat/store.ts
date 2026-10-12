@@ -267,7 +267,8 @@ export function truncateFrom(db: Database, sessionId: string, seqFrom: number): 
 }
 
 /** A persistent local slash-command row in the thread. `afterSeq` anchors it after that message seq. */
-export type CommandNote = { id: number; name: string; body: string; afterSeq: number; createdAt: number };
+/** `block` is how many blocks of the anchor message existed when the command ran (it ran mid-reply); null = after the message. */
+export type CommandNote = { id: number; name: string; body: string; afterSeq: number; block: number | null; createdAt: number };
 
 /** The highest message seq in a session (0 when empty); used to anchor a new command row. */
 export function lastSeq(db: Database, sessionId: string): number {
@@ -275,17 +276,18 @@ export function lastSeq(db: Database, sessionId: string): number {
   return r.n;
 }
 
-export function insertCommand(db: Database, c: { sessionId: string; name: string; body: string; afterSeq: number; createdAt: number }): CommandNote {
-  const r = db.query("INSERT INTO chat_commands (session_id, seq, name, body, created_at) VALUES (?, ?, ?, ?, ?)")
-    .run(c.sessionId, c.afterSeq, c.name, c.body, c.createdAt);
-  return { id: Number(r.lastInsertRowid), name: c.name, body: c.body, afterSeq: c.afterSeq, createdAt: c.createdAt };
+export function insertCommand(db: Database, c: { sessionId: string; name: string; body: string; afterSeq: number; block?: number | null; createdAt: number }): CommandNote {
+  const block = c.block ?? null;
+  const r = db.query("INSERT INTO chat_commands (session_id, seq, name, body, block, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(c.sessionId, c.afterSeq, c.name, c.body, block, c.createdAt);
+  return { id: Number(r.lastInsertRowid), name: c.name, body: c.body, afterSeq: c.afterSeq, block, createdAt: c.createdAt };
 }
 
 /** Every command row in the session, oldest first. */
 export function listCommands(db: Database, sessionId: string): CommandNote[] {
-  const rows = db.query("SELECT id, seq, name, body, created_at FROM chat_commands WHERE session_id = ? ORDER BY seq ASC, id ASC")
-    .all(sessionId) as { id: number; seq: number; name: string; body: string; created_at: number }[];
-  return rows.map(r => ({ id: r.id, name: r.name, body: r.body, afterSeq: r.seq, createdAt: r.created_at }));
+  const rows = db.query("SELECT id, seq, name, body, block, created_at FROM chat_commands WHERE session_id = ? ORDER BY seq ASC, id ASC")
+    .all(sessionId) as { id: number; seq: number; name: string; body: string; block: number | null; created_at: number }[];
+  return rows.map(r => ({ id: r.id, name: r.name, body: r.body, afterSeq: r.seq, block: r.block, createdAt: r.created_at }));
 }
 
 /** Drops command rows anchored at or after a deleted or rebranched message. */

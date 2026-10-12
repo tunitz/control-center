@@ -13,6 +13,12 @@ function migrateSampleTable(db: Database, table: string, perMetric: (m: string) 
   }
 }
 
+/** Adds the block column to an existing chat_commands table. Old rows read null: they sit after their message. */
+function migrateChatCommands(db: Database) {
+  const have = new Set((db.query("PRAGMA table_info(chat_commands)").all() as { name: string }[]).map(c => c.name));
+  if (!have.has("block")) db.exec("ALTER TABLE chat_commands ADD COLUMN block INTEGER");
+}
+
 /** Adds the backend columns to an existing chat_sessions table. Existing rows read as 'hermes'. */
 function migrateChatSessions(db: Database) {
   const have = new Set((db.query("PRAGMA table_info(chat_sessions)").all() as { name: string }[]).map(c => c.name));
@@ -85,6 +91,7 @@ export function openDb(path: string): Database {
   `);
   db.exec(CHAT_SCHEMA);
   migrateChatSessions(db);
+  migrateChatCommands(db);
   migrateChatMessages(db);
   migrateSampleTable(db, "samples_raw", m => [m]);
   migrateSampleTable(db, "samples_1m", m => [`${m}_avg`, `${m}_min`, `${m}_max`]);

@@ -24,8 +24,8 @@ test("fmtMs and fmtCost", () => {
   expect(fmtCost(0.456)).toBe("$0.46");
 });
 
-test("usageSummary: context when known, else the whole prompt; output; first token when measured", () => {
-  expect(usageSummary(CACHED)).toEqual(["553k context", "8.7k out", "first token 1.2s"]);
+test("usageSummary: context when known, else the whole prompt; output", () => {
+  expect(usageSummary(CACHED)).toEqual(["553k context", "8.7k out"]);
   expect(usageSummary({ input: 22960, output: 10 })).toEqual(["23k in", "10 out"]);
   // Hermes with cache counters: "in" counts the cache too.
   expect(usageSummary({ input: 100, output: 7, cacheRead: 8000, cacheWrite: 1000 })).toEqual(["9.1k in", "7 out"]);

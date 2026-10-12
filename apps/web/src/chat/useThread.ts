@@ -123,6 +123,7 @@ export function useThread(sid: string | null, onRunEnd: (sid: string) => void) {
     const id = args.sid ?? sidRef.current;
     if (!id) throw new Error("No chat selected");
     const res = await chat.send(id, { text: args.text, model: args.model, effort: args.effort, files: args.files });
+    if (res.queued) return res; // stored and run once the chat is free; the run feed reloads the thread then
     // Another chat was opened while the send was in flight: the reload on switch picks up the running turn.
     if (sidRef.current !== id) return res;
     setSt(s => ({ ...s, messages: [...s.messages, res.userMessage, res.assistantMessage], runId: res.runId }));
@@ -159,10 +160,10 @@ export function useThread(sid: string | null, onRunEnd: (sid: string) => void) {
   }, []);
 
   /** Records a slash-command row on the server and appends it to the thread. */
-  const addCommand = useCallback(async (name: string, body: string) => {
+  const addCommand = useCallback(async (name: string, body: string, block: number | null = null) => {
     const id = sidRef.current;
     if (!id) throw new Error("No chat selected");
-    const cmd = await chat.addCommand(id, name, body);
+    const cmd = await chat.addCommand(id, name, body, block);
     if (sidRef.current !== id) return cmd;
     setSt(s => ({ ...s, commands: [...s.commands, cmd] }));
     return cmd;

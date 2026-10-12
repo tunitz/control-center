@@ -77,6 +77,8 @@ export type PiAuthEvent =
 export const PI_BRIDGE_DEFAULT_URL = "http://127.0.0.1:3050";
 const MODEL_CACHE_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 15_000;
+/** A compaction summarises the whole context with the model; the bridge allows it 5 minutes. */
+const COMPACT_TIMEOUT_MS = 5 * 60_000;
 
 export type PiClientOptions = { baseUrl: string; token: string; now?: () => number; requestTimeoutMs?: number };
 
@@ -227,7 +229,7 @@ export class PiClient implements ChatBackend {
     const r = await this.call("POST", `/chats/${id}/command`, {
       name: "compact",
       args: instructions ? { customInstructions: instructions } : {},
-    });
+    }, COMPACT_TIMEOUT_MS);
     return { tokensBefore: Number(r.data?.tokensBefore) || 0, tokensAfter: Number(r.data?.estimatedTokensAfter) || 0 };
   }
 
@@ -311,7 +313,7 @@ export class PiClient implements ChatBackend {
     }
   }
 
-  private async raw(method: string, path: string, body?: unknown): Promise<Response> {
+  private async raw(method: string, path: string, body?: unknown, timeoutMs = this.timeoutMs): Promise<Response> {
     const headers: Record<string, string> = { authorization: `Bearer ${this.token}` };
     if (body !== undefined) headers["content-type"] = "application/json";
     try {
@@ -319,15 +321,15 @@ export class PiClient implements ChatBackend {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       throw new ChatError(502, "pi bridge unreachable");
     }
   }
 
-  private async call(method: string, path: string, body?: unknown): Promise<Record<string, any>> {
-    const res = await this.raw(method, path, body);
+  private async call(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<Record<string, any>> {
+    const res = await this.raw(method, path, body, timeoutMs);
     if (!res.ok) throw await this.failure(path.split("/").pop() || "request", res);
     const text = await res.text().catch(() => "");
     try {

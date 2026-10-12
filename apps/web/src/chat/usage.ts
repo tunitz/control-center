@@ -25,7 +25,6 @@ export function usageSummary(u: TokenUsage): string[] {
   if (typeof u.context === "number") parts.push(`${fmtTokens(u.context)} context`);
   else parts.push(`${fmtTokens(promptTokens(u))} in`);
   parts.push(`${fmtTokens(u.output)} out`);
-  if (typeof u.ttftMs === "number") parts.push(`first token ${fmtMs(u.ttftMs)}`);
   return parts;
 }
 
