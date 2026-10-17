@@ -3,7 +3,7 @@ import { decrypt } from "./crypto";
 import { ingestLines } from "./ingest";
 import { SshPool, type Target } from "./ssh";
 
-export type UnitRow = { id: number; host: string; ssh_port: number; ssh_user: string; privkey_enc: string; sample_interval_s: number; enabled: number };
+export type UnitRow = { id: number; name: string; host: string; ssh_port: number; ssh_user: string; privkey_enc: string; sample_interval_s: number; enabled: number };
 export type Fetcher = { exec(id: number, t: Target, cmd: string): Promise<string> };
 
 export function targetOf(u: UnitRow, master: string): Target {
@@ -42,12 +42,28 @@ export async function refreshStatic(db: Database, f: Fetcher, u: UnitRow, master
   db.query("INSERT INTO unit_static(unit_id,json,updated_at) VALUES(?,?,?) ON CONFLICT(unit_id) DO UPDATE SET json=excluded.json, updated_at=excluded.updated_at").run(u.id, out.trim(), now);
 }
 
-/** Runs polls on a timer with per-unit jitter; one in-flight poll per unit. */
+const log = (msg: string) => console.log(`[poll] ${new Date().toISOString()} ${msg}`);
+const withTimeout = <T,>(p: Promise<T>, ms: number, msg: string) =>
+  new Promise<T>((res, rej) => {
+    const timer = setTimeout(() => rej(new Error(msg)), ms);
+    p.then(v => { clearTimeout(timer); res(v); }, e => { clearTimeout(timer); rej(e); });
+  });
+
+export type SchedulerOpts = {
+  /** Hard cap on one unit's whole poll cycle; a wedge must never own the unit's poll slot forever. */
+  pollTimeoutMs?: number;
+};
+
+/** Runs polls on a timer with per-unit jitter; one in-flight poll per unit, always bounded. */
 export class Scheduler {
   private timer?: ReturnType<typeof setInterval>;
   private busy = new Set<number>();
   private statics = new Set<number>();
-  constructor(private db: Database, private pool: SshPool, private master: string, private getIntervalS: () => number, private onSamples: (unitId: number, added: number) => void) {}
+  private failing = new Map<number, string>();
+  private pollTimeoutMs: number;
+  constructor(private db: Database, private pool: SshPool, private master: string, private getIntervalS: () => number, private onSamples: (unitId: number, added: number) => void, opts: SchedulerOpts = {}) {
+    this.pollTimeoutMs = opts.pollTimeoutMs ?? 30_000;
+  }
   start() {
     const tick = () => {
       const units = this.db.query("SELECT * FROM units WHERE enabled=1").all() as UnitRow[];
@@ -57,14 +73,29 @@ export class Scheduler {
   }
   private restart(tick: () => void) { this.timer = setInterval(tick, this.getIntervalS() * 1000); }
   stop() { if (this.timer) clearInterval(this.timer); this.pool.closeAll(); }
+  private ok(u: UnitRow) {
+    if (this.failing.has(u.id)) { log(`unit ${u.id} ${u.name} (${u.host}) recovered`); this.failing.delete(u.id); }
+  }
+  private failed(u: UnitRow, e: unknown) {
+    const msg = String((e as any)?.message ?? e).slice(0, 200);
+    this.db.query("UPDATE units SET last_error=? WHERE id=?").run(msg, u.id);
+    if (this.failing.get(u.id) !== msg) { this.failing.set(u.id, msg); log(`unit ${u.id} ${u.name} (${u.host}) failing: ${msg}`); }
+  }
   async run(u: UnitRow) {
     if (this.busy.has(u.id)) return;
     this.busy.add(u.id);
     try {
-      const now = Math.floor(Date.now() / 1000);
-      if (!this.statics.has(u.id)) { await refreshStatic(this.db, this.pool, u, this.master, now); this.statics.add(u.id); }
-      const added = await pollUnit(this.db, this.pool, u, this.master, now);
-      this.onSamples(u.id, added);
-    } catch { this.pool.drop(u.id); } finally { this.busy.delete(u.id); }
+      await withTimeout(this.cycle(u), this.pollTimeoutMs, `poll watchdog: no result in ${this.pollTimeoutMs}ms`);
+      this.ok(u);
+    } catch (e) {
+      this.failed(u, e);
+      this.pool.drop(u.id); // a wedged connection must not be reused; the next tick reconnects
+    } finally { this.busy.delete(u.id); }
+  }
+  private async cycle(u: UnitRow) {
+    const now = Math.floor(Date.now() / 1000);
+    if (!this.statics.has(u.id)) { await refreshStatic(this.db, this.pool, u, this.master, now); this.statics.add(u.id); }
+    const added = await pollUnit(this.db, this.pool, u, this.master, now);
+    this.onSamples(u.id, added);
   }
 }

@@ -24,7 +24,9 @@ export class SshPool {
   async exec(id: number, t: Target, cmd: string, timeoutMs = 15000, stdin?: string): Promise<string> {
     let e = this.conns.get(id);
     if (!e || e.dead) e = this.connect(id, t);
-    await e.ready;
+    // Hard deadline on the handshake too: a peer that accepts TCP but never finishes SSH must not
+    // leave the caller awaiting forever (that wedged a unit's poll loop for hours after a reboot).
+    await this.within(e.ready, this.readyTimeoutMs + 2000, `ssh connect to ${t.host}:${t.port} stalled`);
     return new Promise<string>((res, rej) => {
       const timer = setTimeout(() => rej(new Error("exec timeout")), timeoutMs);
       e!.c.exec(cmd, (err, stream) => {
@@ -37,6 +39,19 @@ export class SshPool {
       });
     });
   }
-  drop(id: number) { const e = this.conns.get(id); if (e) { e.c.end(); this.conns.delete(id); } }
+  private within<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
+    return new Promise<T>((res, rej) => {
+      const timer = setTimeout(() => rej(new Error(msg)), ms);
+      p.then(v => { clearTimeout(timer); res(v); }, err => { clearTimeout(timer); rej(err); });
+    });
+  }
+  drop(id: number) {
+    const e = this.conns.get(id);
+    if (!e) return;
+    this.conns.delete(id);
+    e.dead = true;
+    try { e.c.end(); } catch { /* already gone */ }
+    try { (e.c as any).destroy?.(); } catch { /* already gone */ }
+  }
   closeAll() { for (const [id] of this.conns) this.drop(id); }
 }

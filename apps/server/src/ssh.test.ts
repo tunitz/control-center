@@ -87,6 +87,21 @@ test("wrong key is refused", async () => {
   pool.closeAll();
 });
 
+test("a peer that accepts TCP and never speaks (host rebooted/suspended) rejects inside readyTimeout instead of hanging", async () => {
+  const net = await import("node:net");
+  const held: any[] = [];
+  const silent = net.createServer(so => { held.push(so); /* accept, never speak */ });
+  await new Promise<void>(r => silent.listen(0, "127.0.0.1", () => r()));
+  const silentPort = (silent.address() as any).port;
+  const pool = new SshPool(1500); // readyTimeout
+  const t0 = Date.now();
+  await expect(pool.exec(42, { host: "127.0.0.1", port: silentPort, username: "x", privateKey: unitKey.privateKey }, "read")).rejects.toThrow();
+  expect(Date.now() - t0).toBeLessThan(1500 + 3000);
+  pool.closeAll();
+  for (const so of held) so.destroy();
+  await new Promise<void>(r => silent.close(() => r()));
+});
+
 test("generateUnitKey retries past ssh2's occasional unloadable key (~1 in 250) and never throws or returns a bad one", () => {
   let bad = 0;
   for (let i = 0; i < 1500; i++) {
