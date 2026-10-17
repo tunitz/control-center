@@ -27,7 +27,7 @@ A Bun + SQLite dashboard that monitors remote Linux units via SSH agents. Each u
 
 - **Repo**: `~/projects/control-center`, private GitHub `tunitz/control-center`
 - **Public agent repo**: `tunitz/ccagent` (agent scripts only)
-- **Live**: http://192.168.31.206:3030 (docker, `network_mode: host`)
+- **Live**: http://192.168.31.10:3030 (docker, `network_mode: host`; the host is also `192.168.31.207` on wifi. `192.168.31.206` is stale and answers nothing)
 - **Stack**: Bun (server + web), SQLite at `/data/cc.db`, volume `control-center_cc-data`
 - **Deploy**: `docker compose up -d --build` (run with background=true)
 
@@ -201,13 +201,21 @@ When a unit reboots while the Control Center is running, the SSH pool can get st
 2. Verify the stored key works manually: decrypt `privkey_enc` from the DB and test an SSH connection to the unit.
 3. Check the DB: `docker exec control-center-control-center-1 bun -e 'import{Database}from"bun:sqlite";const d=new Database("/data/cc.db");console.log(d.query("select id,last_seen,last_error from units").all())'` — if `last_seen` is stale and `last_error` says "Connection lost before handshake", the pool is stuck.
 
-**Fix:** Restart the Control Center container:
+**Fix:** nothing to do now, but if a unit is still stuck on an older build, restart the Control Center container:
 ```bash
 docker restart control-center-control-center-1
 ```
 The pool reconnects on the next poll cycle and the unit comes back online.
 
-**Root cause (not yet fixed in code):** The SSH pool in `apps/server/src/ssh.ts` keeps a dead connection entry and never re-establishes it after a transient failure during a unit's boot window. A code fix needs a failing test first, then a patch to the pool's reconnect logic.
+**Root cause and the fix (deployed 2026-10-17):** one unit's poll cycle could hang forever with nothing recorded — `SshPool.exec` awaited a handshake promise that only rejected on `error`, so a client whose socket closed during the handshake left the promise pending. `Scheduler.busy` then kept that unit's poll slot taken for the life of the process: `last_seen` went stale, `last_error` stayed null, and no reconnect was ever attempted (that is why the unit showed offline for hours with a clean error field and no `ccagent` lines in the unit's sshd journal).
+
+The fix is in `apps/server/src/ssh.ts` and `apps/server/src/poller.ts`:
+- `SshPool.exec` bounds the handshake wait hard (`readyTimeout + 2s`) and `drop()` destroys the client, not just `end()`s it.
+- `Scheduler` runs each unit's whole cycle under a watchdog (`pollTimeoutMs`, default 30 s). On expiry it records `last_error` (`poll watchdog: no result in 30000ms`), drops the connection and frees the slot, so the next tick reconnects. A static-refresh failure is now recorded in `last_error` too instead of failing silently.
+- Poll state changes are logged once per transition, so `docker logs` explains an outage without guesswork:
+  `[poll] … unit 4 proxmox (127.0.0.1) failing: Timed out while waiting for handshake` then `[poll] … unit 4 proxmox (192.168.31.2) recovered`.
+
+Regression tests: `apps/server/src/poller.watchdog.test.ts` (a never-settling poll or static refresh returns, frees the slot and retries) and two `ssh.test.ts` cases (silent peer, peer that drops during the handshake). Reproduce a stall on purpose by pointing a unit's host at a silent TCP listener and restarting the container: the unit must go stale with that reason within ~one interval and come back on its own after the address is restored.
 
 ### Chat reply shows "run failed" with no text
 The UI only shows "run failed"; the reason lives in the Hermes log. Triage in this order before changing code:

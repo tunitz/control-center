@@ -102,6 +102,19 @@ test("a peer that accepts TCP and never speaks (host rebooted/suspended) rejects
   await new Promise<void>(r => silent.close(() => r()));
 });
 
+test("a peer that drops the connection during the handshake reports \"Connection lost before handshake\" instead of wedging the caller", async () => {
+  const net = await import("node:net");
+  const dropper = net.createServer(so => { so.end(); });
+  await new Promise<void>(r => dropper.listen(0, "127.0.0.1", () => r()));
+  const dropPort = (dropper.address() as any).port;
+  const pool = new SshPool(2000);
+  const t0 = Date.now();
+  await expect(pool.exec(7, { host: "127.0.0.1", port: dropPort, username: "x", privateKey: unitKey.privateKey }, "read")).rejects.toThrow();
+  expect(Date.now() - t0).toBeLessThan(2000 + 3000);
+  pool.closeAll();
+  await new Promise<void>(r => dropper.close(() => r()));
+});
+
 test("generateUnitKey retries past ssh2's occasional unloadable key (~1 in 250) and never throws or returns a bad one", () => {
   let bad = 0;
   for (let i = 0; i < 1500; i++) {
