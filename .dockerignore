@@ -1,0 +1,68 @@
+# Docker build context for the control-center image.
+# The context must contain exactly what `docker build` needs: no secrets, no local
+# runtime state, no stale dependencies, no test files. Everything excluded here is
+# either regenerated inside the image or never read by the running service.
+
+# --- Secrets and credentials (excluded by pattern only; never read) ---
+.env
+.env.*
+**/.env
+**/.env.*
+# Defense in depth for credential files that must never enter a build context.
+.npmrc
+**/.npmrc
+*.pem
+*.p12
+*.pfx
+
+# --- Version control and local tooling state ---
+.git
+**/.git
+
+# --- Dependencies ---
+# The image runs `bun install --frozen-lockfile` itself. Host node_modules are
+# stale (they still carry removed chat deps such as dompurify/marked/highlight.js)
+# and `COPY . .` would drop them over the freshly installed tree.
+node_modules
+**/node_modules
+
+# --- Local runtime state: SQLite database plus WAL/SHM sidecars ---
+data
+**/data
+*.db*
+**/*.db*
+
+# --- Build outputs: the image rebuilds apps/web/dist; root dist/ is a release artifact ---
+dist
+**/dist
+
+# --- Disposable task artifacts ---
+scratch
+**/scratch
+
+# --- Maintained tests and test-only fixtures (not production inputs) ---
+apps/server/src/*.test.ts
+apps/server/src/**/*.test.ts
+apps/web/src/*.test.ts
+apps/web/src/**/*.test.ts
+apps/**/src/**/fixtures
+apps/**/src/**/__fixtures__
+
+# --- Dev/release/test tooling: not a build or runtime input of the image ---
+tools/test_all.sh
+tools/testunit
+tools
+
+# --- Generated Python bytecode ---
+__pycache__
+**/__pycache__
+*.pyc
+
+# --- Docs and agent skill definitions: not needed to build or run the image ---
+docs
+.claude
+README.md
+
+# --- Editor / OS noise ---
+.DS_Store
+*.log

@@ -3,9 +3,6 @@ import { api, type Unit } from "../api";
 import { cached, remember, useLive } from "../hooks";
 import InstallPanel from "../components/InstallPanel";
 import EditUnit from "../components/EditUnit";
-import PiConfigCard from "../components/PiConfigCard";
-import PiSkillsCard from "../components/PiSkillsCard";
-import SubagentsCard from "../components/SubagentsCard";
 import Accordion, { type AccordionItem } from "../components/Accordion";
 import { getThemeMode, setThemeMode, type ThemeMode } from "../theme";
 
@@ -67,19 +64,6 @@ export default function Settings({ onSignOut }: { onSignOut: () => void }) {
             </div>
         </>
       ),
-    },
-    {
-      id: "pi", title: "Pi agent", hint: "Instructions, tools, Claude, browser and skills",
-      body: (
-        <>
-            <PiConfigCard onMsg={setMsg} />
-            <PiSkillsCard onMsg={setMsg} />
-        </>
-      ),
-    },
-    {
-      id: "subagents", title: "Subagents", hint: "Helpers Pi can hand work to",
-      body: <SubagentsCard onMsg={setMsg} />,
     },
     {
       id: "security", title: "Security", hint: "Password and audit log",

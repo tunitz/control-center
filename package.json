@@ -6,7 +6,7 @@
   ],
   "scripts": {
     "test": "bun test apps/server apps/web/src",
-    "typecheck": "bun run --cwd apps/server typecheck && bun run --cwd apps/web typecheck && bun run --cwd pi-bridge typecheck",
+    "typecheck": "bun run --cwd apps/server typecheck && bun run --cwd apps/web typecheck",
     "build:web": "bun run --cwd apps/web build",
     "start": "bun run apps/server/src/index.ts"
   }

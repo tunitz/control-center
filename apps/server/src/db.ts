@@ -13,63 +13,6 @@ function migrateSampleTable(db: Database, table: string, perMetric: (m: string) 
   }
 }
 
-/** Adds the block column to an existing chat_commands table. Old rows read null: they sit after their message. */
-function migrateChatCommands(db: Database) {
-  const have = new Set((db.query("PRAGMA table_info(chat_commands)").all() as { name: string }[]).map(c => c.name));
-  if (!have.has("block")) db.exec("ALTER TABLE chat_commands ADD COLUMN block INTEGER");
-}
-
-/** Adds the backend columns to an existing chat_sessions table. Existing rows read as 'hermes'. */
-function migrateChatSessions(db: Database) {
-  const have = new Set((db.query("PRAGMA table_info(chat_sessions)").all() as { name: string }[]).map(c => c.name));
-  if (!have.has("backend")) db.exec("ALTER TABLE chat_sessions ADD COLUMN backend TEXT NOT NULL DEFAULT 'hermes'");
-  if (!have.has("backend_ref")) db.exec("ALTER TABLE chat_sessions ADD COLUMN backend_ref TEXT");
-  if (!have.has("pi_settings_json")) db.exec("ALTER TABLE chat_sessions ADD COLUMN pi_settings_json TEXT");
-  if (!have.has("cwd")) db.exec("ALTER TABLE chat_sessions ADD COLUMN cwd TEXT");
-  if (!have.has("yolo")) db.exec("ALTER TABLE chat_sessions ADD COLUMN yolo INTEGER NOT NULL DEFAULT 0");
-}
-
-/** Adds todos_json (Pi's last todo list) and blocks_json (ordered turn body) to an existing chat_messages table. */
-function migrateChatMessages(db: Database) {
-  const have = new Set((db.query("PRAGMA table_info(chat_messages)").all() as { name: string }[]).map(c => c.name));
-  if (have.size > 0 && !have.has("todos_json")) db.exec("ALTER TABLE chat_messages ADD COLUMN todos_json TEXT");
-  if (have.size > 0 && !have.has("blocks_json")) db.exec("ALTER TABLE chat_messages ADD COLUMN blocks_json TEXT");
-}
-
-/** Chat mirror tables (additive). chat_sessions.id = Hermes session id. FTS5 is kept in sync by triggers. */
-export const CHAT_SCHEMA = `
-  CREATE TABLE IF NOT EXISTS chat_sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', title_auto INTEGER NOT NULL DEFAULT 1,
-    model TEXT NOT NULL, provider TEXT NOT NULL DEFAULT '', model_locked TEXT, effort TEXT, pinned INTEGER NOT NULL DEFAULT 0,
-    archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-    run_state TEXT NOT NULL DEFAULT 'idle', run_id TEXT, unread INTEGER NOT NULL DEFAULT 0,
-    backend TEXT NOT NULL DEFAULT 'hermes', backend_ref TEXT, pi_settings_json TEXT, yolo INTEGER NOT NULL DEFAULT 0);
-  CREATE INDEX IF NOT EXISTS chat_sessions_list ON chat_sessions(archived, pinned, updated_at);
-  CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-    seq INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', reasoning TEXT, tools_json TEXT, usage_json TEXT,
-    status TEXT NOT NULL DEFAULT 'complete', run_id TEXT, model TEXT, error TEXT, created_at INTEGER NOT NULL, todos_json TEXT, blocks_json TEXT,
-    UNIQUE(session_id, seq));
-  CREATE TABLE IF NOT EXISTS chat_attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
-    session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE, kind TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL,
-    size INTEGER NOT NULL, sha256 TEXT NOT NULL, path TEXT NOT NULL, w INTEGER, h INTEGER);
-  CREATE TABLE IF NOT EXISTS chat_run_events (run_id TEXT NOT NULL, n INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL,
-    PRIMARY KEY (run_id, n)) WITHOUT ROWID;
-  CREATE TABLE IF NOT EXISTS chat_await (session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
-    expected INTEGER NOT NULL, since_ms INTEGER NOT NULL, deadline_ms INTEGER NOT NULL);
-  CREATE TABLE IF NOT EXISTS chat_seen (session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-    hermes_msg_id INTEGER NOT NULL, PRIMARY KEY (session_id, hermes_msg_id)) WITHOUT ROWID;
-  CREATE TABLE IF NOT EXISTS chat_commands (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-    seq INTEGER NOT NULL, name TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL);
-  CREATE INDEX IF NOT EXISTS chat_commands_session ON chat_commands(session_id, seq, id);
-  CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_fts USING fts5(message_id UNINDEXED, text);
-  CREATE TRIGGER IF NOT EXISTS chat_messages_ai AFTER INSERT ON chat_messages BEGIN
-    INSERT INTO chat_messages_fts(message_id, text) VALUES (new.id, new.text); END;
-  CREATE TRIGGER IF NOT EXISTS chat_messages_ad AFTER DELETE ON chat_messages BEGIN
-    DELETE FROM chat_messages_fts WHERE message_id = old.id; END;
-  CREATE TRIGGER IF NOT EXISTS chat_messages_au AFTER UPDATE OF text ON chat_messages BEGIN
-    DELETE FROM chat_messages_fts WHERE message_id = old.id;
-    INSERT INTO chat_messages_fts(message_id, text) VALUES (new.id, new.text); END;
-`;
-
 export function openDb(path: string): Database {
   const db = new Database(path, { create: true });
   db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;");
@@ -89,10 +32,6 @@ export function openDb(path: string): Database {
   CREATE TABLE IF NOT EXISTS unit_services (unit_id INTEGER NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(unit_id,kind,name));
   CREATE TABLE IF NOT EXISTS unit_disks (unit_id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, json TEXT NOT NULL);
   `);
-  db.exec(CHAT_SCHEMA);
-  migrateChatSessions(db);
-  migrateChatCommands(db);
-  migrateChatMessages(db);
   migrateSampleTable(db, "samples_raw", m => [m]);
   migrateSampleTable(db, "samples_1m", m => [`${m}_avg`, `${m}_min`, `${m}_max`]);
   migrateSampleTable(db, "samples_15m", m => [`${m}_avg`, `${m}_min`, `${m}_max`]);

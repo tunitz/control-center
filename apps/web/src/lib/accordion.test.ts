@@ -5,10 +5,10 @@ const mem = (init: Record<string, string> = {}) => {
   const d = { ...init };
   return { getItem: (k: string) => (k in d ? d[k] : null), setItem: (k: string, v: string) => { d[k] = v; }, d };
 };
-const IDS = ["appearance", "monitoring", "pi"];
+const IDS = ["appearance", "monitoring", "security"];
 
 test("a stored section that still exists is reopened", () => {
-  expect(readOpenSection(mem({ k: "pi" }), "k", IDS, "appearance")).toBe("pi");
+  expect(readOpenSection(mem({ k: "security" }), "k", IDS, "appearance")).toBe("security");
 });
 
 test("nothing stored, an unknown id or no storage falls back", () => {
@@ -26,5 +26,5 @@ test("all closed is remembered too, instead of reopening the default", () => {
 test("blocked storage never throws", () => {
   const blocked = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); } };
   expect(readOpenSection(blocked, "k", IDS, "monitoring")).toBe("monitoring");
-  expect(() => writeOpenSection(blocked, "k", "pi")).not.toThrow();
+  expect(() => writeOpenSection(blocked, "k", "security")).not.toThrow();
 });

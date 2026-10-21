@@ -44,8 +44,6 @@ button,input,select,textarea{font:inherit;color:inherit}
 h3,h4{font-weight:600;letter-spacing:-.01em;line-height:1.3}
 
 .app{max-width:1200px;margin:0 auto;padding:16px 20px 96px}
-/* Desktop chat uses the whole window; phones (max 760px) keep the normal width. */
-@media(min-width:761px){.app.wide{max-width:none}}
 header.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 24px}
 .brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:16px;letter-spacing:-.01em}
 .logo{width:26px;height:26px;border-radius:8px;flex:none;display:block}
@@ -249,40 +247,3 @@ td{font-variant-numeric:tabular-nums}
 .acc-subtitle{margin:12px 0 0;font-size:15px}
 .acc-sub>.acc-subtitle+*{margin-top:8px}
 .acc-sub+.acc-sub>.acc-subtitle{margin-top:0}
-
-/* Settings: Pi agent card */
-.pi-chk{display:flex;align-items:center;gap:10px;min-height:44px;font-size:14px}
-.pi-tool-list{display:flex;flex-direction:column;gap:2px;max-height:280px;overflow-y:auto;overflow-x:hidden;min-width:0;border:1px solid var(--line);border-radius:10px;padding:6px 10px;background:var(--surface2)}
-.pi-tool{flex:none;display:flex;align-items:flex-start;gap:10px;min-height:44px;padding:6px 0;font-size:14px;min-width:0;cursor:pointer}
-.pi-tool input{width:20px;height:20px;flex:none;margin-top:2px;accent-color:var(--accent)}
-.pi-tool-main{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}
-.pi-chk input{width:20px;height:20px;flex:none}
-.pi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px}
-.pi-grid>div{display:grid;grid-row:span 2;grid-template-rows:subgrid;row-gap:6px;align-content:start}
-.pi-grid>div>label{align-self:end}
-.pi-num{width:100%;min-height:44px;box-sizing:border-box}
-.pi-add{display:flex;gap:8px;align-items:center}
-.pi-add input{flex:1;min-width:0}
-.pi-add .btn{min-height:44px;white-space:nowrap}
-.pi-rules{list-style:none;margin:8px 0 12px;padding:0;display:flex;flex-direction:column;gap:6px}
-.pi-rules li{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
-.pi-rules code{min-width:0;overflow-wrap:anywhere}
-.pi-rules .btn{min-height:44px}
-#pi-agent .btn{min-height:44px}
-
-/* Settings: Pi skills card */
-.pi-skill-group{margin:16px 0 6px;font-size:14px;font-weight:600}
-.pi-skill-list{display:flex;flex-direction:column;max-height:320px;overflow-y:auto;overflow-x:hidden;border:1px solid var(--line);border-radius:12px}.pi-skill{flex:none}
-.pi-skill{display:flex;align-items:flex-start;gap:12px;padding:10px 12px;border-top:1px solid var(--line);cursor:pointer;margin:0}
-.pi-skill:first-child{border-top:0}
-.pi-skill:hover{background:var(--surface2)}
-.pi-skill input{width:20px;height:20px;flex:none;margin-top:3px}
-.pi-skill-main{display:flex;flex-direction:column;gap:3px;min-width:0}
-.pi-skill-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.pi-skill-name{font-weight:600;font-size:14px}
-.pi-skill-tag{font-size:11px;line-height:18px;padding:0 8px;border-radius:999px;border:1px solid var(--ok);color:var(--ok)}
-.pi-skill-tag.off{color:var(--mut);border-color:var(--line)}
-.pi-skill-desc{font-size:13px;color:var(--mut);line-height:1.45;overflow-wrap:anywhere}
-.pi-skill-where{font-size:12px;color:var(--mut);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
-
-.pi-tool-desc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px}
