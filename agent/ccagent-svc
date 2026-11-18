@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Root-owned service-control request executor. Commands are argv-only, never shell strings."""
-import json, os, re, stat, subprocess, time, tempfile
+import json, os, re, stat, subprocess, time, tempfile, uuid
 
 DIR = os.environ.get('CCAGENT_DIR', '/var/lib/ccagent')
 REQ = os.environ.get('CCAGENT_REQ', DIR + '/svc.request')
@@ -244,13 +244,24 @@ def main():
     except PermissionError as e: result={'ok':False,'code':'denied','error':str(e)}
     except ValueError as e: result={'ok':False,'code':'bad_request','error':str(e)}
     except Exception as e: result={'ok':False,'code':'failed','error':str(e)[:1000]}
-    # Results live in a root-owned directory: the gate user can read them through the
-    # known path but cannot create, rename or replace anything here.
+    # The result directory is owned by the gate user so it can read and delete results.
+    # Root publishes a result safely: O_EXCL|O_NOFOLLOW on a fresh random name prevents
+    # a planted symlink or pre-created file from redirecting the write, and fchown acts
+    # only on the fd root just created (never on a caller-chosen path).
     result_dir = os.environ.get('RESULTS_DIR', '/run/ccagent')
-    os.makedirs(result_dir, mode=0o750, exist_ok=True)
+    dst = os.stat(result_dir)
     path=result_dir+'/svc.result.'+ident
-    tmp=path+'.tmp-'+str(os.getpid())
-    fd=os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd,'w') as f: json.dump(result,f); f.write('\n')
-    os.replace(tmp,path)
+    tmp=path+'.tmp-'+uuid.uuid4().hex
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os,'O_NOFOLLOW',0)
+    fd=os.open(tmp, flags, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode): os.close(fd); return
+        with os.fdopen(fd,'w') as f: json.dump(result,f); f.write('\n')
+        # fd is closed by fdopen; reopen by the same verified inode for fchown.
+        fd2=os.open(tmp, os.O_WRONLY | getattr(os,'O_NOFOLLOW',0))
+        os.fchown(fd2, dst.st_uid, dst.st_gid); os.close(fd2)
+        os.replace(tmp,path)
+    except OSError:
+        try: os.unlink(tmp)
+        except OSError: pass
 if __name__=='__main__': main()

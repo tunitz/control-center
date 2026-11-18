@@ -148,9 +148,9 @@ cat > /opt/ccagent/uninstall.sh <<'EOF_uninstall_sh'
 ${slim(agentFile("uninstall.sh"))}EOF_uninstall_sh
 chmod 755 /opt/ccagent/ccagent.sh /opt/ccagent/ccagent-gate /opt/ccagent/ccagent-power /opt/ccagent/ccagent-svc /opt/ccagent/uninstall.sh
 printf 'INTERVAL=%s\\nDIR=/var/lib/ccagent\\nSVC_UNIT=/etc/systemd/system/ccagent-svc.path\\nRESULTS_DIR=/run/ccagent\\nSSH_PORT=%s\\n' "$INTERVAL" "$PORT" > /etc/ccagent.conf
-# Root-owned results directory. The gate user may read named results but cannot write here.
-install -d -o root -g root -m 0750 /run/ccagent
-install -d -o root -g root -m 0750 /etc/tmpfiles.d
+# Results directory owned by the gate user so it can read and delete results.
+# The root helper publishes results with O_EXCL|O_NOFOLLOW and fchown on its own fd.
+install -d -o ccagent -g ccagent -m 0700 /run/ccagent
 printf '%s\\n' "command=\\"/opt/ccagent/ccagent-gate\\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding${fromOpt} $PUBKEY" > /var/lib/ccagent/.ssh/authorized_keys
 chmod 700 /var/lib/ccagent/.ssh; chmod 600 /var/lib/ccagent/.ssh/authorized_keys
 chown -R ccagent:ccagent /var/lib/ccagent
@@ -190,7 +190,7 @@ Type=oneshot
 ExecStart=/opt/ccagent/ccagent-svc
 UNIT
 if command -v systemd-tmpfiles >/dev/null; then
-  printf 'd /run/ccagent 0750 root root -\\nz /sys/class/powercap/*/energy_uj 0444 - - -\\n' > /etc/tmpfiles.d/ccagent-rapl.conf
+  printf 'd /run/ccagent 0700 ccagent ccagent -\\nz /sys/class/powercap/*/energy_uj 0444 - - -\\n' > /etc/tmpfiles.d/ccagent-rapl.conf
   systemd-tmpfiles --create /etc/tmpfiles.d/ccagent-rapl.conf 2>/dev/null || true
 fi
 cat > /etc/systemd/system/ccagent.service <<UNIT

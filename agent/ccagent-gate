@@ -8,7 +8,7 @@ POWER_UNIT=${POWER_UNIT:-/etc/systemd/system/ccagent-power.path}
 SVC_UNIT=${SVC_UNIT:-/etc/systemd/system/ccagent-svc.path}
 SVC_WAIT=${CCAGENT_SVC_WAIT:-8}
 LOCK_WAIT=${CCAGENT_SVC_LOCK_WAIT:-20}
-RESULTS_DIR=${CCAGENT_RESULTS:-/run/ccagent}
+RESULTS_DIR=${RESULTS_DIR:-${CCAGENT_RESULTS:-/run/ccagent}}
 # Parse only fixed positional words; never execute or interpolate a supplied word.
 read -r -a args <<< "${SSH_ORIGINAL_COMMAND:-}"
 verb=${args[0]:-}

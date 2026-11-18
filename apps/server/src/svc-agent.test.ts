@@ -424,9 +424,10 @@ test("svc-logs refuses a non-allowlisted unit (exit 3, denied) and never calls t
   expect(callLog()).toBe("");
 });
 
-// The helper runs as root. Its result must be created with O_EXCL in a root-owned
-// directory and renamed into place without chowning anything in agent-writable space.
-test("helper publishes the result with O_EXCL and an atomic rename, mode 0600", () => {
+// The helper runs as root. Its result must be created with O_EXCL|O_NOFOLLOW on a fresh
+// random name, fchowned via its own fd, and renamed into place — never following a path
+// an agent could pre-plant.
+test("helper publishes the result with O_EXCL|O_NOFOLLOW and an atomic rename, mode 0600", () => {
   const id = "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1";
   writeFileSync(req, JSON.stringify({ ts: Math.floor(Date.now() / 1000), id, verb: "bogus" }) + "\n");
   const probe = `
@@ -438,8 +439,12 @@ def rep(a, b):
 os.replace = rep
 real_open = os.open
 def op(path, flags, mode=0o777, *a, **k):
-    events.append(["open", path, flags & os.O_EXCL != 0]); return real_open(path, flags, mode, *a, **k)
+    events.append(["open", path, bool(flags & os.O_EXCL), bool(getattr(os,'O_NOFOLLOW',0) and flags & os.O_NOFOLLOW)]); return real_open(path, flags, mode, *a, **k)
 os.open = op
+real_fchown = os.fchown
+def fch(fd, u, g):
+    events.append(["fchown", u, g]); return real_fchown(fd, u, g)
+os.fchown = fch
 import importlib.machinery
 loader = importlib.machinery.SourceFileLoader("svc", sys.argv[1])
 spec = importlib.util.spec_from_loader("svc", loader)
@@ -452,7 +457,10 @@ print(json.dumps({"events": events}))
   const { events } = JSON.parse(p.stdout.toString());
   const opened = events.find((e: any[]) => e[0] === "open" && e[1].includes("svc.result."));
   const replace = events.find((e: any[]) => e[0] === "replace");
+  const fchown = events.find((e: any[]) => e[0] === "fchown");
   expect(opened[2]).toBe(true);
+  expect(opened[3]).toBe(true);
+  expect(fchown).toBeDefined();
   expect(replace[1]).toMatch(new RegExp(`svc.result.${id}.tmp-`));
   expect(replace[2]).toBe(join(resultsDir, `svc.result.${id}`));
   expect(result(id)).toMatchObject({ ok: false, code: "denied" });
