@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 
-export type Mount = { mount: string; fs: string; total_mb: number; used_mb: number };
+export type Mount = { mount: string; fs: string; total_mb: number; used_mb: number; available_mb?: number };
 export type DiskSnapshot = { ts: number; mounts: Mount[] } | null;
 
 const finite = (v: unknown): v is number => typeof v === "number" && isFinite(v);
@@ -13,7 +13,10 @@ export function normaliseMounts(raw: unknown): Mount[] {
     if (!d || typeof d !== "object") continue;
     const o = d as Record<string, unknown>;
     if (typeof o.m !== "string" || typeof o.fs !== "string" || !finite(o.total_mb) || !finite(o.used_mb)) continue;
-    out.push({ mount: o.m, fs: o.fs, total_mb: o.total_mb, used_mb: o.used_mb });
+    const available_mb = finite(o.avail_mb) ? o.avail_mb : undefined;
+    out.push(available_mb === undefined
+      ? { mount: o.m, fs: o.fs, total_mb: o.total_mb, used_mb: o.used_mb }
+      : { mount: o.m, fs: o.fs, total_mb: o.total_mb, used_mb: o.used_mb, available_mb });
   }
   return out;
 }

@@ -1,10 +1,13 @@
 import type { DiskSnapshot } from "./lib/disks";
+export type { DiskSnapshot } from "./lib/disks";
 export class ApiError extends Error { constructor(public status: number, msg: string) { super(msg); } }
-export async function api<T = any>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; priority?: "low" | "high" | "auto" } = {}): Promise<T> {
   const r = await fetch("/api" + path, {
     method: opts.method ?? "GET", credentials: "same-origin",
     headers: { "content-type": "application/json", ...(opts.method && opts.method !== "GET" ? { "x-cc": "1" } : {}) },
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    // Progressive enhancement: unsupported browsers ignore this key.
+    ...(opts.priority ? ({ priority: opts.priority } as any) : {}),
   });
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && typeof window !== "undefined") {

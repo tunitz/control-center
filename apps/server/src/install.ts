@@ -257,9 +257,13 @@ systemctl restart ccagent.service
 sleep 2; systemctl is-active ccagent.service
 
 # --- open the port on every active firewall backend, idempotently ---
+# Every rule we add carries a stable ownership marker. The manifest lets uninstall.sh
+# remove only our rules and never a same-port rule that someone else created.
+FW_MARKER="ccagent-control-center-$PORT"
+FW_IP6=0
 if [ "$FW_UFW" = 1 ]; then
   if ! ufw status 2>/dev/null | grep -q "\${PORT}/tcp"; then
-    ufw allow "\${PORT}/tcp" comment 'ccagent control center'
+    ufw allow "\${PORT}/tcp" comment "\$FW_MARKER"
   fi
 fi
 if [ "$FW_FIREDALD" = 1 ]; then
@@ -269,21 +273,26 @@ if [ "$FW_FIREDALD" = 1 ]; then
   fi
 fi
 if [ "$FW_NFT" = 1 ]; then
-  if ! nft list chain inet filter input 2>/dev/null | grep -q "dport \${PORT} accept"; then
-    nft add rule inet filter input tcp dport "\${PORT}" accept
+  if ! nft list chain inet filter input 2>/dev/null | grep -q "\$FW_MARKER"; then
+    nft add rule inet filter input tcp dport "\${PORT}" accept comment "\$FW_MARKER"
   fi
 fi
 if [ "$FW_IPTABLES" = 1 ]; then
-  if ! iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT >/dev/null 2>&1; then
-    iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT
+  if ! iptables -C INPUT -p tcp --dport "$PORT" -m comment --comment "$FW_MARKER" -j ACCEPT >/dev/null 2>&1; then
+    iptables -I INPUT -p tcp --dport "$PORT" -m comment --comment "$FW_MARKER" -j ACCEPT
   fi
   if command -v ip6tables >/dev/null 2>&1 && ip6tables -S INPUT >/dev/null 2>&1; then
-    if ! ip6tables -C INPUT -p tcp --dport "$PORT" -j ACCEPT >/dev/null 2>&1; then
-      ip6tables -I INPUT -p tcp --dport "$PORT" -j ACCEPT
+    FW_IP6=1
+    if ! ip6tables -C INPUT -p tcp --dport "$PORT" -m comment --comment "$FW_MARKER" -j ACCEPT >/dev/null 2>&1; then
+      ip6tables -I INPUT -p tcp --dport "$PORT" -m comment --comment "$FW_MARKER" -j ACCEPT
     fi
   fi
   echo "NOTE: iptables rules may not persist across reboot unless your distro persists them."
 fi
+# Root-owned record of exactly what this installer added.
+printf '{"port":%s,"marker":"%s","ufw":%s,"firewalld":%s,"nft":%s,"iptables":%s,"ip6tables":%s}\\n' \
+  "$PORT" "$FW_MARKER" "$FW_UFW" "$FW_FIREDALD" "$FW_NFT" "$FW_IPTABLES" "$FW_IP6" > /etc/ccagent/firewall.json
+chmod 600 /etc/ccagent/firewall.json
 
 # --- verification ---
 if ! systemctl is-active ccagent-sshd.service >/dev/null; then
@@ -319,7 +328,7 @@ fi
 if [ "$FW_NFT" = 1 ] && ! nft list chain inet filter input 2>/dev/null | grep -q "dport \${PORT} accept"; then
   echo "ERROR: nftables rule for port $PORT is missing after installation." >&2; exit 1
 fi
-if [ "$FW_IPTABLES" = 1 ] && ! iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT >/dev/null 2>&1; then
+if [ "$FW_IPTABLES" = 1 ] && ! iptables -C INPUT -p tcp --dport "$PORT" -m comment --comment "$FW_MARKER" -j ACCEPT >/dev/null 2>&1; then
   echo "ERROR: iptables rule for port $PORT is missing after installation." >&2; exit 1
 fi
 echo "ccagent installed. The Control Center connects over SSH (port $PORT) and will mark this unit online within a poll interval."

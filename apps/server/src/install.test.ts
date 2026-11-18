@@ -183,6 +183,12 @@ test("sshPort propagates into curlCommand as the third argument without changing
     expect(() => curlCommand({ repo: "a/b", tag: "latest", pubkey: pub, sshPort: bad })).toThrow(/ssh port/i);
 });
 
+test("agent reports df avail_mb so UI can show real available space", () => {
+  const sh = agentFile("ccagent.sh");
+  expect(sh).toContain("avail = $5");
+  expect(sh).toContain('\\"avail_mb\\":" avail + 0');
+});
+
 test("firewall preflight runs first, detects every backend and aborts on nft without a chain", () => {
   const s = installScript({ pubkey: pub, interval: 5 });
   expect(s.indexOf("# --- firewall preflight")).toBeLessThan(s.indexOf("useradd"));
@@ -195,16 +201,29 @@ test("firewall preflight runs first, detects every backend and aborts on nft wit
   expect(s).toContain("nft add table inet filter");
   expect(s).toContain("nft add chain inet filter input");
 });
+test("firewall rules carry an ownership marker and a root-owned manifest for clean uninstall", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  expect(s).toContain('FW_MARKER="ccagent-control-center-$PORT"');
+  expect(s).toContain('/etc/ccagent/firewall.json');
+  expect(s).toContain('chmod 600 /etc/ccagent/firewall.json');
+  expect(s).toContain('-m comment --comment "$FW_MARKER"');
+  const u = agentFile("uninstall.sh");
+  expect(u).toContain('nft delete rule inet filter input handle');
+  expect(u).toContain('-m comment --comment "$FW_MARKER"');
+  expect(u).toContain("rm -f /etc/ccagent/firewall.json");
+  expect(() => Bun.spawnSync(["bash", "-n"], { stdin: Buffer.from(s) }).exitCode === 0 || (() => { throw 1; })()).not.toThrow();
+});
+
 test("firewall is opened idempotently for each active backend", () => {
   const s = installScript({ pubkey: pub, interval: 5 });
-  expect(s).toContain("ufw allow \"${PORT}/tcp\" comment 'ccagent control center'");
+  expect(s).toContain("ufw allow \"${PORT}/tcp\" comment \"$FW_MARKER\"");
   expect(s).toContain("firewall-cmd --query-port=\"${PORT}/tcp\"");
   expect(s).toContain("firewall-cmd --permanent --add-port=\"${PORT}/tcp\"");
   expect(s).toContain("firewall-cmd --reload");
-  expect(s).toContain("nft add rule inet filter input tcp dport \"${PORT}\" accept");
-  expect(s).toContain("iptables -C INPUT -p tcp --dport \"$PORT\" -j ACCEPT");
-  expect(s).toContain("iptables -I INPUT -p tcp --dport \"$PORT\" -j ACCEPT");
-  expect(s).toContain("ip6tables -I INPUT -p tcp --dport \"$PORT\" -j ACCEPT");
+  expect(s).toContain("nft add rule inet filter input tcp dport \"${PORT}\" accept comment \"$FW_MARKER\"");
+  expect(s).toContain("iptables -C INPUT -p tcp --dport \"$PORT\" -m comment --comment \"$FW_MARKER\" -j ACCEPT");
+  expect(s).toContain("iptables -I INPUT -p tcp --dport \"$PORT\" -m comment --comment \"$FW_MARKER\" -j ACCEPT");
+  expect(s).toContain("ip6tables -I INPUT -p tcp --dport \"$PORT\" -m comment --comment \"$FW_MARKER\" -j ACCEPT");
   expect(s).toContain("iptables rules may not persist across reboot");
 });
 test("sshd preflight installs openssh-server via apt-get/dnf/yum and prepares host keys", () => {
@@ -268,7 +287,7 @@ test("uninstall removes the dedicated sshd unit/config and only our firewall rul
   expect(u).toContain(". /etc/ccagent.conf");
   expect(u).toContain("ccagent control center");
   expect(u).toContain("firewall-cmd --permanent --remove-port=");
-  expect(u).toContain('iptables -D INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT');
+  expect(u).toContain('iptables -D INPUT -p tcp --dport "$SSH_PORT" -m comment --comment "$FW_MARKER" -j ACCEPT');
   expect(u).toContain("nftables detected");
   expect(u).toContain("rm -rf /opt/ccagent");
   expect(u).toContain("userdel -r ccagent");

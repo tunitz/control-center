@@ -37,7 +37,7 @@ export function openDb(path: string): Database {
   INSERT OR IGNORE INTO settings(key,value) VALUES('admin_hash',''),('bootstrap_hash',''),('auth_version','0');
   CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, unit_id INTEGER, unit_name TEXT, public_id TEXT, detail TEXT, ip TEXT);
   CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, auth_version INTEGER NOT NULL DEFAULT 0);
-  CREATE TABLE IF NOT EXISTS unit_services (unit_id INTEGER NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(unit_id,kind,name));
+  CREATE TABLE IF NOT EXISTS unit_services (unit_id INTEGER NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, synced INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(unit_id,kind,name));
   CREATE TABLE IF NOT EXISTS unit_disks (unit_id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, json TEXT NOT NULL);
   `);
   migrateSampleTable(db, "samples_raw", m => [m]);
@@ -46,6 +46,8 @@ export function openDb(path: string): Database {
   const auditCols = new Set((db.query("PRAGMA table_info(audit)").all() as { name: string }[]).map(c => c.name));
   if (!auditCols.has("unit_name")) db.exec("ALTER TABLE audit ADD COLUMN unit_name TEXT");
   if (!auditCols.has("public_id")) db.exec("ALTER TABLE audit ADD COLUMN public_id TEXT");
+  const svcCols = new Set((db.query("PRAGMA table_info(unit_services)").all() as { name: string }[]).map(c => c.name));
+  if (!svcCols.has("synced")) db.exec("ALTER TABLE unit_services ADD COLUMN synced INTEGER NOT NULL DEFAULT 0");
   const unitCols = new Set((db.query("PRAGMA table_info(units)").all() as { name: string }[]).map(c => c.name));
   if (!unitCols.has("host_fingerprint")) db.exec("ALTER TABLE units ADD COLUMN host_fingerprint TEXT");
   if (!unitCols.has("last_sample_ts")) db.exec("ALTER TABLE units ADD COLUMN last_sample_ts INTEGER");

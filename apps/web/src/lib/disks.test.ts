@@ -26,18 +26,20 @@ test("toneColor uses theme CSS vars only", () => {
   expect(toneColor("err")).toBe("var(--err)");
 });
 
-test("freeMb and freeLine: free of total in GB", () => {
+test("freeMb and freeLine: available space in binary units", () => {
   expect(freeMb(m(512000, 128000))).toBe(384000);
   expect(freeMb(m(1000, 2000))).toBe(0);
-  expect(freeLine(m(512000, 128000))).toBe("375.0 GB free of 500.0 GB");
-  expect(freeLine(m(0, 0))).toBe("0.0 GB free of 0.0 GB");
+  // df 'avail' excludes reserved blocks; prefer it over total-used when reported.
+  expect(freeMb({ ...m(512000, 128000), available_mb: 300000 })).toBe(300000);
+  expect(freeLine(m(512000, 128000))).toBe("375.0 GiB available of 500.0 GiB");
+  expect(freeLine(m(0, 0))).toBe("0.0 GiB available of 0.0 GiB");
 });
 
-test("rateUnit: KB/s below 1024, MB/s at or above", () => {
-  expect(rateUnit(null)).toEqual({ scale: 1, unit: " KB/s" });
-  expect(rateUnit(undefined)).toEqual({ scale: 1, unit: " KB/s" });
-  expect(rateUnit(1023)).toEqual({ scale: 1, unit: " KB/s" });
-  expect(rateUnit(1024)).toEqual({ scale: 1 / 1024, unit: " MB/s" });
+test("rateUnit: KiB/s below 1024, MiB/s at or above", () => {
+  expect(rateUnit(null)).toEqual({ scale: 1, unit: " KiB/s" });
+  expect(rateUnit(undefined)).toEqual({ scale: 1, unit: " KiB/s" });
+  expect(rateUnit(1023)).toEqual({ scale: 1, unit: " KiB/s" });
+  expect(rateUnit(1024)).toEqual({ scale: 1 / 1024, unit: " MiB/s" });
 });
 
 test("hasSeries: true only when some sample is non-null", () => {

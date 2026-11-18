@@ -94,10 +94,10 @@ test("newest disks inside one batch wins; samples without disks do not clear the
   expect(latestDisks(db, 1)).toEqual({ ts: 310, mounts: api(mountsB) });
 });
 
-test("disk entries are normalised to {mount,fs,total_mb,used_mb}; malformed entries dropped", () => {
+test("disk entries are normalised and avail_mb becomes available_mb; malformed entries dropped", () => {
   const db = fresh();
-  ingestLines(db, 1, [JSON.stringify({ v: 1, ts: 400, disks: [{ m: "/", fs: "ext4", total_mb: 10, used_mb: 2, extra: 1 }, { m: 5 }, { m: "/x", fs: "xfs", total_mb: "nope", used_mb: 1 }] })], 5);
-  expect(latestDisks(db, 1)).toEqual({ ts: 400, mounts: [{ mount: "/", fs: "ext4", total_mb: 10, used_mb: 2 }] });
+  ingestLines(db, 1, [JSON.stringify({ v: 1, ts: 400, disks: [{ m: "/", fs: "ext4", total_mb: 10, used_mb: 2, avail_mb: 7, extra: 1 }, { m: 5 }, { m: "/x", fs: "xfs", total_mb: "nope", used_mb: 1 }] })], 5);
+  expect(latestDisks(db, 1)).toEqual({ ts: 400, mounts: [{ mount: "/", fs: "ext4", total_mb: 10, used_mb: 2, available_mb: 7 }] });
 });
 
 test("deleteUnit removes the disks snapshot too", () => {

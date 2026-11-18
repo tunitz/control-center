@@ -39,15 +39,15 @@ function App() {
       .catch(() => { writeAuthed(false); clearCache(); setAuthed(false); });
   }, []);
   const done = () => { writeAuthed(true); setSetupNeeded(false); setAuthed(true); };
-  if (authed === null) return null;
-  if (setupNeeded) return <Login mode="setup" needsToken={needsToken} onDone={done} />;
-  if (!authed) return <Login onDone={done} />;
   const unit = /^#\/unit\/(\d+)/.exec(hash), settings = hash.startsWith("#/settings");
-  const signOut = async () => { await api("/auth/logout", { method: "POST" }); clearCache(); writeAuthed(false); setAuthed(false); };
   useEffect(() => {
     const path = unit ? `Unit ${unit[1]}` : settings ? "Settings" : "Dashboard";
     document.title = `${path} · Control Center`;
   }, [hash]);
+  if (authed === null) return null;
+  if (setupNeeded) return <Login mode="setup" needsToken={needsToken} onDone={done} />;
+  if (!authed) return <Login onDone={done} />;
+  const signOut = async () => { await api("/auth/logout", { method: "POST" }); clearCache(); writeAuthed(false); setAuthed(false); };
   return (
     <div className="app">
       <a className="skip" href="#main">Skip to content</a>

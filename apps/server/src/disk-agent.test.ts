@@ -133,9 +133,9 @@ test("disks array on the first sample and every 12th; tmpfs/devtmpfs/overlay/squ
   const withDisks = lines.map((l, i) => (l.disks !== undefined ? i : -1)).filter(i => i >= 0);
   expect(withDisks).toEqual([0, 12]);
   expect(lines[0].disks).toEqual([
-    { m: "/", fs: "ext4", total_mb: 225922, used_mb: 45873 },
-    { m: "/mnt/my disk", fs: "ext4", total_mb: 931500, used_mb: 500000 },
-    { m: "/srv/nas", fs: "xfs", total_mb: 3700000, used_mb: 1200000 },
+    { m: "/", fs: "ext4", total_mb: 225922, used_mb: 45873, avail_mb: 168502 },
+    { m: "/mnt/my disk", fs: "ext4", total_mb: 931500, used_mb: 500000, avail_mb: 383000 },
+    { m: "/srv/nas", fs: "xfs", total_mb: 3700000, used_mb: 1200000, avail_mb: 2500000 },
   ]);
   expect(lines[12].disks).toEqual(lines[0].disks);
 });

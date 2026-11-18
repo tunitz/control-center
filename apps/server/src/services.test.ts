@@ -168,18 +168,18 @@ test("GET services: 409 'unit offline' when the unit is not online; no SSH attem
   db.query("UPDATE units SET last_seen=NULL WHERE id=1").run();
   const r = (await route(deps(), req("GET", "/api/units/1/services")))!;
   expect(r.status).toBe(409);
-  expect(await r.json()).toEqual({ error: "unit offline" });
+  expect(await r.json()).toEqual({ error: "unit offline", needs_sync: false });
   expect(calls).toEqual([]);
 });
 
 test("GET services returns the agent's items; an agent error comes back as 200 with items [] and error", async () => {
   reply = (cmd) => cmd === LIST_CMD ? JSON.stringify({ ok: true, data: { items: [{ kind: "systemd", name: "a.service", state: "active", detail: "running" }] } }) : "";
   let body: any = await (await route(deps(), req("GET", "/api/units/1/services")))!.json();
-  expect(body).toEqual({ items: [{ kind: "systemd", name: "a.service", state: "active", detail: "running" }] });
+  expect(body).toEqual({ items: [{ kind: "systemd", name: "a.service", state: "active", detail: "running" }], needs_sync: false });
   reply = () => new Error("exit 3: svc helper missing");
   const r = (await route(deps(), req("GET", "/api/units/1/services")))!;
   expect(r.status).toBe(200);
-  expect(await r.json()).toEqual({ items: [], error: "svc helper missing" });
+  expect(await r.json()).toEqual({ items: [], error: "svc helper missing", needs_sync: false });
 });
 
 test("GET services/discover returns {items:[{kind,name,state}]}; agent failure is 502", async () => {
@@ -195,7 +195,7 @@ test("PUT allow: replaces the stored set, pushes it on stdin via svc-allow, audi
   const body = { items: [{ kind: "systemd", name: "nginx.service" }, { kind: "lxc", name: "101" }] };
   const r = (await route(deps(), req("PUT", "/api/units/1/services/allow", body)))!;
   expect(r.status).toBe(200);
-  expect(await r.json()).toMatchObject({ ok: true, items: body.items });
+  expect(await r.json()).toMatchObject({ ok: true, items: body.items, needs_sync: false });
   expect(allowRows()).toEqual([{ kind: "lxc", name: "101" }, { kind: "systemd", name: "nginx.service" }]);
   expect(calls).toHaveLength(1);
   expect(calls[0].cmd).toBe("svc-allow");
@@ -221,12 +221,33 @@ test("PUT allow: push failure is 502, the DB set is still kept, audited svc.allo
   expect(auditRows().at(-1)).toMatchObject({ action: "svc.allow.failed", unit_id: 1 });
 });
 
-test("PUT allow while the unit is offline: saved, not pushed, 502", async () => {
+test("PUT allow while the unit is offline: saved unsynced, not pushed, 502", async () => {
   db.query("UPDATE units SET last_seen=NULL WHERE id=1").run();
   const r = (await route(deps(), req("PUT", "/api/units/1/services/allow", { items: [{ kind: "systemd", name: "a.service" }] })))!;
   expect(r.status).toBe(502);
   expect(calls).toEqual([]);
   expect(allowRows()).toEqual([{ kind: "systemd", name: "a.service" }]);
+  expect(db.query("SELECT synced FROM unit_services WHERE unit_id=1").get()).toEqual({ synced: 0 });
+});
+
+test("reconcile pushes the stored allowlist and clears the drift flag", async () => {
+  db.query("INSERT INTO unit_services(unit_id,kind,name,synced) VALUES(1,'systemd','a.service',0)").run();
+  const r = (await route(deps(), req("POST", "/api/units/1/services/reconcile")))!;
+  expect(r.status).toBe(200);
+  expect(await r.json()).toEqual({ ok: true, needs_sync: false });
+  expect(calls[0].cmd).toBe("svc-allow");
+  expect(JSON.parse(calls[0].stdin!)).toEqual({ items: [{ kind: "systemd", name: "a.service" }] });
+  expect(db.query("SELECT synced FROM unit_services WHERE unit_id=1").get()).toEqual({ synced: 1 });
+  expect(auditRows().at(-1)).toMatchObject({ action: "svc.allow.reconciled", unit_id: 1 });
+});
+
+test("reconcile reports failure and keeps the drift flag when the agent rejects it", async () => {
+  db.query("INSERT INTO unit_services(unit_id,kind,name,synced) VALUES(1,'systemd','a.service',0)").run();
+  reply = () => new Error("exit 3: helper busy");
+  const r = (await route(deps(), req("POST", "/api/units/1/services/reconcile")))!;
+  expect(r.status).toBe(502);
+  expect(await r.json()).toMatchObject({ needs_sync: true });
+  expect(db.query("SELECT synced FROM unit_services WHERE unit_id=1").get()).toEqual({ synced: 0 });
 });
 
 test("GET allow reads the stored set from the DB (no SSH)", async () => {

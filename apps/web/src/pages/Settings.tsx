@@ -46,7 +46,7 @@ export default function Settings({ onSignOut }: { onSignOut: () => void }) {
               <p className="muted">Applies to the current month ({month}) only. Past months keep the rate they had.</p>
               <label htmlFor="rate">PHP per kWh</label><input id="rate" type="number" step="0.01" min="0" value={rate} onChange={e => setRate(e.target.value)} style={{ maxWidth: 200 }} />
               <div style={{ marginTop: 12 }}><button className="btn pri" onClick={() => run(async () => { await api(`/rates/${month}`, { method: "PUT", body: { php_per_kwh: Number(rate) } }); rr(); }, "Rate saved")}>Save rate</button></div>
-              <div className="scroll" role="region" aria-label="Rate history" tabIndex={0} style={{ marginTop: 12 }}><table><thead><tr><th>Month</th><th>₱ / kWh</th></tr></thead><tbody>{rates?.map(r => <tr key={r.month}><td>{r.month}</td><td>{r.php_per_kwh}</td></tr>)}</tbody></table></div>
+              <div className="scroll" role="region" aria-label="Rate history" tabIndex={0} style={{ marginTop: 12 }}><table className="rtable"><thead><tr><th>Month</th><th>₱ / kWh</th></tr></thead><tbody>{rates?.map(r => <tr key={r.month}><td data-label="Month">{r.month}</td><td data-label="₱ / kWh">{r.php_per_kwh}</td></tr>)}</tbody></table></div>
             </div>
             <div className="acc-sub"><h3 className="acc-subtitle">Collection</h3>
               <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
@@ -57,8 +57,8 @@ export default function Settings({ onSignOut }: { onSignOut: () => void }) {
               <div style={{ marginTop: 12 }}><button className="btn pri" onClick={() => run(() => api("/settings", { method: "PUT", body: s }), "Settings saved")}>Save</button></div>
             </div>
             <div className="acc-sub"><h3 className="acc-subtitle">Units</h3>
-              <div className="scroll" role="region" aria-label="Units" tabIndex={0}><table><thead><tr><th>Name</th><th>Host</th><th>MAC</th><th>Key</th><th></th></tr></thead><tbody>{units?.map(u => <tr key={u.id}><td>{u.name}</td><td>{u.host}</td><td>{u.mac ?? "—"}</td><td title={u.fingerprint ?? ""}>{u.fingerprint?.slice(0, 18)}</td>
-                <td style={{ whiteSpace: "nowrap" }}><button className="btn" onClick={() => setEdit(u)}>Edit</button>{" "}<button className="btn" onClick={() => run(async () => { const r = await api<any>(`/units/${u.id}/rekey`, { method: "POST" }); setKey({ id: u.id, name: u.name, public_key: r.public_key, fingerprint: r.fingerprint }); ru(); }, "New key issued: re-run the installer on the unit")}>Rotate key</button>{" "}
+              <div className="scroll" role="region" aria-label="Units" tabIndex={0}><table className="rtable"><thead><tr><th>Name</th><th>Host</th><th>MAC</th><th>Key</th><th></th></tr></thead><tbody>{units?.map(u => <tr key={u.id}><td data-label="Name">{u.name}</td><td data-label="Host">{u.host}</td><td data-label="MAC">{u.mac ?? "—"}</td><td data-label="Key" title={u.fingerprint ?? ""}>{u.fingerprint?.slice(0, 18)}</td>
+                <td data-label="Actions" style={{ whiteSpace: "nowrap" }}><button className="btn" onClick={() => setEdit(u)}>Edit</button>{" "}<button className="btn" onClick={() => run(async () => { const r = await api<any>(`/units/${u.id}/rekey`, { method: "POST" }); setKey({ id: u.id, name: u.name, public_key: r.public_key, fingerprint: r.fingerprint }); ru(); }, "New key issued: re-run the installer on the unit")}>Rotate key</button>{" "}
                   <button className="btn dng" onClick={() => { if (confirm(`Remove ${u.name} and delete all its history? The agent on the unit is not touched (run /opt/ccagent/uninstall.sh there).`)) run(async () => { await api(`/units/${u.id}`, { method: "DELETE" }); ru(); }, "Unit removed"); }}>Remove</button></td></tr>)}</tbody></table></div>
               {key && <div style={{ marginTop: 12 }}><InstallPanel id={key.id} name={key.name} publicKey={key.public_key} fingerprint={key.fingerprint} /></div>}
             </div>
@@ -76,7 +76,7 @@ export default function Settings({ onSignOut }: { onSignOut: () => void }) {
               <div style={{ marginTop: 12 }}><button className="btn" onClick={() => run(async () => { if (pw.next !== pw.confirm) throw new Error("Passwords do not match"); await api("/auth/password", { method: "POST", body: { current: pw.current, next: pw.next } }); setPw({ current: "", next: "", confirm: "" }); }, "Password changed")}>Reset password</button></div>
             </div>
             <div className="acc-sub"><h3 className="acc-subtitle">Audit log</h3>
-              <div className="scroll" role="region" aria-label="Audit log" tabIndex={0}><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Unit</th><th>Detail</th></tr></thead><tbody>{audit?.map(a => <tr key={a.id}><td>{new Date(a.ts * 1000).toLocaleString()}</td><td>{a.actor}</td><td>{a.action}</td><td>{a.unit ?? ""}</td><td className="muted">{a.detail}</td></tr>)}</tbody></table></div>
+              <div className="scroll" role="region" aria-label="Audit log" tabIndex={0}><table className="rtable"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Unit</th><th>Detail</th></tr></thead><tbody>{audit?.map(a => <tr key={a.id}><td data-label="Time">{new Date(a.ts * 1000).toLocaleString()}</td><td data-label="Actor">{a.actor}</td><td data-label="Action">{a.action}</td><td data-label="Unit">{a.unit ?? ""}</td><td data-label="Detail" className="muted">{a.detail}</td></tr>)}</tbody></table></div>
             </div>
         </>
       ),

@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { decrypt } from "./crypto";
 import { ingestLines } from "./ingest";
+import { pushAllowlist } from "./services";
 import { SshPool, type Target } from "./ssh";
 
 export type UnitRow = { id: number; name: string; host: string; ssh_port: number; ssh_user: string; privkey_enc: string; sample_interval_s: number; enabled: number; host_fingerprint: string | null };
@@ -133,6 +134,12 @@ export class Scheduler {
       }
     }
     const added = await pollUnit(this.db, this.pool, u, this.master, now);
+    // If an allowlist edit was stored while the unit was offline, push it now that
+    // the unit is reachable. This heals desired-vs-applied drift without operator action.
+    if (this.db.query("SELECT 1 FROM unit_services WHERE unit_id=? AND synced=0 LIMIT 1").get(u.id)) {
+      await pushAllowlist({ db: this.db, pool: this.pool, master: this.master, now, pollInterval: this.getIntervalS(), authed: true },
+        u.id, true, (cmd, stdin) => this.pool.exec(u.id, targetOf(u as UnitRow, this.master), cmd, 40000, stdin));
+    }
     this.onSamples(u.id, added);
   }
 }

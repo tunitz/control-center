@@ -91,10 +91,10 @@ export function useLive<T>(path: string, everyMs = 15000) {
     shown.current = c === undefined ? null : JSON.stringify(c);
     setData(c ?? null);
   }
-  const load = useCallback(() => {
+  const load = useCallback((background = false) => {
     last.current = Date.now();
     const generation = ++loadGeneration.current;
-    api<T>(path).then(d => {
+    api<T>(path, { priority: background ? "low" : undefined }).then(d => {
       if (generation !== loadGeneration.current) return; // stale path/view response
       cache.set(path, d);
       schedulePersist();
@@ -105,12 +105,12 @@ export function useLive<T>(path: string, everyMs = 15000) {
   }, [path]);
   useEffect(() => {
     load();
-    const t = setInterval(load, everyMs);
+    const t = setInterval(() => load(true), everyMs);
     const off = subscribeSample(() => {
       const since = Date.now() - last.current;
       if (since < Math.max(2000, everyMs / 2)) return;
       if (document.visibilityState !== "visible") return;
-      load();
+      load(true);
     });
     return () => { clearInterval(t); off(); };
   }, [load, everyMs]);

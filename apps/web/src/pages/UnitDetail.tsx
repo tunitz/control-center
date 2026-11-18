@@ -6,7 +6,8 @@ import { Chart, type Series } from "../components/Chart";
 import EditUnit from "../components/EditUnit";
 import Services from "../components/Services";
 import { navigate } from "../route";
-import { useDismiss, useFocusTrap } from "../lib/useDismiss";
+import Modal from "../components/Modal";
+import ActionMenu from "../components/ActionMenu";
 import { DiskList } from "../components/DiskList";
 import { hasSeries, rateUnit } from "../lib/disks";
 
@@ -47,12 +48,8 @@ export default function UnitDetail({ id }: { id: number }) {
   const u = live ?? listed;
   const [editing, setEditing] = useState(false);
   const { data: m } = useLive<Metrics>(`/units/${id}/metrics?range=${range}`, range === "1h" ? 10000 : 60000);
-  const [menu, setMenu] = useState(false), [confirm, setConfirm] = useState<null | "shutdown" | "restart" | "remove">(null), [toast, setToast] = useState("");
-  useEffect(() => { setConfirm(null); setEditing(false); setMenu(false); }, [id]);
-  const menuRef = useRef<HTMLDivElement>(null), closeMenu = useCallback(() => setMenu(false), []);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDismiss(menu, menuRef, closeMenu);
-  useFocusTrap(!!confirm, dialogRef);
+  const [confirm, setConfirm] = useState<null | "shutdown" | "restart" | "remove">(null), [toast, setToast] = useState("");
+  useEffect(() => { setConfirm(null); setEditing(false); }, [id]);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 3500); return () => clearTimeout(t); } }, [toast]);
   const remove = async () => {
     try { await api(`/units/${id}`, { method: "DELETE" }); navigate("#/"); } catch (e: any) { setToast(e.message); setConfirm(null); }
@@ -65,7 +62,7 @@ export default function UnitDetail({ id }: { id: number }) {
     } catch (e: any) {
       setToast(e?.status === "delivery_unknown" ? `${action}: delivery unconfirmed` : e.message);
     }
-    setConfirm(null); setMenu(false);
+    setConfirm(null);
   };
   const s = u?.static, l = u?.latest;
   const needsMigration = u?.migration_pending_port != null;
@@ -79,9 +76,13 @@ export default function UnitDetail({ id }: { id: number }) {
   return (
     <>
       <div className="uhead"><a href="#/" className="btn" aria-label="Back">←</a><span className={"dot" + (u.online ? " on" : "")} /><div><h3 style={{ fontSize: 22 }}>{u.name}</h3><div className="host">{u.host} · {u.online ? "online" : "offline"}</div></div><div className="spacer" />
-        <div className="menu" ref={menuRef}><button className="btn pri" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>Power ▾</button>
-          {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => { setEditing(true); setMenu(false); }}>Edit IP / MAC</button><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => { setConfirm("restart"); setMenu(false); }}>Restart</button><button role="menuitem" className="dng" onClick={() => { setConfirm("shutdown"); setMenu(false); }}>Shut down</button><button role="menuitem" className="dng" onClick={() => { setConfirm("remove"); setMenu(false); }}>Remove unit</button></div>}
-        </div>
+        <ActionMenu label="Power" actions={[
+          { label: "Edit IP / MAC", onSelect: () => setEditing(true) },
+          { label: "Wake (WoL)", onSelect: () => act("wake") },
+          { label: "Restart", onSelect: () => setConfirm("restart") },
+          { label: "Shut down", onSelect: () => setConfirm("shutdown"), danger: true },
+          { label: "Remove unit", onSelect: () => setConfirm("remove"), danger: true },
+        ]} />
       </div>
       {needsMigration && <div className="err" role="alert" style={{ marginBottom: 14 }}>Agent SSH port migration required: reinstall the agent on this unit, then clear the pending port in Settings. It stays offline until verified.</div>}
       <div className="card specs" style={{ marginBottom: 14 }}>
@@ -110,15 +111,15 @@ export default function UnitDetail({ id }: { id: number }) {
         </div>}
       </section>}
       {u.online && <Services unitId={id} />}
-      {confirm && <div className="modal" role="alertdialog" aria-modal="true" aria-label={`Confirm ${confirm} ${u.name}`} onClick={() => setConfirm(null)}><div className="card" ref={dialogRef} onClick={e => e.stopPropagation()}>
+      {confirm && <Modal label={`Confirm ${confirm} ${u.name}`} onClose={() => setConfirm(null)}>
         {confirm === "remove" ? <>
           <h3 style={{ marginTop: 0 }}>Remove {u.name}?</h3><p className="muted">Deletes the unit and all of its history and energy data from the Control Center. This cannot be undone. The agent stays on the unit: run <code>sudo /opt/ccagent/uninstall.sh</code> there to remove it.</p>
-          <div style={{ display: "flex", gap: 8 }}><button className="btn dng" onClick={remove}>Remove unit</button><button className="btn" onClick={() => setConfirm(null)} autoFocus>Cancel</button></div>
+          <div style={{ display: "flex", gap: 8 }}><button className="btn dng" onClick={remove}>Remove unit</button><button className="btn" onClick={() => setConfirm(null)} data-safe>Cancel</button></div>
         </> : <>
           <h3 style={{ marginTop: 0 }}>{confirm === "shutdown" ? "Shut down" : "Restart"} {u.name}?</h3><p className="muted">This takes the unit offline{confirm === "shutdown" ? ". Use Wake (WoL) to bring it back." : " briefly."} The action is audit-logged.</p>
-          <div style={{ display: "flex", gap: 8 }}><button className="btn dng" onClick={() => act(confirm)}>{confirm === "shutdown" ? "Shut down" : "Restart"}</button><button className="btn" onClick={() => setConfirm(null)} autoFocus>Cancel</button></div>
+          <div style={{ display: "flex", gap: 8 }}><button className="btn dng" onClick={() => act(confirm)}>{confirm === "shutdown" ? "Shut down" : "Restart"}</button><button className="btn" onClick={() => setConfirm(null)} data-safe>Cancel</button></div>
         </>}
-      </div></div>}
+      </Modal>}
       {editing && <EditUnit unit={u} onClose={() => setEditing(false)} onSaved={() => { reload(); setToast("Saved"); }} />}
       {toast && <div className="toast" role="status">{toast}</div>}
     </>

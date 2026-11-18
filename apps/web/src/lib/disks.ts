@@ -1,6 +1,6 @@
 import type { Sample } from "../api";
 
-export type DiskMount = { mount: string; fs: string; total_mb: number; used_mb: number };
+export type DiskMount = { mount: string; fs: string; total_mb: number; used_mb: number; available_mb?: number };
 export type DiskSnapshot = { ts: number; mounts: DiskMount[] } | null;
 export type DiskTone = "ok" | "warn" | "err";
 
@@ -21,21 +21,22 @@ export function usageTone(pct: number): DiskTone {
 
 export const toneColor = (t: DiskTone): string => TONE_VAR[t];
 
-/** Free space in GB, never negative. */
+/** Space actually available to the user, never negative. `df` avail accounts for reserved blocks. */
 export function freeMb(m: DiskMount): number {
-  return Math.max(0, m.total_mb - m.used_mb);
+  return Math.max(0, m.available_mb ?? (m.total_mb - m.used_mb));
 }
 
-const gbText = (mb: number) => (mb / 1024).toFixed(1) + " GB";
+// Values are MiB (divided by 1024), so use the binary suffix rather than calling them GB.
+const gbText = (mb: number) => (mb / 1024).toFixed(1) + " GiB";
 
-/** "120.5 GB free of 500.0 GB" */
+/** "120.5 GiB available of 500.0 GiB" */
 export function freeLine(m: DiskMount): string {
-  return `${gbText(freeMb(m))} free of ${gbText(m.total_mb)}`;
+  return `${gbText(freeMb(m))} available of ${gbText(m.total_mb)}`;
 }
 
-/** Picks KB/s or MB/s for a rate chart from the highest value seen. */
+/** Picks KiB/s or MiB/s for a rate chart from the highest value seen. */
 export function rateUnit(peakKbs: number | null | undefined): { scale: number; unit: string } {
-  return peakKbs != null && peakKbs >= 1024 ? { scale: 1 / 1024, unit: " MB/s" } : { scale: 1, unit: " KB/s" };
+  return peakKbs != null && peakKbs >= 1024 ? { scale: 1 / 1024, unit: " MiB/s" } : { scale: 1, unit: " KiB/s" };
 }
 
 /** True when at least one sample in the range has a value for this key. */

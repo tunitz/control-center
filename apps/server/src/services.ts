@@ -36,6 +36,18 @@ const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { sta
 const isOnline = (u: any, d: ServiceDeps) => !!u.last_seen && d.now - u.last_seen < Math.max(30, d.pollInterval * 4);
 function parseAgent(out: string) { const x = JSON.parse(out); if (!x || typeof x !== "object" || typeof x.ok !== "boolean") throw new Error("invalid agent response"); if (!x.ok) throw new Error(JSON.stringify(x)); return x.data ?? {}; }
 function auditSvc(d: ServiceDeps, action: string, id: number, detail: string, ip: string) { audit(d.db, "admin", action.startsWith("svc.") ? action : auditAction(action, false), id, detail, ip); }
+const getDesired = (db: Database, id: number) => db.query("SELECT kind,name FROM unit_services WHERE unit_id=? ORDER BY kind,name").all(id) as ServiceItem[];
+const needsSync = (db: Database, id: number) => !!(db.query("SELECT 1 FROM unit_services WHERE unit_id=? AND synced=0 LIMIT 1").get(id));
+/** Push the stored allowlist to a unit and mark it synced only after the agent confirms. */
+export async function pushAllowlist(d: ServiceDeps, id: number, online: boolean, exec: (cmd: string, stdin?: string) => Promise<string>, override?: ServiceItem[]): Promise<{ ok: true } | { ok: false; error: string }> {
+  const items = override ?? getDesired(d.db, id);
+  if (!online) return { ok: false, error: "unit offline" };
+  try {
+    await exec(ALLOW_CMD, JSON.stringify({ items }));
+    d.db.query("UPDATE unit_services SET synced=1 WHERE unit_id=?").run(id);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: errorText(e) }; }
+}
 
 /** Handles only service-control routes; null means normal routing continues. */
 export async function handleServiceRoute(d: ServiceDeps, req: Request, url: URL, path: string, ip = ""): Promise<Response | null> {
@@ -47,8 +59,10 @@ export async function handleServiceRoute(d: ServiceDeps, req: Request, url: URL,
   const sub = root[2] ?? "", online = isOnline(u, d), target = () => targetOf(u as UnitRow, d.master);
   const exec = (cmd: string, stdin?: string) => d.pool.exec(id, target(), cmd, 40000, stdin); // svc-* can queue up to LOCK_WAIT(20s)+SVC_WAIT(8s); keep >= 40s
   if (sub === "" && req.method === "GET") {
-    if (!online) return json({ error: "unit offline" }, 409);
-    try { return json({ items: parseAgent(await exec(LIST_CMD)).items ?? [] }); } catch (e) { return json({ items: [], error: errorText(e) }); }
+    const unsynced = needsSync(d.db, id);
+    if (!online) return json({ error: "unit offline", needs_sync: unsynced }, 409);
+    try { return json({ items: parseAgent(await exec(LIST_CMD)).items ?? [], needs_sync: unsynced }); }
+    catch (e) { return json({ items: [], error: errorText(e), needs_sync: unsynced }); }
   }
   if (sub === "discover" && req.method === "GET") {
     if (!online) return json({ error: "unit offline" }, 409);
@@ -57,10 +71,20 @@ export async function handleServiceRoute(d: ServiceDeps, req: Request, url: URL,
   if (sub === "allow" && req.method === "GET") return json({ items: d.db.query("SELECT kind,name FROM unit_services WHERE unit_id=? ORDER BY kind,name").all(id) });
   if (sub === "allow" && req.method === "PUT") {
     const checked = validateItems(await req.json().catch(() => null)); if (!checked.ok) return json({ error: checked.error }, 400);
-    d.db.transaction(() => { d.db.query("DELETE FROM unit_services WHERE unit_id=?").run(id); const q=d.db.query("INSERT INTO unit_services(unit_id,kind,name) VALUES(?,?,?)"); for (const x of checked.items) q.run(id,x.kind,x.name); })();
-    if (!online) { auditSvc(d,"allow.failed",id,"unit offline",ip); return json({ error:"unit offline", items:checked.items },502); }
-    try { await exec(ALLOW_CMD,JSON.stringify({items:checked.items})); auditSvc(d,"allow",id,"",ip); return json({ok:true,items:checked.items}); }
-    catch(e) { const error=errorText(e); auditSvc(d,"allow.failed",id,error,ip); return json({error,items:checked.items},502); }
+    // Store as unsynced first; only mark synced after the agent applies it.
+    d.db.transaction(() => {
+      d.db.query("DELETE FROM unit_services WHERE unit_id=?").run(id);
+      const q=d.db.query("INSERT INTO unit_services(unit_id,kind,name,synced) VALUES(?,?,?,0)");
+      for (const x of checked.items) q.run(id,x.kind,x.name);
+    })();
+    const pushed = await pushAllowlist(d, id, online, exec, checked.items);
+    if (!pushed.ok) { auditSvc(d,"allow.failed",id,pushed.error,ip); return json({error:pushed.error,items:checked.items,needs_sync:true},502); }
+    auditSvc(d,"allow",id,"",ip); return json({ok:true,items:checked.items,needs_sync:false});
+  }
+  if (sub === "reconcile" && req.method === "POST") {
+    const pushed = await pushAllowlist(d, id, online, exec);
+    if (!pushed.ok) { auditSvc(d,"allow.failed",id,`reconcile: ${pushed.error}`,ip); return json({error:pushed.error,needs_sync:true},502); }
+    auditSvc(d,"allow.reconciled",id,"",ip); return json({ok:true,needs_sync:false});
   }
   const m = /^(\w+)\/([^/]+)\/(\w+)$/.exec(sub);
   if (m) {
@@ -81,6 +105,6 @@ export async function handleServiceRoute(d: ServiceDeps, req: Request, url: URL,
     return json({error:"method not allowed"},405);
   }
   if(sub===""&&req.method!=="GET")return json({error:"method not allowed"},405);
-  if(sub==="discover"||sub==="allow")return json({error:"method not allowed"},405);
+  if(sub==="discover"||sub==="allow"||sub==="reconcile")return json({error:"method not allowed"},405);
   return null;
 }
