@@ -9,7 +9,9 @@ bun install && bun run build:web
 CC_MASTER_KEY=<long random> CC_ADMIN_PASSWORD=<pw> CC_PUBLIC_URL=http://<this-host>:3030 bun run start
 ```
 Or `docker compose up -d --build` with `CC_MASTER_KEY` and `CC_PUBLIC_URL` in `.env`. If `CC_ADMIN_PASSWORD` is unset, open the dashboard and set the admin password on first run. Once set, change it in Settings > Security.
-`CC_MASTER_KEY` encrypts the per-unit SSH private keys at rest. Back it up: losing it means re-keying every unit.
+`CC_MASTER_KEY` encrypts the per-unit SSH private keys at rest. Back it up: losing it means re-keying every unit. It is required outside local development (`CC_DEV_KEY=1`).
+
+**First run:** when no `CC_ADMIN_PASSWORD` is seeded, set `CC_BOOTSTRAP_TOKEN` (min 8 chars) and enter it in the setup form along with the new admin password. Loopback setup is allowed only with `CC_DEV_KEY=1`. Changing the admin password revokes all existing sessions.
 
 | Env | Default | Meaning |
 |---|---|---|
@@ -58,14 +60,16 @@ Unit page > Power menu > **Remove unit** (or Settings > Units > Remove). This de
 Handoff: the poller runs `read` (the gate renames the log to `metrics.<ns>.reading` and prints it), ingests (dedupe on unit+ts), then `ack <file>` deletes it and anything older. A crash before ack means a re-read next cycle: no loss, no duplicates. The agent caps the log at 5 MB if nobody reads it.
 
 ## Data and cost
-Raw samples are kept 48 h, 1-minute rollups 30 d, 15-minute rollups 90 d (the retention setting clamps to 90). Energy comes from the RAPL counter delta, falling back to integrating watts; gaps over 3x the interval are never interpolated. Cost = current-month kWh (Asia/Manila month) x that month's rate. Editing the rate only writes the current month; `PUT /api/rates/<past month>` is rejected, and a new month copies the previous rate.
+Raw samples are kept 48 h, 1-minute rollups 30 d, 15-minute rollups 90 d (the retention setting clamps to 90). Energy comes from the RAPL counter delta, falling back to integrating watts; gaps over 3x the interval are never interpolated. Each interval is stored in `energy_intervals` and recomputed when a late sample arrives, so replays cannot double-count. Cost is an **estimate of CPU + GPU energy** (not wall power) for the current month (Asia/Manila month) x that month's rate. Billing intervals are retained for 400 days regardless of the telemetry retention setting. Editing the rate only writes the current month; `PUT /api/rates/<past month>` is rejected, and a new month copies the previous rate.
+
+Live power and the dashboard total only count units with a recent sample from a reachable, verified unit; stale samples read as unknown. On first contact a unit's SSH host key is pinned and checked on later connections.
 GPU power is read from hwmon (AMD) or nvidia-smi. CPU power needs Intel/AMD RAPL; units without it show "n/a".
 
 ## API (cookie session; writes need header `x-cc: 1`)
 - `GET /api/auth/status` → `{setupNeeded, authed}` (public); `POST /api/auth/setup {password}` (first run only), `POST /api/auth/login {password}`, `POST /api/auth/logout`, `POST /api/auth/password {current,next}`
-- `GET /api/units`, `POST /api/units {name,host,mac?}` -> `{id,public_key,fingerprint}`; `GET /api/units/:id/installer` (per-unit script); `GET|PATCH|DELETE /api/units/:id`; `POST /api/units/:id/rekey` -> `{public_key,fingerprint}`
+- `GET /api/units`, `POST /api/units {name,host,mac?}` -> `{id,public_id,public_key,fingerprint}`; `GET /api/units/:id/installer` (per-unit script); `GET|PATCH|DELETE /api/units/:id`; `POST /api/units/:id/rekey` -> `{public_key,fingerprint}`
 - `GET /api/units/:id/metrics?range=1h|6h|12h|24h|7d|30d` -> `{tier,points[],summary{min,avg,max},energy_wh}`
-- `POST /api/units/:id/power {action: shutdown|restart|wake, confirm:true}`
+- `POST /api/units/:id/power {action: shutdown|restart|wake, confirm:true}` -> `{ok,status:"accepted"}`; a lost link returns 502 with `status:"delivery_unknown"`
 - `GET /api/cost`, `GET /api/rates`, `PUT /api/rates/:YYYY-MM` (current month only)
 - `GET|PUT /api/settings`, `GET /api/audit`, `GET /api/events` (SSE)
 

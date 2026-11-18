@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { openDb, getSetting, setSetting, audit } from "./db";
-import { ensureAdmin, setupNeeded, setupAdmin, checkPassword, changePassword, createSession, validSession, destroySession, makeLimiter, sessionCookie, clearSessionCookie } from "./auth";
+import { ensureAdmin, setupNeeded, setupAdmin, authorizedSetup, setBootstrapHash, clearBootstrap, checkPassword, changePassword, createSession, validSession, destroySession, makeLimiter, sessionCookie, clearSessionCookie } from "./auth";
 import { monthCost, setCurrentRate, monthKey, getRate } from "./cost";
 import { queryMetrics, RANGES, type Range } from "./metrics";
 import { rollup, purge } from "./rollup";
@@ -17,9 +18,14 @@ import { latestDisks } from "./disks";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
-const master = process.env.CC_MASTER_KEY ?? (() => { console.warn("CC_MASTER_KEY not set: using a dev key"); return "dev-master-key-change-me"; })();
+const devMode = process.env.NODE_ENV !== "production" && process.env.CC_DEV_KEY === "1";
+const master = process.env.CC_MASTER_KEY ?? (devMode ? "dev-master-key-change-me" : (() => { throw new Error("CC_MASTER_KEY is required outside local development"); })());
 const db = openDb(join(DATA, "cc.db"));
 await ensureAdmin(db, process.env.CC_ADMIN_PASSWORD);
+if (setupNeeded(db) && process.env.CC_BOOTSTRAP_TOKEN) {
+  try { await setBootstrapHash(db, process.env.CC_BOOTSTRAP_TOKEN); }
+  catch (e: any) { throw new Error(`invalid CC_BOOTSTRAP_TOKEN: ${e?.message ?? e}`); }
+}
 
 const now = () => Math.floor(Date.now() / 1000);
 const pool = new SshPool();
@@ -60,17 +66,21 @@ const server = Bun.serve({
       // Returns auth state too so boot takes a single round-trip.
       if (path === "/api/auth/status" && req.method === "GET") {
         const pending = setupNeeded(db);
-        return json({ setupNeeded: pending, authed: !pending && validSession(db, cookieOf(req), now()) });
+        return json({ setupNeeded: pending, needsBootstrapToken: pending && !devMode, localSetup: pending && devMode, authed: !pending && validSession(db, cookieOf(req), now()) });
       }
       if (path === "/api/auth/setup" && req.method === "POST") {
         if (!setupNeeded(db)) return json({ error: "password already set" }, 409);
         if (!setupLimit(ip, now())) return json({ error: "too many attempts" }, 429);
         if (req.headers.get("x-cc") !== "1") return json({ error: "csrf" }, 403);
         const body = await req.json().catch(() => ({}));
+        const loopback = ["127.0.0.1", "::1"].includes(ip);
+        if (!(await authorizedSetup(db, String(body.bootstrap_token ?? ""), loopback, devMode)))
+          return json({ error: "valid bootstrap token required" }, 403);
         try { await setupAdmin(db, String(body.password ?? "")); }
         catch (e: any) { return json({ error: String(e?.message ?? e) }, 400); }
+        clearBootstrap(db); // one-time token
         const id = createSession(db, now()); audit(db, "anon", "auth.setup", null, "", ip);
-        return json({ ok: true }, 200, { "set-cookie": sessionCookie(id) });
+        return json({ ok: true }, 200, { "set-cookie": sessionCookie(id, url.protocol === "https:") });
       }
       if (path === "/api/auth/login" && req.method === "POST") {
         if (setupNeeded(db)) return json({ error: "setup required" }, 409);
@@ -78,7 +88,7 @@ const server = Bun.serve({
         const body = await req.json().catch(() => ({}));
         if (!(await checkPassword(db, String(body.password ?? "")))) { audit(db, "anon", "login.failed", null, "", ip); return json({ error: "invalid password" }, 401); }
         const id = createSession(db, now()); audit(db, "admin", "login", null, "", ip);
-        return json({ ok: true }, 200, { "set-cookie": sessionCookie(id) });
+        return json({ ok: true }, 200, { "set-cookie": sessionCookie(id, url.protocol === "https:") });
       }
       if (path.startsWith("/api/")) {
         if (!validSession(db, cookieOf(req), now())) return json({ error: "unauthorized" }, 401);
@@ -112,8 +122,9 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     const b = await req.json();
     if (!b.name || !b.host) return json({ error: "name and host required" }, 400);
     const k = generateUnitKey(`cc-${b.name}`);
-    const r = db.query("INSERT INTO units(name,host,ssh_port,pubkey,privkey_enc,fingerprint,mac,broadcast,sample_interval_s,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
-      .run(String(b.name), String(b.host), Number(b.ssh_port ?? 62478), k.publicKey, encrypt(master, k.privateKey), k.fingerprint, b.mac || null, b.broadcast || "255.255.255.255", Number(b.sample_interval_s ?? getSetting(db, "sample_interval_s", "5")), now());
+    const publicId = randomUUID();
+    const r = db.query("INSERT INTO units(public_id,name,host,ssh_port,pubkey,privkey_enc,fingerprint,mac,broadcast,sample_interval_s,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+      .run(publicId, String(b.name), String(b.host), Number(b.ssh_port ?? 62478), k.publicKey, encrypt(master, k.privateKey), k.fingerprint, b.mac || null, b.broadcast || "255.255.255.255", Number(b.sample_interval_s ?? getSetting(db, "sample_interval_s", "5")), now());
     const id = Number(r.lastInsertRowid);
     audit(db, "admin", "unit.added", id, String(b.name), ip);
     return json({ id, public_key: k.publicKey, fingerprint: k.fingerprint }, 201);
@@ -139,7 +150,7 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
       const script = installScript({ pubkey: u.pubkey, from: process.env.CC_PUBLIC_IP, interval: u.sample_interval_s, sshPort });
       const sudo = url.searchParams.get("sudo") !== "0";
       if (url.searchParams.get("format") === "curl")
-        return new Response(curlCommand({ sudo,  repo: process.env.CC_AGENT_REPO ?? "tunitz/ccagent", tag: process.env.CC_AGENT_TAG ?? "latest", pubkey: u.pubkey, sshPort }), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
+        return new Response(curlCommand({ sudo,  repo: process.env.CC_AGENT_REPO ?? "tunitz/ccagent", tag: process.env.CC_AGENT_TAG ?? "latest", pubkey: u.pubkey, sshPort, interval: u.sample_interval_s }), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
       if (url.searchParams.get("format") === "paste")
         return new Response(pasteCommand(script, sudo), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
       return new Response(script, { headers: { "content-type": "text/x-shellscript", "content-disposition": `attachment; filename="install-ccagent-${u.name.replace(/[^\w.-]/g, "_")}.sh"` } });
@@ -163,10 +174,13 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
         if (c.gate) await pool.exec(id, targetOf(u as UnitRow, master), c.gate);
         else { if (!u.mac) return json({ error: "no MAC configured for this unit" }, 400); await sendWol(u.mac, u.broadcast); }
       } catch (e: any) {
-        // the link may drop as the unit goes down: that still counts as delivered
-        if (!(c.gate && /exit null|closed|ECONNRESET|socket|Unable to exec/i.test(String(e?.message)))) { const aid = audit(db, "admin", `power.${c.verb}.failed`, id, String(e?.message), ip); return json({ error: String(e?.message), audit_id: aid }, 502); }
+        const msg = String(e?.message ?? e);
+        const maybeDelivered = c.gate && /exit null|closed|ECONNRESET|socket|Unable to exec/i.test(msg);
+        const aid = audit(db, "admin", `power.${c.verb}${maybeDelivered ? ".unknown" : ".failed"}`, id, msg, ip);
+        if (!maybeDelivered) return json({ error: msg, audit_id: aid }, 502);
+        return json({ ok: false, status: "delivery_unknown", error: msg, audit_id: aid }, 502);
       }
-      const aid = audit(db, "admin", `power.${c.verb}`, id, "", ip); return json({ ok: true, audit_id: aid });
+      const aid = audit(db, "admin", `power.${c.verb}`, id, "", ip); return json({ ok: true, status: "accepted", delivery: c.gate ? "sent" : "broadcast", audit_id: aid });
     }
   }
   if (path === "/api/cost" && m === "GET") return json(monthCost(db, now()));
@@ -183,9 +197,10 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     if (b.poll_interval_s != null) setSetting(db, "poll_interval_s", String(Math.min(3600, Math.max(1, Number(b.poll_interval_s)))));
     if (b.sample_interval_s != null) setSetting(db, "sample_interval_s", String(Math.min(3600, Math.max(1, Number(b.sample_interval_s)))));
     if (b.retention_days != null) setSetting(db, "retention_days", String(Math.min(90, Math.max(1, Number(b.retention_days)))));
+    sched.refreshInterval();
     audit(db, "admin", "settings.updated", null, JSON.stringify(b), ip); return json({ ok: true });
   }
-  if (path === "/api/audit" && m === "GET") return json(db.query("SELECT a.*, u.name unit FROM audit a LEFT JOIN units u ON u.id=a.unit_id ORDER BY a.id DESC LIMIT ?").all(Math.min(500, Number(url.searchParams.get("limit") ?? 100))));
+  if (path === "/api/audit" && m === "GET") return json(db.query("SELECT a.*, COALESCE(a.unit_name,u.name) unit FROM audit a LEFT JOIN units u ON u.id=a.unit_id ORDER BY a.id DESC LIMIT ?").all(Math.min(500, Number(url.searchParams.get("limit") ?? 100))));
   if (path === "/api/events") {
     let ctl: ReadableStreamDefaultController<Uint8Array>;
     const stream = new ReadableStream<Uint8Array>({

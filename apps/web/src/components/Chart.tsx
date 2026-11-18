@@ -14,8 +14,22 @@ function resolveColor(c: string): string {
   return c;
 }
 
-function toData(points: Sample[], series: Series[]): uPlot.AlignedData {
-  return [points.map(p => p.ts as number), ...series.map(s => points.map(p => (p[s.key] == null ? null : (p[s.key] as number) * (s.scale ?? 1))))];
+/** Split series at real time gaps so an outage is not drawn as a continuous line. */
+function toData(points: Sample[], series: Series[], maxGapS = 600): uPlot.AlignedData {
+  const ts: number[] = [];
+  const values = series.map(() => [] as (number | null)[]);
+  for (let i = 0; i < points.length; i++) {
+    if (i > 0 && (points[i].ts as number) - (points[i - 1].ts as number) > maxGapS) {
+      ts.push((points[i - 1].ts as number) + 1);
+      series.forEach((_, j) => values[j].push(null));
+    }
+    ts.push(points[i].ts as number);
+    series.forEach((s, j) => {
+      const v = points[i][s.key];
+      values[j].push(v == null ? null : (v as number) * (s.scale ?? 1));
+    });
+  }
+  return [ts, ...values];
 }
 
 export function Chart({ points, series, unit, syncKey, max }: { points: Sample[]; series: Series[]; unit: string; syncKey: string; max?: number }) {
@@ -54,7 +68,8 @@ export function Chart({ points, series, unit, syncKey, max }: { points: Sample[]
           return g;
         },
       }))],
-    }, toData(p0, s0), el);
+    }, toData(p0, s0, s0[0]?.key === "cpu_mhz" ? 60 : 3600), el);
+
     plotRef.current = plot;
     const ro = new ResizeObserver(() => plot.setSize({ width: w(), height: 190 }));
     ro.observe(el);
@@ -63,8 +78,13 @@ export function Chart({ points, series, unit, syncKey, max }: { points: Sample[]
 
   // data updates on poll: push into the existing plot, no destroy/recreate
   useEffect(() => {
-    plotRef.current?.setData(toData(points, latest.current.series));
+    plotRef.current?.setData(toData(points, latest.current.series, series[0]?.key === "cpu_mhz" ? 60 : 3600));
   }, [points]);
 
-  return <div ref={ref} className="chart" role="img" aria-label={series.map(s => s.label).join(", ") + " chart"} />;
+  const summary = series.map(s => {
+    const vals = points.map(p => p[s.key]).filter((v): v is number => v != null);
+    if (!vals.length) return `${s.label}: no data`;
+    return `${s.label}: min ${Math.min(...vals).toFixed(1)}, max ${Math.max(...vals).toFixed(1)}, ${vals.length} points`;
+  }).join("; ");
+  return <div ref={ref} className="chart" role="img" aria-label={`${series.map(s => s.label).join(", ")} chart. ${summary}`} />;
 }

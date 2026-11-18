@@ -9,7 +9,9 @@ bun install && bun run build:web
 CC_MASTER_KEY=<long random> CC_ADMIN_PASSWORD=<pw> CC_PUBLIC_URL=http://<this-host>:3030 bun run start
 ```
 Or `docker compose up -d --build` with `CC_MASTER_KEY` and `CC_PUBLIC_URL` in `.env`. If `CC_ADMIN_PASSWORD` is unset, open the dashboard and set the admin password on first run. Once set, change it in Settings > Security.
-`CC_MASTER_KEY` encrypts the per-unit SSH private keys at rest. Back it up: losing it means re-keying every unit.
+`CC_MASTER_KEY` encrypts the per-unit SSH private keys at rest. Back it up: losing it means re-keying every unit. It is required outside local development.
+
+For first-run setup without `CC_ADMIN_PASSWORD`, set `CC_BOOTSTRAP_TOKEN` and enter it in the setup form. Only a loopback request in local development (`CC_DEV_KEY=1`) may skip it.
 
 | Env | Default | Meaning |
 |---|---|---|
@@ -58,7 +60,7 @@ Unit page > Power menu > **Remove unit** (or Settings > Units > Remove). This de
 Handoff: the poller runs `read` (the gate renames the log to `metrics.<ns>.reading` and prints it), ingests (dedupe on unit+ts), then `ack <file>` deletes it and anything older. A crash before ack means a re-read next cycle: no loss, no duplicates. The agent caps the log at 5 MB if nobody reads it.
 
 ## Data and cost
-Raw samples are kept 48 h, 1-minute rollups 30 d, 15-minute rollups 90 d (the retention setting clamps to 90). Energy comes from the RAPL counter delta, falling back to integrating watts; gaps over 3x the interval are never interpolated. Cost = current-month kWh (Asia/Manila month) x that month's rate. Editing the rate only writes the current month; `PUT /api/rates/<past month>` is rejected, and a new month copies the previous rate.
+Raw samples are kept 48 h, 1-minute rollups 30 d, 15-minute rollups 90 d (the retention setting clamps to 90). Energy comes from the RAPL counter delta, falling back to integrating watts; gaps over 3x the interval are never interpolated. Per-interval energy is recomputed on late samples; billing intervals are kept 400 days independently of telemetry retention. Cost is an estimated CPU + GPU figure for the current month (Asia/Manila month) x that month's rate. Editing the rate only writes the current month; `PUT /api/rates/<past month>` is rejected, and a new month copies the previous rate. Live power needs a fresh sample and a verified host key.
 GPU power is read from hwmon (AMD) or nvidia-smi. CPU power needs Intel/AMD RAPL; units without it show "n/a".
 
 ## API (cookie session; writes need header `x-cc: 1`)

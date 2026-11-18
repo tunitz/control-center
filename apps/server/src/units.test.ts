@@ -1,8 +1,17 @@
 import { test, expect } from "bun:test";
-import { openDb } from "./db";
+import { openDb, audit } from "./db";
 import { ingestLines } from "./ingest";
 import { rollup } from "./rollup";
 import { deleteUnit } from "./units";
+
+test("audit rows keep the deleted unit's name instead of misattributing to a later unit", () => {
+  const db = openDb(":memory:");
+  db.query("INSERT INTO units(id,name,host,pubkey,privkey_enc,created_at) VALUES(1,'Original','h','pk','sk',0)").run();
+  audit(db, "admin", "unit.updated", 1, "x");
+  deleteUnit(db, 1);
+  db.query("INSERT INTO units(id,name,host,pubkey,privkey_enc,created_at) VALUES(1,'Replacement','h','pk','sk',0)").run();
+  expect(db.query("SELECT COALESCE(a.unit_name,u.name) unit FROM audit a LEFT JOIN units u ON u.id=a.unit_id").get()).toEqual({ unit: "Original" });
+});
 
 test("deleteUnit removes the unit and ALL its data, leaves other units alone, returns false if missing", () => {
   const db = openDb(":memory:");

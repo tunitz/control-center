@@ -2,16 +2,16 @@ import { useState } from "react";
 import { api } from "../api";
 
 /** One auth form for both states: first-run setup (no hash yet) and normal login. */
-export default function Login({ onDone, mode = "login" }: { onDone: () => void; mode?: "login" | "setup" }) {
+export default function Login({ onDone, mode = "login", needsToken = false }: { onDone: () => void; mode?: "login" | "setup"; needsToken?: boolean }) {
   const setup = mode === "setup";
-  const [pw, setPw] = useState(""), [confirm, setConfirm] = useState(""), [err, setErr] = useState(""), [busy, setBusy] = useState(false);
+  const [pw, setPw] = useState(""), [confirm, setConfirm] = useState(""), [token, setToken] = useState(""), [err, setErr] = useState(""), [busy, setBusy] = useState(false);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr("");
     if (setup && pw !== confirm) { setErr("Passwords do not match"); return; }
     setBusy(true);
     try {
-      await api(setup ? "/auth/setup" : "/auth/login", { method: "POST", body: { password: pw } });
+      await api(setup ? "/auth/setup" : "/auth/login", { method: "POST", body: setup ? { password: pw, bootstrap_token: token } : { password: pw } });
       onDone();
     } catch (x: any) { setErr(x.message); setBusy(false); }
   };
@@ -23,6 +23,7 @@ export default function Login({ onDone, mode = "login" }: { onDone: () => void; 
       {setup && <>
         <label htmlFor="cf">Confirm password</label>
         <input id="cf" type="password" autoComplete="new-password" minLength={8} value={confirm} onChange={e => setConfirm(e.target.value)} />
+        {needsToken && <><label htmlFor="bt">Bootstrap token</label><input id="bt" type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} required /></>}
       </>}
       {err && <div className="err" role="alert">{err}</div>}
       <button className="btn pri" disabled={busy}>{setup ? "Set password" : "Sign in"}</button>

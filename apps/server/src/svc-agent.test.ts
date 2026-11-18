@@ -15,7 +15,7 @@ const GATE = join(AGENT, "ccagent-gate");
 const HELPER = join(AGENT, "ccagent-svc");
 const PATHENV = "/usr/bin:/bin";
 
-let dir: string, bin: string, calls: string, allow: string, unitFile: string, conf: string, req: string;
+let dir: string, bin: string, calls: string, allow: string, unitFile: string, conf: string, req: string, resultsDir: string;
 
 const fakeCmd = (name: string, body: string) => {
   const p = join(bin, name);
@@ -36,11 +36,15 @@ const helperEnv = () => ({
   CCAGENT_DOCKER: join(bin, "docker"),
   CCAGENT_PCT: join(bin, "pct"),
   CCAGENT_JOURNALCTL: join(bin, "journalctl"),
+  CCAGENT_DOCKER_LOGS: "1",
   CCAGENT_LOGINCTL: join(bin, "loginctl"),
   CCAGENT_RUNUSER: join(bin, "runuser"),
   CCAGENT_RUNDIR: join(dir, "run"),
+  RESULTS_DIR: resultsDir,
 });
-const gateEnv = (cmd: string) => ({ PATH: PATHENV, CCAGENT_CONF: conf, CCAGENT_SVC_WAIT: "3", SSH_ORIGINAL_COMMAND: cmd });
+
+const gateEnv = (cmd: string) => ({ PATH: PATHENV, CCAGENT_CONF: conf, CCAGENT_SVC_WAIT: "3", CCAGENT_RESULTS: resultsDir, SSH_ORIGINAL_COMMAND: cmd });
+
 
 /** Gate alone, synchronously: for inputs the gate must reject before queueing, or for the timeout/missing cases. */
 const gateSync = (cmd: string, stdin?: Buffer) =>
@@ -62,7 +66,7 @@ const helperRun = (header: Record<string, unknown>, body = "", ageS = 0) => {
   Bun.spawnSync(["python3", HELPER], { env: helperEnv() });
 };
 const result = (id: string) => {
-  const f = join(dir, `svc.result.${id.padEnd(32, "0")}`);
+  const f = join(resultsDir, `svc.result.${id.padEnd(32, "0")}`);
   return existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null;
 };
 const SYSTEMCTL_LIST = [
@@ -99,6 +103,7 @@ beforeEach(() => {
   bin = join(dir, "bin"); mkdirSync(bin);
   calls = join(dir, "calls.log"); allow = join(dir, "services.json"); unitFile = join(dir, "ccagent-svc.path");
   conf = join(dir, "conf"); req = join(dir, "svc.request");
+  resultsDir = join(dir, "results"); mkdirSync(resultsDir, { recursive: true });
   writeFileSync(conf, `DIR=${dir}\nSVC_UNIT=${unitFile}\n`);
   writeFileSync(unitFile, "");
   // `systemctl --user ...` (run through runuser) reads per-uid unit fixtures: user-units-<uid>.
@@ -280,7 +285,7 @@ test("gate round trip: svc-act on an allowlisted systemd unit runs exactly syste
   expect(JSON.parse(r.out)).toMatchObject({ ok: true });
   expect(callLog()).toContain("systemctl restart -- nginx.service");
   expect(existsSync(req)).toBe(false);
-  expect(readdirSync(dir).filter(f => f.startsWith("svc.result."))).toEqual([]); // gate deletes the result it printed
+  expect(readdirSync(resultsDir).filter(f => f.startsWith("svc.result."))).toEqual([]); // gate deletes the result it printed
 });
 
 test("svc-act maps docker and lxc actions to the right binaries (lxc restart = reboot, stop = shutdown)", async () => {
@@ -419,40 +424,39 @@ test("svc-logs refuses a non-allowlisted unit (exit 3, denied) and never calls t
   expect(callLog()).toBe("");
 });
 
-// The helper runs as root and writes the result file; the gate (ccagent) must be able to read and delete it,
-// so the result must be chowned to the state dir's owner before it is renamed into place.
-test("helper chowns the result to the state dir's uid/gid, mode 0600, before the rename", () => {
+// The helper runs as root. Its result must be created with O_EXCL in a root-owned
+// directory and renamed into place without chowning anything in agent-writable space.
+test("helper publishes the result with O_EXCL and an atomic rename, mode 0600", () => {
   const id = "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1";
   writeFileSync(req, JSON.stringify({ ts: Math.floor(Date.now() / 1000), id, verb: "bogus" }) + "\n");
   const probe = `
 import importlib.util, json, os, sys
 events = []
 real_replace = os.replace
-os.chown = lambda p, u, g: events.append(["chown", p, u, g])
 def rep(a, b):
-    events.append(["replace", a, b]); return real_replace(a, b)
+    events.append(["replace", a, b, b]); return real_replace(a, b)
 os.replace = rep
+real_open = os.open
+def op(path, flags, mode=0o777, *a, **k):
+    events.append(["open", path, flags & os.O_EXCL != 0]); return real_open(path, flags, mode, *a, **k)
+os.open = op
 import importlib.machinery
 loader = importlib.machinery.SourceFileLoader("svc", sys.argv[1])
 spec = importlib.util.spec_from_loader("svc", loader)
 m = importlib.util.module_from_spec(spec); loader.exec_module(m)
 m.main()
-st = os.stat(os.environ["CCAGENT_DIR"])
-print(json.dumps({"events": events, "uid": st.st_uid, "gid": st.st_gid}))
+print(json.dumps({"events": events}))
 `;
   const p = Bun.spawnSync(["python3", "-c", probe, HELPER], { env: helperEnv() });
   expect(p.exitCode).toBe(0);
-  const { events, uid, gid } = JSON.parse(p.stdout.toString());
-  const tmp = join(dir, `svc.result.${id}.tmp`);
-  const final = join(dir, `svc.result.${id}`);
-  const chown = events.findIndex((e: any[]) => e[0] === "chown");
-  const replace = events.findIndex((e: any[]) => e[0] === "replace");
-  expect(chown).toBeGreaterThanOrEqual(0);
-  expect(events[chown]).toEqual(["chown", tmp, uid, gid]);
-  expect(events[replace]).toEqual(["replace", tmp, final]);
-  expect(chown).toBeLessThan(replace);
+  const { events } = JSON.parse(p.stdout.toString());
+  const opened = events.find((e: any[]) => e[0] === "open" && e[1].includes("svc.result."));
+  const replace = events.find((e: any[]) => e[0] === "replace");
+  expect(opened[2]).toBe(true);
+  expect(replace[1]).toMatch(new RegExp(`svc.result.${id}.tmp-`));
+  expect(replace[2]).toBe(join(resultsDir, `svc.result.${id}`));
   expect(result(id)).toMatchObject({ ok: false, code: "denied" });
-  expect(statSync(final).mode & 0o777).toBe(0o600);
+  expect(statSync(replace[2]).mode & 0o777).toBe(0o600);
 });
 
 // ---------- log text: ANSI stripping and keyword level upgrade (systemd + lxc journal lines) ----------
@@ -522,7 +526,7 @@ while :; do
     id=$(head -n1 "${req}" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p')
     sleep ${delayS}
     rm -f "${req}"
-    printf '{"ok":true,"data":{"items":[]}}' > "${dir}/svc.result.$id"
+    printf '{"ok":true,"data":{"items":[]}}' > "${resultsDir}/svc.result.$id"
   fi
   sleep 0.02
 done

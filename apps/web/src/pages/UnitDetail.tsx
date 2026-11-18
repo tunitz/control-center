@@ -6,7 +6,7 @@ import { Chart, type Series } from "../components/Chart";
 import EditUnit from "../components/EditUnit";
 import Services from "../components/Services";
 import { navigate } from "../route";
-import { useDismiss } from "../lib/useDismiss";
+import { useDismiss, useFocusTrap } from "../lib/useDismiss";
 import { DiskList } from "../components/DiskList";
 import { hasSeries, rateUnit } from "../lib/disks";
 
@@ -48,17 +48,27 @@ export default function UnitDetail({ id }: { id: number }) {
   const [editing, setEditing] = useState(false);
   const { data: m } = useLive<Metrics>(`/units/${id}/metrics?range=${range}`, range === "1h" ? 10000 : 60000);
   const [menu, setMenu] = useState(false), [confirm, setConfirm] = useState<null | "shutdown" | "restart" | "remove">(null), [toast, setToast] = useState("");
+  useEffect(() => { setConfirm(null); setEditing(false); setMenu(false); }, [id]);
   const menuRef = useRef<HTMLDivElement>(null), closeMenu = useCallback(() => setMenu(false), []);
+  const dialogRef = useRef<HTMLDivElement>(null);
   useDismiss(menu, menuRef, closeMenu);
+  useFocusTrap(!!confirm, dialogRef);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 3500); return () => clearTimeout(t); } }, [toast]);
   const remove = async () => {
     try { await api(`/units/${id}`, { method: "DELETE" }); navigate("#/"); } catch (e: any) { setToast(e.message); setConfirm(null); }
   };
   const act = async (action: string) => {
-    try { await api(`/units/${id}/power`, { method: "POST", body: { action, confirm: action !== "wake" } }); setToast(action === "wake" ? "Wake packet sent" : `${action} sent`); } catch (e: any) { setToast(e.message); }
+    try {
+      const r = await api<{ status?: string; delivery?: string }>(`/units/${id}/power`, { method: "POST", body: { action, confirm: action !== "wake" } });
+      const verb = action === "wake" ? "Wake packet" : action;
+      setToast(r.status === "accepted" ? `${verb} ${r.delivery === "broadcast" ? "broadcast" : "sent"}` : `${verb}: delivery unconfirmed`);
+    } catch (e: any) {
+      setToast(e?.status === "delivery_unknown" ? `${action}: delivery unconfirmed` : e.message);
+    }
     setConfirm(null); setMenu(false);
   };
   const s = u?.static, l = u?.latest;
+  const needsMigration = u?.migration_pending_port != null;
   const energy = useMemo(() => (m ? m.energy_wh : null), [m]);
   if (!u) return (
     <>
@@ -73,14 +83,15 @@ export default function UnitDetail({ id }: { id: number }) {
           {menu && <div className="card pop" role="menu"><button role="menuitem" onClick={() => { setEditing(true); setMenu(false); }}>Edit IP / MAC</button><button role="menuitem" onClick={() => act("wake")}>Wake (WoL)</button><button role="menuitem" onClick={() => { setConfirm("restart"); setMenu(false); }}>Restart</button><button role="menuitem" className="dng" onClick={() => { setConfirm("shutdown"); setMenu(false); }}>Shut down</button><button role="menuitem" className="dng" onClick={() => { setConfirm("remove"); setMenu(false); }}>Remove unit</button></div>}
         </div>
       </div>
+      {needsMigration && <div className="err" role="alert" style={{ marginBottom: 14 }}>Agent SSH port migration required: reinstall the agent on this unit, then clear the pending port in Settings. It stays offline until verified.</div>}
       <div className="card specs" style={{ marginBottom: 14 }}>
         <div><div className="k">CPU</div><div className="v">{s?.cpu_model ?? "—"}</div><div className="k">{s ? `${s.cores}C/${s.threads}T · ${s.base_mhz ?? "?"}–${s.boost_mhz ?? "?"} MHz · now ${fmt(l?.cpu_mhz, 0, " MHz")}` : ""}</div></div>
         <div><div className="k">GPU</div><div className="v">{s?.gpu_model ?? "none detected"}</div><div className="k">{s?.vram_total_mb ? `VRAM ${gb(l?.vram_used_mb)} / ${gb(s.vram_total_mb)}` : ""}</div></div>
         <div><div className="k">Memory</div><div className="v">{s ? `${gb(l?.ram_used_mb)} / ${gb(s.ram_total_mb)}` : "—"}</div><div className="k">cached {gb(l?.ram_cached_mb)} · swap {gb(l?.swap_used_mb)}{s ? ` / ${gb(s.swap_total_mb)}` : ""}</div></div>
         <div><div className="k">Energy this range</div><div className="v">{energy == null ? "—" : energy >= 1000 ? (energy / 1000).toFixed(3) + " kWh" : energy.toFixed(2) + " Wh"}</div><div className="k">Month {u.month ? `${u.month.kwh.toFixed(3)} kWh · ₱${u.month.php.toFixed(2)}` : ""}</div></div>
       </div>
-      <div className="sticky"><div className="chips" role="tablist" aria-label="Time range">{RANGES.map(r => <button key={r} role="tab" aria-selected={r === range} className={"chip" + (r === range ? " on" : "")} onClick={() => setRange(r)}>{r}</button>)}</div></div>
-      <div className="charts">{m && <>
+      <div className="sticky"><div className="chips" role="group" aria-label="Time range">{RANGES.map(r => <button key={r} aria-pressed={r === range} className={"chip" + (r === range ? " on" : "")} onClick={() => setRange(r)}>{r}</button>)}</div></div>
+      <div className="charts">{!m && <div className="card muted" role="status">Loading history. If this persists, check the unit connection.</div>}{m && <>
         <Block title="CPU usage" m={m} keys={["cpu_pct"]} series={S.cpu} unit="%" max={100} />
         <Block title="CPU clock" m={m} keys={["cpu_mhz"]} series={S.clk} unit="" />
         <Block title="GPU usage" m={m} keys={["gpu_pct"]} series={S.gpu} unit="%" max={100} />
@@ -99,7 +110,7 @@ export default function UnitDetail({ id }: { id: number }) {
         </div>}
       </section>}
       {u.online && <Services unitId={id} />}
-      {confirm && <div className="modal" role="alertdialog" aria-modal="true" onClick={() => setConfirm(null)}><div className="card" onClick={e => e.stopPropagation()}>
+      {confirm && <div className="modal" role="alertdialog" aria-modal="true" aria-label={`Confirm ${confirm} ${u.name}`} onClick={() => setConfirm(null)}><div className="card" ref={dialogRef} onClick={e => e.stopPropagation()}>
         {confirm === "remove" ? <>
           <h3 style={{ marginTop: 0 }}>Remove {u.name}?</h3><p className="muted">Deletes the unit and all of its history and energy data from the Control Center. This cannot be undone. The agent stays on the unit: run <code>sudo /opt/ccagent/uninstall.sh</code> there to remove it.</p>
           <div style={{ display: "flex", gap: 8 }}><button className="btn dng" onClick={remove}>Remove unit</button><button className="btn" onClick={() => setConfirm(null)} autoFocus>Cancel</button></div>

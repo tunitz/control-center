@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { METRICS } from "./db";
+import { sumEnergy } from "./energy";
 
 export const RANGES = { "1h": 3600, "6h": 6 * 3600, "12h": 12 * 3600, "24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400 } as const;
 export type Range = keyof typeof RANGES;
@@ -26,11 +27,17 @@ export function queryMetrics(db: Database, unitId: number, range: Range, now: nu
     });
   } else {
     const t = tier === "1m" ? "samples_1m" : "samples_15m";
-    const cols = METRICS.flatMap(m => [`${m}_avg`, `${m}_min`, `${m}_max`]).join(",");
+    const cols = METRICS.flatMap(m => [`${m}_avg`, `${m}_min`, `${m}_max`, `${m}_count`]).join(",");
     const rows = db.query(`SELECT ts, n, ${cols} FROM ${t} WHERE unit_id=? AND ts>=? AND ts<=? ORDER BY ts`).all(unitId, from, now) as any[];
     points = rows.map(r => {
       const p: Record<string, number | null> = { ts: r.ts };
-      for (const m of METRICS) { p[m] = r[m + "_avg"]; p[m + "_min"] = r[m + "_min"]; p[m + "_max"] = r[m + "_max"]; feed(m, r[m + "_min"], r[m + "_avg"], r[m + "_max"], r.n); }
+      for (const m of METRICS) {
+        p[m] = r[m + "_avg"]; p[m + "_min"] = r[m + "_min"]; p[m + "_max"] = r[m + "_max"];
+        // The rollup stores per-metric valid counts, so a sparse sensor does not
+        // get weighted by every row in the bucket.
+        const weight = Number((r as any)[m + "_count"] ?? r.n);
+        feed(m, r[m + "_min"], r[m + "_avg"], r[m + "_max"] ?? r[m + "_avg"], weight);
+      }
       return p;
     });
   }
@@ -38,8 +45,6 @@ export function queryMetrics(db: Database, unitId: number, range: Range, now: nu
     const a = acc[m];
     summary[m] = a && a.n ? { min: a.mn, avg: a.sum / a.n, max: a.mx } : { min: null, avg: null, max: null };
   }
-  const energy_wh = tier === "raw"
-    ? ((db.query("SELECT COALESCE(SUM(e_wh),0) s FROM samples_raw WHERE unit_id=? AND ts>=? AND ts<=?").get(unitId, from, now) as any).s as number)
-    : ((db.query("SELECT COALESCE(SUM(wh),0) s FROM energy_hourly WHERE unit_id=? AND hour_ts>=?").get(unitId, Math.ceil(from / 3600) * 3600) as any).s as number);
+  const energy_wh = sumEnergy(db, unitId, from, now + 1);
   return { range, tier, from, to: now, points, summary, energy_wh };
 }

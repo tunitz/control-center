@@ -34,6 +34,33 @@ test("an existing chat table and its rows survive openDb (nothing is dropped)", 
   db.close();
 });
 
+test("legacy sessions survive the auth_version migration", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "ccsession-")), "cc.db");
+  const old = new Database(path, { create: true });
+  old.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY, expires_at INTEGER); INSERT INTO sessions VALUES('s1',9999999999)");
+  old.close();
+  const db = openDb(path);
+  expect(db.query("SELECT id,auth_version FROM sessions").get()).toEqual({ id: "s1", auth_version: 0 });
+  db.close();
+});
+
+test("a legacy database preserves hourly energy while gaining the interval ledger", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "ccenergy-")), "cc.db");
+  const old = new Database(path, { create: true });
+  old.exec(`
+    CREATE TABLE samples_raw (unit_id INTEGER, ts INTEGER, cpu_w REAL, PRIMARY KEY(unit_id,ts));
+    CREATE TABLE energy_hourly (unit_id INTEGER, hour_ts INTEGER, wh REAL, PRIMARY KEY(unit_id,hour_ts));
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, expires_at INTEGER);
+    INSERT INTO samples_raw VALUES(1,100,60),(1,105,60);
+    INSERT INTO energy_hourly VALUES(1,0,0.0833333);
+  `);
+  old.close();
+  const db = openDb(path);
+  expect((db.query("SELECT wh FROM energy_hourly WHERE unit_id=1").get() as any).wh).toBeCloseTo(0.0833333, 6);
+  expect((db.query("SELECT wh FROM energy_intervals WHERE unit_id=1 AND end_ts=105").get() as any).wh).toBeCloseTo(0.0833333, 6);
+  db.close();
+});
+
 test("a fresh units table defaults ssh_port to 62478", () => {
   const db = openDb(":memory:");
   db.query("INSERT INTO units(name,host,pubkey,privkey_enc,created_at) VALUES('u','h','p','k',0)").run();
@@ -41,7 +68,7 @@ test("a fresh units table defaults ssh_port to 62478", () => {
   db.close();
 });
 
-test("SSH port migration runs once: only 22 becomes 62478, custom ports survive, no re-apply", () => {
+test("legacy port-22 units are flagged for verified migration, not silently switched", () => {
   const path = join(mkdtempSync(join(tmpdir(), "ccmig-")), "cc.db");
   const legacy = new Database(path, { create: true });
   legacy.exec("CREATE TABLE units (id INTEGER PRIMARY KEY, ssh_port INTEGER NOT NULL DEFAULT 22)");
@@ -50,7 +77,9 @@ test("SSH port migration runs once: only 22 becomes 62478, custom ports survive,
 
   const db = openDb(path);
   const rows = () => db.query("SELECT id,ssh_port FROM units ORDER BY id").all() as { id: number; ssh_port: number }[];
-  expect(rows()).toEqual([{ id: 1, ssh_port: 62478 }, { id: 2, ssh_port: 2222 }, { id: 3, ssh_port: 62478 }]);
+  // Legacy units keep port 22 but are flagged for an explicit, verified migration.
+  expect(rows()).toEqual([{ id: 1, ssh_port: 22 }, { id: 2, ssh_port: 2222 }, { id: 3, ssh_port: 22 }]);
+  expect(db.query("SELECT migration_pending_port p FROM units WHERE id=1").get()).toEqual({ p: 22 });
   expect(getSetting(db, "ssh_port_62478_migrated", "0")).toBe("1");
 
   // A deliberate later change back to 22 must not be migrated again on the next open.

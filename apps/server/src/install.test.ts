@@ -75,6 +75,14 @@ test("curl command is short, pinned to a tag, and passes the key as an argument"
   expect(() => curlCommand({ repo: "a/b", tag: "v1", pubkey: "x'; rm -rf / #" })).toThrow();
 });
 
+test("curl command propagates the configured sampling interval and accepts OpenSSH comments", () => {
+  const c = curlCommand({ repo: "a/b", tag: "latest", pubkey: "ssh-ed25519 AAAA cc-Lab Node@localhost", interval: 30, sshPort: 62478 });
+  expect(c).toContain("' 30 62478");
+  expect(c.trimEnd()).toMatch(/ 30 62478$/);
+  expect(c).toContain("cc-Lab Node@localhost");
+  expect(() => curlCommand({ repo: "a/b", tag: "latest", pubkey: pub, interval: 0 })).toThrow(/interval/);
+});
+
 test("curl command has a no-sudo variant for root shells (Proxmox has no sudo)", async () => {
   const { curlCommand } = await import("./install");
   const c = curlCommand({ repo: "a/b", tag: "latest", pubkey: pub, sudo: false });
@@ -152,6 +160,11 @@ test("SSH port defaults to 62478, is baked in and recorded in /etc/ccagent.conf"
   expect(s).not.toContain("port 22)");
   expect(s).toContain("port $PORT)");
 });
+test("invalid sampling intervals and source IPs are rejected before rendering a script", () => {
+  for (const bad of [0, -1, 1.5, 3601]) expect(() => installScript({ pubkey: pub, interval: bad })).toThrow(/interval/);
+  expect(() => installScript({ pubkey: pub, interval: 5, from: "1.2.3.4; rm -rf /" })).toThrow(/source IP/);
+});
+
 test("optional sshPort propagates into installScript; invalid ports are rejected", () => {
   const s = installScript({ pubkey: pub, interval: 5, sshPort: 63000 });
   expect(s).toContain("SSH_PORT=63000");

@@ -27,14 +27,18 @@ export function pasteCommand(script: string, sudo = true) {
  * and the unit's public key is passed as an argument. tag "latest" follows the newest release.
  * An optional sshPort is passed as $3 (with the default interval as $2); omitting it keeps the legacy command byte-for-byte.
  */
-export function curlCommand(o: { repo: string; tag: string; pubkey: string; sudo?: boolean; sshPort?: number }) {
+export function curlCommand(o: { repo: string; tag: string; pubkey: string; sudo?: boolean; sshPort?: number; interval?: number }) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(o.repo)) throw new Error("invalid repo");
   if (!/^[\w.-]+$/.test(o.tag)) throw new Error("invalid tag");
-  if (!/^ssh-ed25519 [A-Za-z0-9+/=]+( [\w.@-]+)?$/.test(o.pubkey)) throw new Error("invalid public key");
+  // Any printable OpenSSH comment is valid; the key blob itself is base64 and the whole
+  // value is single-quoted, so no shell metacharacter can escape.
+  if (!/^ssh-ed25519 [A-Za-z0-9+/=]+( [^\n']*)?$/.test(o.pubkey)) throw new Error("invalid public key");
   const base = o.tag === "latest" ? "releases/latest/download" : `releases/download/${o.tag}`;
+  const interval = o.interval ?? 5;
+  if (!Number.isInteger(interval) || interval < 1 || interval > 3600) throw new Error("invalid interval");
   // $1 is the key, $2 the interval, $3 the dedicated SSH port.
-  const portArg = o.sshPort === undefined ? "" : ` 5 ${validateSshPort(o.sshPort)}`;
-  return `curl -fsSL https://github.com/${o.repo}/${base}/install-ccagent.sh | ${o.sudo === false ? "" : "sudo "}bash -s -- '${o.pubkey}'${portArg}`;
+  const args = o.sshPort === undefined ? "" : ` ${interval} ${validateSshPort(o.sshPort)}`;
+  return `curl -fsSL https://github.com/${o.repo}/${base}/install-ccagent.sh | ${o.sudo === false ? "" : "sudo "}bash -s -- '${o.pubkey}'${args}`;
 }
 
 /**
@@ -43,8 +47,10 @@ export function curlCommand(o: { repo: string; tag: string; pubkey: string; sudo
  * Control Center SSH uses a dedicated sshd on a non-standard port; the system sshd on 22 is never touched.
  */
 export function installScript(opts: { pubkey?: string; from?: string; interval: number; sshPort?: number }) {
+  if (!Number.isInteger(opts.interval) || opts.interval < 1 || opts.interval > 3600) throw new Error("invalid sampling interval");
   const sshPort = opts.sshPort === undefined ? DEFAULT_SSH_PORT : validateSshPort(opts.sshPort);
   // raw (quoted heredoc) embedding compresses far better inside the gzip'd one-liner than base64 does
+  if (opts.from && !/^[\d.]+$/.test(opts.from)) throw new Error("invalid source IP");
   const fromOpt = opts.from ? `,from=\\"${opts.from}\\"` : "";
   const keyLine = opts.pubkey
     ? `PUBKEY=${JSON.stringify(opts.pubkey)}
@@ -141,7 +147,10 @@ ${slim(agentFile("ccagent-svc"))}EOF_ccagent_svc
 cat > /opt/ccagent/uninstall.sh <<'EOF_uninstall_sh'
 ${slim(agentFile("uninstall.sh"))}EOF_uninstall_sh
 chmod 755 /opt/ccagent/ccagent.sh /opt/ccagent/ccagent-gate /opt/ccagent/ccagent-power /opt/ccagent/ccagent-svc /opt/ccagent/uninstall.sh
-printf 'INTERVAL=%s\\nDIR=/var/lib/ccagent\\nSVC_UNIT=/etc/systemd/system/ccagent-svc.path\\nSSH_PORT=%s\\n' "$INTERVAL" "$PORT" > /etc/ccagent.conf
+printf 'INTERVAL=%s\\nDIR=/var/lib/ccagent\\nSVC_UNIT=/etc/systemd/system/ccagent-svc.path\\nRESULTS_DIR=/run/ccagent\\nSSH_PORT=%s\\n' "$INTERVAL" "$PORT" > /etc/ccagent.conf
+# Root-owned results directory. The gate user may read named results but cannot write here.
+install -d -o root -g root -m 0750 /run/ccagent
+install -d -o root -g root -m 0750 /etc/tmpfiles.d
 printf '%s\\n' "command=\\"/opt/ccagent/ccagent-gate\\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding${fromOpt} $PUBKEY" > /var/lib/ccagent/.ssh/authorized_keys
 chmod 700 /var/lib/ccagent/.ssh; chmod 600 /var/lib/ccagent/.ssh/authorized_keys
 chown -R ccagent:ccagent /var/lib/ccagent
@@ -181,8 +190,7 @@ Type=oneshot
 ExecStart=/opt/ccagent/ccagent-svc
 UNIT
 if command -v systemd-tmpfiles >/dev/null; then
-  mkdir -p /etc/tmpfiles.d
-  printf 'z /sys/class/powercap/*/energy_uj 0444 - - -\\n' > /etc/tmpfiles.d/ccagent-rapl.conf
+  printf 'd /run/ccagent 0750 root root -\\nz /sys/class/powercap/*/energy_uj 0444 - - -\\n' > /etc/tmpfiles.d/ccagent-rapl.conf
   systemd-tmpfiles --create /etc/tmpfiles.d/ccagent-rapl.conf 2>/dev/null || true
 fi
 cat > /etc/systemd/system/ccagent.service <<UNIT

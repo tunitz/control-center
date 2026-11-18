@@ -2,9 +2,9 @@ import { test, expect } from "bun:test";
 import { unitView } from "./unitview";
 
 const NOW = 1_000_000;
-const base = { id: 1, name: "u", host: "h", ssh_port: 62478, mac: null, broadcast: null, enabled: 1, last_seen: NOW - 5, last_error: null, fingerprint: null, sample_interval_s: 5 };
+const base = { id: 1, name: "u", host: "h", ssh_port: 62478, mac: null, broadcast: null, enabled: 1, last_seen: NOW - 5, last_error: null, fingerprint: null, host_fingerprint: null, sample_interval_s: 5 };
 const view = (u: any, latest: Record<string, number | null> | null, pollInterval = 5) =>
-  unitView(u, { now: NOW, pollInterval, latest: () => latest, staticJson: () => null });
+  unitView({ last_sample_ts: NOW - 2, ...u }, { now: NOW, pollInterval, latest: () => latest, staticJson: () => null });
 
 test("online+enabled unit: live_w = cpu_w + gpu_w", () => {
   const v = view(base, { cpu_w: 40, gpu_w: 60 });
@@ -45,6 +45,12 @@ test("disabled unit: live_w null even when online", () => {
   const v = view({ ...base, enabled: 0 }, { cpu_w: 40, gpu_w: 60 });
   expect(v.online).toBe(true);
   expect(v.enabled).toBe(false);
+  expect(v.live_w).toBeNull();
+});
+
+test("a reachable unit with a stale sample reports no live power", () => {
+  const v = view({ last_sample_ts: NOW - 3600 }, { cpu_w: 100 }, 5);
+  expect(v.sample_fresh).toBe(false);
   expect(v.live_w).toBeNull();
 });
 

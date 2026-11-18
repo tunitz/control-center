@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 const TZ_OFFSET_S = 8 * 3600; // Asia/Manila, no DST
+const BILLING_KEEP_S = 400 * 86400;
 
 export function monthKey(ts: number): string {
   const d = new Date((ts + TZ_OFFSET_S) * 1000);
@@ -31,8 +32,8 @@ export function monthCost(db: Database, now: number) {
   const month = monthKey(now);
   const rate = getRate(db, month, now);
   const rows = db.query(
-    `SELECT u.id, u.name, COALESCE(SUM(e.wh),0) wh FROM units u LEFT JOIN energy_hourly e ON e.unit_id=u.id AND e.hour_ts>=? WHERE u.enabled=1 GROUP BY u.id ORDER BY u.id`
-  ).all(monthStart(month)) as { id: number; name: string; wh: number }[];
+    `SELECT u.id, u.name, COALESCE(SUM(e.wh),0) wh FROM units u LEFT JOIN energy_intervals e ON e.unit_id=u.id AND e.end_ts>=? AND e.end_ts<? AND e.end_ts>=? WHERE u.enabled=1 GROUP BY u.id ORDER BY u.id`
+  ).all(monthStart(month), now + 1, now - BILLING_KEEP_S) as { id: number; name: string; wh: number }[];
   const units = rows.map(r => ({ id: r.id, name: r.name, kwh: r.wh / 1000, php: (r.wh / 1000) * rate }));
   return { month, rate, total_kwh: units.reduce((a, u) => a + u.kwh, 0), total_php: units.reduce((a, u) => a + u.php, 0), units };
 }

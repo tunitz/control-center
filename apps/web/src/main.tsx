@@ -31,27 +31,33 @@ const writeAuthed = (on: boolean) => { try { if (on) localStorage.setItem(AUTH_K
 function App() {
   const [authed, setAuthed] = useState<boolean | null>(readAuthed);
   const [setupNeeded, setSetupNeeded] = useState(false);
+  const [needsToken, setNeedsToken] = useState(false);
   const hash = useHash();
   useEffect(() => {
-    api<{ setupNeeded: boolean; authed: boolean }>("/auth/status")
-      .then(s => { setSetupNeeded(s.setupNeeded); writeAuthed(s.authed); setAuthed(s.authed); if (!s.authed) clearCache(); })
+    api<{ setupNeeded: boolean; needsBootstrapToken?: boolean; authed: boolean }>("/auth/status")
+      .then(s => { setSetupNeeded(s.setupNeeded); setNeedsToken(!!s.needsBootstrapToken); writeAuthed(s.authed); setAuthed(s.authed); if (!s.authed) clearCache(); })
       .catch(() => { writeAuthed(false); clearCache(); setAuthed(false); });
   }, []);
   const done = () => { writeAuthed(true); setSetupNeeded(false); setAuthed(true); };
   if (authed === null) return null;
-  if (setupNeeded) return <Login mode="setup" onDone={done} />;
+  if (setupNeeded) return <Login mode="setup" needsToken={needsToken} onDone={done} />;
   if (!authed) return <Login onDone={done} />;
   const unit = /^#\/unit\/(\d+)/.exec(hash), settings = hash.startsWith("#/settings");
   const signOut = async () => { await api("/auth/logout", { method: "POST" }); clearCache(); writeAuthed(false); setAuthed(false); };
+  useEffect(() => {
+    const path = unit ? `Unit ${unit[1]}` : settings ? "Settings" : "Dashboard";
+    document.title = `${path} · Control Center`;
+  }, [hash]);
   return (
     <div className="app">
+      <a className="skip" href="#main">Skip to content</a>
       <header className="top">
         <div className="brand"><img className="logo" src="/favicon.svg" alt="" width="26" height="26" />Control Center</div>
-        <nav className="tabs"><a href="#/" className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
+        <nav className="tabs" aria-label="Main"><a href="#/" aria-current={!settings ? "page" : undefined} className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" aria-current={settings ? "page" : undefined} className={settings ? "on" : ""}>Settings</a></nav>
         <div className="spacer" />
       </header>
-      <main>{unit ? <UnitDetail id={Number(unit[1])} /> : settings ? <Settings onSignOut={signOut} /> : <Dashboard />}</main>
-      <nav className="tabbar"><a href="#/" className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" className={settings ? "on" : ""}>Settings</a></nav>
+      <main id="main">{unit ? <UnitDetail id={Number(unit[1])} /> : settings ? <Settings onSignOut={signOut} /> : <Dashboard />}</main>
+      <nav className="tabbar" aria-label="Main"><a href="#/" aria-current={!settings ? "page" : undefined} className={!settings ? "on" : ""}>Dashboard</a><a href="#/settings" aria-current={settings ? "page" : undefined} className={settings ? "on" : ""}>Settings</a></nav>
     </div>
   );
 }

@@ -13,6 +13,16 @@ export function decrypt(master: string, blob: string): string {
   d.setAuthTag(b.subarray(12, 28));
   return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString("utf8");
 }
+/** Parse an OpenSSH known_hosts line into ssh2's allowed host fingerprint format. */
+export function hostFingerprintFromKnownHosts(line: string): string | null {
+  const raw = line.trim();
+  if (!raw || raw.startsWith("#")) return null;
+  const fields = raw.split(/\s+/);
+  const keyBlob = fields.find(f => /^[A-Za-z0-9+/=]+$/.test(f) && f.length > 8);
+  if (!keyBlob) return null;
+  const digest = createHash("sha256").update(Buffer.from(keyBlob, "base64")).digest("base64").replace(/=+$/, "");
+  return `SHA256:${digest}`;
+}
 /** ssh2's ed25519 generator emits a key its own parser rejects roughly 1 time in 250, so retry until it loads. */
 export function generateUnitKey(comment: string) {
   for (let attempt = 0; attempt < 20; attempt++) {

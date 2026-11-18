@@ -14,6 +14,7 @@ pkill -f /opt/ccagent/ccagent.sh 2>/dev/null || true
 systemctl disable --now ccagent-power.path 2>/dev/null || true
 systemctl disable --now ccagent-svc.path 2>/dev/null || true
 rm -f /etc/systemd/system/ccagent-sshd.service /etc/ssh/ccagent_sshd_config /etc/systemd/system/ccagent-power.path /etc/systemd/system/ccagent-power.service /etc/systemd/system/ccagent-svc.path /etc/systemd/system/ccagent-svc.service /etc/systemd/system/ccagent.service /etc/sudoers.d/ccagent /etc/tmpfiles.d/ccagent-rapl.conf /etc/ccagent.conf
+rm -rf /run/ccagent
 rm -rf /etc/ccagent
 # Remove only rules we can positively identify as ours; leave the system sshd/port 22 alone.
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then

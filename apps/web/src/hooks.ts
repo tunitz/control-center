@@ -81,9 +81,11 @@ export function useLive<T>(path: string, everyMs = 15000) {
   // JSON of what is currently shown by this instance (not the shared cache, which other instances may have advanced)
   const shown = useRef<string | null>(init === undefined ? null : JSON.stringify(init));
   const last = useRef(0);
+  const loadGeneration = useRef(0);
   // path changed (e.g. range switch): show that path's cached value, never the previous path's
   const [seen, setSeen] = useState(path);
   if (seen !== path) {
+    loadGeneration.current++;
     setSeen(path);
     const c = cache.get(path) as T | undefined;
     shown.current = c === undefined ? null : JSON.stringify(c);
@@ -91,18 +93,25 @@ export function useLive<T>(path: string, everyMs = 15000) {
   }
   const load = useCallback(() => {
     last.current = Date.now();
+    const generation = ++loadGeneration.current;
     api<T>(path).then(d => {
+      if (generation !== loadGeneration.current) return; // stale path/view response
       cache.set(path, d);
       schedulePersist();
       const s = JSON.stringify(d);
       if (s !== shown.current) { shown.current = s; setData(d); }
       setErr("");
-    }).catch(e => setErr(e.message));
+    }).catch(e => { if (generation === loadGeneration.current) setErr(e.message); });
   }, [path]);
   useEffect(() => {
     load();
     const t = setInterval(load, everyMs);
-    const off = subscribeSample(() => { if (Date.now() - last.current > 2000) load(); });
+    const off = subscribeSample(() => {
+      const since = Date.now() - last.current;
+      if (since < Math.max(2000, everyMs / 2)) return;
+      if (document.visibilityState !== "visible") return;
+      load();
+    });
     return () => { clearInterval(t); off(); };
   }, [load, everyMs]);
   return { data, err, reload: load };

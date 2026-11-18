@@ -7,7 +7,10 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new ApiError(r.status, j.error ?? r.statusText);
+  if (r.status === 401 && typeof window !== "undefined") {
+    try { localStorage.removeItem("cc:authed"); } catch { /* ignore */ }
+  }
+  if (!r.ok) { const e = new ApiError(r.status, j.error ?? r.statusText); Object.assign(e, j); throw e; }
   return j as T;
 }
 export type ServiceKind = "systemd" | "user" | "docker" | "lxc";
@@ -16,8 +19,8 @@ export type ServiceRef = { kind: ServiceKind; name: string };
 export type ServiceLogLine = { ts: number; level: "error" | "warn" | "info" | "debug"; msg: string };
 export type Sample = Record<string, number | null>;
 export type Unit = {
-  id: number; name: string; host: string; ssh_port?: number; mac: string | null; broadcast: string | null; enabled: boolean; online: boolean; last_seen: number | null; last_error: string | null;
-  fingerprint: string | null; sample_interval_s: number; latest: Sample | null; live_w: number | null; ram_pct: number | null; vram_pct: number | null;
+  id: number; name: string; host: string; ssh_port?: number; mac: string | null; broadcast: string | null; enabled: boolean; online: boolean; sample_fresh?: boolean; last_sample_ts?: number | null; last_seen: number | null; last_error: string | null;
+  fingerprint: string | null; host_fingerprint?: string | null; migration_pending_port?: number | null; sample_interval_s: number; latest: Sample | null; live_w: number | null; ram_pct: number | null; vram_pct: number | null;
   static: null | { cpu_model: string; cores: number; threads: number; base_mhz: number | null; boost_mhz: number | null; gpu_model: string | null; vram_total_mb: number | null; ram_total_mb: number; swap_total_mb: number };
   month?: { kwh: number; php: number };
   disks?: DiskSnapshot;

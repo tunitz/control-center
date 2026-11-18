@@ -1,7 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { METRICS } from "./db";
 import { storeDisks } from "./disks";
+import { replaceEnergy } from "./energy";
 
+/** Energy for one interval in watt-hours; gaps and clock jumps contribute nothing. */
 export function computeEnergy(o: { dt: number; cpuW: number | null; gpuW: number | null; dCpuUj: number | null; dGpuUj: number | null; interval: number }): number {
   if (o.dt <= 0 || o.dt > o.interval * 3) return 0; // gap or clock jump: never interpolate
   const part = (dUj: number | null, w: number | null) => dUj != null && dUj >= 0 ? dUj / 1e6 : w != null ? w * o.dt : 0;
@@ -21,25 +23,28 @@ export function ingestLines(db: Database, unitId: number, lines: string[], inter
   parsed.sort((a, b) => (a.ts as number) - (b.ts as number));
   const cols = ["unit_id", "ts", ...METRICS, "cpu_uj", "gpu_uj", "e_wh"];
   const ins = db.query(`INSERT OR IGNORE INTO samples_raw(${cols.join(",")}) VALUES(${cols.map(() => "?").join(",")})`);
-  const prevQ = db.query("SELECT ts, cpu_uj, gpu_uj FROM samples_raw WHERE unit_id=? AND ts<? ORDER BY ts DESC LIMIT 1");
-  const hour = db.query("INSERT INTO energy_hourly(unit_id,hour_ts,wh) VALUES(?,?,?) ON CONFLICT(unit_id,hour_ts) DO UPDATE SET wh=wh+excluded.wh");
+  const updateSample = db.query("UPDATE units SET last_sample_ts=MAX(COALESCE(last_sample_ts,0),?) WHERE id=?");
   let added = 0;
   db.transaction(() => {
     for (const o of parsed) {
-      if (Array.isArray(o.disks)) storeDisks(db, unitId, o.ts as number, o.disks);
       const ts = o.ts as number;
-      const prev = prevQ.get(unitId, ts) as { ts: number; cpu_uj: number | null; gpu_uj: number | null } | null;
-      const cpuUj = num(o.cpu_uj), gpuUj = num(o.gpu_uj);
-      const e = prev ? computeEnergy({
-        dt: ts - prev.ts, cpuW: num(o.cpu_w), gpuW: num(o.gpu_w),
-        dCpuUj: cpuUj != null && prev.cpu_uj != null ? cpuUj - prev.cpu_uj : null,
-        dGpuUj: gpuUj != null && prev.gpu_uj != null ? gpuUj - prev.gpu_uj : null, interval,
-      }) : 0;
-      const r = ins.run(unitId, ts, ...METRICS.map(m => num(o[m])), cpuUj, gpuUj, e);
-      if (r.changes > 0) {
-        added++;
-        if (e > 0) hour.run(unitId, Math.floor(ts / 3600) * 3600, e);
-      }
+      if (Array.isArray(o.disks)) storeDisks(db, unitId, ts, o.disks);
+      const r = ins.run(unitId, ts, ...METRICS.map(m => num(o[m])), num(o.cpu_uj), num(o.gpu_uj), 0);
+      if (r.changes === 0) continue;
+      added++;
+      updateSample.run(ts, unitId);
+      // Backdated data invalidates its buckets. Delete them and rewind the watermark so
+      // the next rollup pass rebuilds from before the late sample.
+      const m1 = Math.floor(ts / 60) * 60, m15 = Math.floor(ts / 900) * 900;
+      db.query("DELETE FROM samples_1m WHERE unit_id=? AND ts>=?").run(unitId, m1);
+      db.query("DELETE FROM samples_15m WHERE unit_id=? AND ts>=?").run(unitId, m15);
+      db.query("UPDATE settings SET value=? WHERE key='wm_1m' AND CAST(value AS INTEGER)>?").run(String(m1), m1);
+      db.query("UPDATE settings SET value=? WHERE key='wm_15m' AND CAST(value AS INTEGER)>?").run(String(m15), m15);
+      // Recompute the interval ending here and the following one: this sample may have
+      // arrived late, changing both predecessor deltas. Idempotent via PRIMARY KEY.
+      replaceEnergy(db, unitId, ts, interval);
+      const next = db.query("SELECT ts FROM samples_raw WHERE unit_id=? AND ts>? ORDER BY ts LIMIT 1").get(unitId, ts) as { ts: number } | null;
+      if (next) replaceEnergy(db, unitId, next.ts, interval);
     }
   })();
   return added;

@@ -10,7 +10,7 @@ const unit = (db: ReturnType<typeof openDb>) => {
 const never = <T,>() => new Promise<T>(() => {});
 const fakePool = (exec: () => Promise<string>) => {
   const drops: number[] = [];
-  return { drops, pool: { exec, drop: (id: number) => { drops.push(id); } } as any };
+  return { drops, pool: { exec, drop: (id: number) => { drops.push(id); }, hostKey: () => undefined } as any };
 };
 const err = (db: ReturnType<typeof openDb>) => (db.query("SELECT last_error FROM units WHERE id=1").get() as any).last_error as string | null;
 
