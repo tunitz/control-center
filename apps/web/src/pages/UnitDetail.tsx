@@ -55,7 +55,7 @@ export default function UnitDetail({ id }: { id: number }) {
     try { await api(`/units/${id}`, { method: "DELETE" }); navigate("#/"); } catch (e: any) { setToast(e.message); setConfirm(null); }
   };
   const act = async (action: string) => {
-    try { await api(`/units/${id}/power`, { method: "POST", body: { action, confirm: action !== "wake" } }); setToast(`${action} sent`); } catch (e: any) { setToast(e.message); }
+    try { await api(`/units/${id}/power`, { method: "POST", body: { action, confirm: action !== "wake" } }); setToast(action === "wake" ? "Wake packet sent" : `${action} sent`); } catch (e: any) { setToast(e.message); }
     setConfirm(null); setMenu(false);
   };
   const s = u?.static, l = u?.latest;
