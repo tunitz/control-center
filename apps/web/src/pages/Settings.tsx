@@ -20,7 +20,7 @@ export default function Settings({ onSignOut }: { onSignOut: () => void }) {
   const { data: rates, reload: rr } = useLive<{ month: string; php_per_kwh: number }[]>("/rates", 60000);
   const { data: units, reload: ru } = useLive<Unit[]>("/units", 20000);
   const { data: audit } = useLive<any[]>("/audit?limit=30", 15000);
-  const DEFAULT_SETTINGS = { poll_interval_s: 5, sample_interval_s: 5, retention_days: 90 };
+  const DEFAULT_SETTINGS = { poll_interval_s: 5, sample_interval_s: 5, retention_days: 90, cost_include_wall: false };
   const [s, setS] = useState<typeof DEFAULT_SETTINGS>(() => cached<typeof DEFAULT_SETTINGS>("/settings") ?? DEFAULT_SETTINGS), [rate, setRate] = useState(""), [msg, setMsg] = useState(""), [pw, setPw] = useState({ current: "", next: "", confirm: "" }), [edit, setEdit] = useState<Unit | null>(null), [key, setKey] = useState<null | { id: number; name: string; public_key: string; fingerprint: string }>(null);
   useEffect(() => { api<any>("/settings").then(v => { remember("/settings", v); setS(v); }); }, []);
   useEffect(() => { if (rates?.[0] && !rate) setRate(String(rates[0].php_per_kwh)); }, [rates]);
@@ -48,6 +48,8 @@ export default function Settings({ onSignOut }: { onSignOut: () => void }) {
               <p className="muted">Applies to the current month ({month}) only. Past months keep the rate they had.</p>
               <label htmlFor="rate">PHP per kWh</label><input id="rate" type="number" step="0.01" min="0" value={rate} onChange={e => setRate(e.target.value)} style={{ maxWidth: 200 }} />
               <div style={{ marginTop: 12 }}><button className="btn pri" onClick={() => run(async () => { await api(`/rates/${month}`, { method: "PUT", body: { php_per_kwh: Number(rate) } }); rr(); }, "Rate saved")}>Save rate</button></div>
+              <div className="chk" style={{ marginTop: 12 }}><input id="wall-cost" type="checkbox" checked={!!s.cost_include_wall} onChange={e => setS({ ...s, cost_include_wall: e.target.checked })} /><label htmlFor="wall-cost" style={{ margin: 0 }}>Use measured wall power for cost</label></div>
+              <p className="muted" style={{ fontSize: "0.75rem" }}>When enabled, units with wall-meter data use measured wall energy instead of the estimated CPU+GPU figure; units without a meter keep the estimate. The dashboard labels the cost basis. Send readings to <code>POST /api/metrics/wall</code> with <code>{'{ unit_id, watts, ts? }'}</code>.</p>
               <div className="scroll" role="region" aria-label="Rate history" tabIndex={0} style={{ marginTop: 12 }}><table className="rtable"><thead><tr><th>Month</th><th>₱ / kWh</th></tr></thead><tbody>{rates?.map(r => <tr key={r.month}><td data-label="Month">{r.month}</td><td data-label="₱ / kWh">{r.php_per_kwh}</td></tr>)}</tbody></table></div>
             </div>
             <div className="acc-sub"><h3 className="acc-subtitle">Collection</h3>

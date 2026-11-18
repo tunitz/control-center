@@ -6,7 +6,7 @@ import { Sparkline } from "../components/Sparkline";
 import AddUnit from "../components/AddUnit";
 import { sampleLabel } from "../lib/format";
 
-type Cost = { month: string; rate: number; total_php: number; total_kwh: number };
+type Cost = { month: string; rate: number; total_php: number; total_kwh: number; wall_kwh?: number; cost_include_wall?: boolean; cost_basis?: string };
 function UnitCard({ u }: { u: Unit }) {
   const [spark, setSpark] = useState<(number | null)[]>(() => cached<(number | null)[]>(`spark:${u.id}`) ?? []);
   useEffect(() => { let on = true; const f = () => api<Metrics>(`/units/${u.id}/metrics?range=1h`).then(m => { if (!on) return; const v = m.points.filter((_, i) => i % 4 === 0).map(p => p.cpu_pct); remember(`spark:${u.id}`, v); setSpark(v); }).catch(() => {}); f(); const t = setInterval(f, 30000); return () => { on = false; clearInterval(t); }; }, [u.id]);
@@ -20,7 +20,7 @@ function UnitCard({ u }: { u: Unit }) {
         <Gauge label="RAM" value={u.ram_pct} color="var(--s3)" />
       </div>
       <Sparkline values={spark} color="var(--s1)" />
-      <div className="row"><span>Power <b>{w != null ? fmt(w, 1, " W") : "—"}</b></span><span>Month <b>{u.month ? `${u.month.kwh.toFixed(3)} kWh · ₱${u.month.php.toFixed(2)}` : "—"}</b></span></div>
+      <div className="row"><span>Power <b>{w != null ? fmt(w, 1, " W") : "—"}</b></span><span>Wall <b>{u.wall_w != null ? fmt(u.wall_w, 1, " W") : "—"}</b></span><span>Month <b>{u.month ? `${u.month.kwh.toFixed(3)} kWh · ₱${u.month.php.toFixed(2)}` : "—"}</b></span></div>
     </a>
   );
 }
@@ -34,7 +34,7 @@ export default function Dashboard() {
   return (
     <>
       <div className="grid g-hero">
-        <div className="card hero"><div className="lab">Cost this month · {cost?.month ?? ""}</div><div className="val">{cost ? `₱${cost.total_php.toFixed(2)}` : "—"}</div><div className="sub">{cost ? `${cost.total_kwh.toFixed(3)} kWh at ₱${cost.rate}/kWh` : ""}</div></div>
+        <div className="card hero"><div className="lab">Cost this month · {cost?.month ?? ""}</div><div className="val">{cost ? `₱${cost.total_php.toFixed(2)}` : "—"}</div><div className="sub">{cost ? `${cost.total_kwh.toFixed(3)} kWh at ₱${cost.rate}/kWh` : ""}{cost?.cost_basis ? ` · ${cost.cost_basis}` : ""}</div></div>
         <div className="card hero"><div className="lab">Live power</div><div className="val">{fmt(watts, 1, " W")}</div><div className="sub">all units, CPU + GPU</div></div>
         <div className="card hero"><div className="lab">Units online</div><div className="val">{online} / {units?.length ?? 0}</div><div className="sub">&nbsp;</div></div>
       </div>

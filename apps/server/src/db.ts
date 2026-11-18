@@ -41,6 +41,8 @@ export function openDb(path: string): Database {
   CREATE TABLE IF NOT EXISTS alert_rules (unit_id INTEGER NOT NULL, kind TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, threshold REAL, PRIMARY KEY(unit_id,kind));
   CREATE TABLE IF NOT EXISTS alert_state (unit_id INTEGER NOT NULL, kind TEXT NOT NULL, since_ts INTEGER NOT NULL, message TEXT, PRIMARY KEY(unit_id,kind));
   CREATE TABLE IF NOT EXISTS maintenance_windows (id INTEGER PRIMARY KEY, unit_id INTEGER, days TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6', start_minute INTEGER NOT NULL, end_minute INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+  CREATE TABLE IF NOT EXISTS wall_power (unit_id INTEGER NOT NULL, ts INTEGER NOT NULL, watts REAL NOT NULL, PRIMARY KEY(unit_id,ts)) WITHOUT ROWID;
+  CREATE TABLE IF NOT EXISTS wall_energy (unit_id INTEGER NOT NULL, end_ts INTEGER NOT NULL, wh REAL NOT NULL, PRIMARY KEY(unit_id,end_ts)) WITHOUT ROWID;
   CREATE TABLE IF NOT EXISTS unit_disks (unit_id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, json TEXT NOT NULL);
   `);
   migrateSampleTable(db, "samples_raw", m => [m]);

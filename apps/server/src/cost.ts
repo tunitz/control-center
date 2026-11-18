@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite";
+import { getSetting } from "./db";
+import { wallEnergySum } from "./wall";
 const TZ_OFFSET_S = 8 * 3600; // Asia/Manila, no DST
 const BILLING_KEEP_S = 400 * 86400;
 
@@ -31,9 +33,28 @@ export function setCurrentRate(db: Database, rate: number, now: number) {
 export function monthCost(db: Database, now: number) {
   const month = monthKey(now);
   const rate = getRate(db, month, now);
+  const start = monthStart(month), end = now + 1, floor = now - BILLING_KEEP_S;
   const rows = db.query(
     `SELECT u.id, u.name, COALESCE(SUM(e.wh),0) wh FROM units u LEFT JOIN energy_intervals e ON e.unit_id=u.id AND e.end_ts>=? AND e.end_ts<? AND e.end_ts>=? WHERE u.enabled=1 GROUP BY u.id ORDER BY u.id`
-  ).all(monthStart(month), now + 1, now - BILLING_KEEP_S) as { id: number; name: string; wh: number }[];
-  const units = rows.map(r => ({ id: r.id, name: r.name, kwh: r.wh / 1000, php: (r.wh / 1000) * rate }));
-  return { month, rate, total_kwh: units.reduce((a, u) => a + u.kwh, 0), total_php: units.reduce((a, u) => a + u.php, 0), units };
+  ).all(start, end, floor) as { id: number; name: string; wh: number }[];
+  const includeWall = getSetting(db, "cost_include_wall", "0") === "1";
+  const units = rows.map(r => {
+    // Never add both: a unit with measured wall energy uses it instead of the estimate.
+    const wallWh = includeWall ? wallEnergySum(db, r.id, Math.max(start, floor), end) : 0;
+    const measured = wallWh > 0;
+    const wh = measured ? wallWh : r.wh;
+    return { id: r.id, name: r.name, kwh: wh / 1000, php: (wh / 1000) * rate, basis: measured ? "measured wall" : "estimated CPU+GPU", wall_kwh: wallWh / 1000 };
+  });
+  const wallKwh = units.reduce((a, u) => a + u.wall_kwh, 0);
+  return {
+    month, rate,
+    total_kwh: units.reduce((a, u) => a + u.kwh, 0),
+    total_php: units.reduce((a, u) => a + u.php, 0),
+    wall_kwh: wallKwh,
+    cost_include_wall: includeWall,
+    cost_basis: includeWall
+      ? (wallKwh > 0 ? "measured wall where available, CPU+GPU estimate elsewhere" : "estimated CPU+GPU (no wall meter data)")
+      : "estimated CPU+GPU power",
+    units,
+  };
 }

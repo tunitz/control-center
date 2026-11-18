@@ -92,6 +92,7 @@ export default function UnitDetail({ id }: { id: number }) {
         <div><div className="k">CPU</div><div className="v">{s?.cpu_model ?? "—"}</div><div className="k">{s ? `${s.cores}C/${s.threads}T · ${s.base_mhz ?? "?"}–${s.boost_mhz ?? "?"} MHz · now ${fmt(l?.cpu_mhz, 0, " MHz")}` : ""}</div></div>
         <div><div className="k">GPU</div><div className="v">{s?.gpu_model ?? "none detected"}</div><div className="k">{s?.vram_total_mb ? `VRAM ${gb(l?.vram_used_mb)} / ${gb(s.vram_total_mb)}` : ""}</div></div>
         <div><div className="k">Memory</div><div className="v">{s ? `${gb(l?.ram_used_mb)} / ${gb(s.ram_total_mb)}` : "—"}</div><div className="k">cached {gb(l?.ram_cached_mb)} · swap {gb(l?.swap_used_mb)}{s ? ` / ${gb(s.swap_total_mb)}` : ""}</div></div>
+        <div><div className="k">Measured wall power</div><div className="v">{u.wall_w != null ? fmt(u.wall_w, 1, " W") : "—"}</div><div className="k">{u.wall_ts ? `at ${new Date(u.wall_ts * 1000).toLocaleTimeString()}` : "no wall meter configured"}</div></div>
         <div><div className="k">Energy this range</div><div className="v">{energy == null ? "—" : energy >= 1000 ? (energy / 1000).toFixed(3) + " kWh" : energy.toFixed(2) + " Wh"}</div><div className="k">Month {u.month ? `${u.month.kwh.toFixed(3)} kWh · ₱${u.month.php.toFixed(2)}` : ""}</div></div>
       </div>
       <div className="sticky"><div className="chips" role="group" aria-label="Time range">{RANGES.map(r => <button key={r} aria-pressed={r === range} className={"chip" + (r === range ? " on" : "")} onClick={() => setRange(r)}>{r}</button>)}</div></div>
@@ -102,7 +103,7 @@ export default function UnitDetail({ id }: { id: number }) {
         <Block title="GPU clock" m={m} keys={["gpu_mhz"]} series={S.gclk} unit="" />
         <Block title="VRAM" m={m} keys={["vram_used_mb"]} series={S.vram} unit="" />
         <Block title="Memory (MB)" m={m} keys={["ram_used_mb", "ram_cached_mb", "swap_used_mb"]} series={S.mem} unit="" />
-        <Block title="Power (W)" m={m} keys={["cpu_w", "gpu_w"]} series={S.pow} unit=" W" />
+        <Block title="Power (W) · estimated CPU+GPU" m={m} keys={["cpu_w", "gpu_w"]} series={S.pow} unit=" W" />
       </>}</div>
       {(u.disks?.mounts.length || m) && <section aria-label="Disks" className="disks">
         <h3 style={{ fontSize: 18, margin: "8px 0 12px" }}>Disks</h3>

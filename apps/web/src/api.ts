@@ -23,7 +23,7 @@ export type ServiceLogLine = { ts: number; level: "error" | "warn" | "info" | "d
 export type Sample = Record<string, number | null>;
 export type Unit = {
   id: number; name: string; host: string; ssh_port?: number; mac: string | null; broadcast: string | null; enabled: boolean; online: boolean; sample_fresh?: boolean; last_sample_ts?: number | null; last_seen: number | null; last_error: string | null;
-  fingerprint: string | null; host_fingerprint?: string | null; migration_pending_port?: number | null; sample_interval_s: number; latest: Sample | null; live_w: number | null; ram_pct: number | null; vram_pct: number | null;
+  fingerprint: string | null; host_fingerprint?: string | null; migration_pending_port?: number | null; sample_interval_s: number; latest: Sample | null; live_w: number | null; wall_w?: number | null; wall_ts?: number | null; ram_pct: number | null; vram_pct: number | null;
   static: null | { cpu_model: string; cores: number; threads: number; base_mhz: number | null; boost_mhz: number | null; gpu_model: string | null; vram_total_mb: number | null; ram_total_mb: number; swap_total_mb: number };
   month?: { kwh: number; php: number };
   disks?: DiskSnapshot;

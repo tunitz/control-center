@@ -19,6 +19,7 @@ import { latestDisks } from "./disks";
 import { handleDiagnosticRoute } from "./diagnostic";
 import { handleAlertRoute, evaluateAlerts } from "./alerts";
 import { createBackup, restoreBackup, validateBackup, tempBackupPath, removeBackupFile, SCHEMA_VERSION } from "./backup";
+import { validateWallSample, ingestWall, latestWall, purgeWall } from "./wall";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
@@ -45,7 +46,7 @@ const sched = new Scheduler(db, pool, master, pollInterval, (unitId, added) => {
 if (process.env.CC_NO_POLL !== "1") sched.start();
 setInterval(() => rollup(db, now()), 60_000);
 setInterval(() => evaluateAlerts(db, now(), pollInterval()), 60_000);
-setInterval(() => purge(db, now(), Number(getSetting(db, "retention_days", "90"))), 3600_000);
+setInterval(() => { purge(db, now(), Number(getSetting(db, "retention_days", "90"))); purgeWall(db, now()); }, 3600_000);
 rollup(db, now());
 
 function latest(unitId: number) {
@@ -53,6 +54,7 @@ function latest(unitId: number) {
 }
 const unitView = (u: any) => unitViewOf(u, {
   now: now(), pollInterval: pollInterval(), latest, disks: (id: number) => latestDisks(db, id),
+  wall: (id: number) => latestWall(db, id, now()),
   staticJson: (id: number) => (db.query("SELECT json FROM unit_static WHERE unit_id=?").get(id) as { json: string } | null)?.json ?? null,
 });
 const json = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
@@ -216,6 +218,19 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     } catch (e: any) { return json({ error: String(e?.message ?? e) }, 400); }
     finally { removeBackupFile(p); }
   }
+  if (path === "/api/metrics/wall" && m === "POST") {
+    const checked = validateWallSample(await req.json().catch(() => ({})), now());
+    if (!checked.ok) return json({ error: checked.error }, 400);
+    if (!db.query("SELECT 1 FROM units WHERE id=?").get(checked.sample.unit_id)) return json({ error: "no such unit" }, 404);
+    ingestWall(db, checked.sample);
+    audit(db, "admin", "wall.sample", checked.sample.unit_id, `${checked.sample.watts}W`, ip);
+    return json({ ok: true });
+  }
+  if (path === "/api/metrics/wall" && m === "GET") {
+    const id = Number(url.searchParams.get("unit_id"));
+    if (!Number.isInteger(id) || id < 1) return json({ error: "unit_id required" }, 400);
+    return json(latestWall(db, id, now()) ?? { ts: null, watts: null });
+  }
   if (path === "/api/cost" && m === "GET") return json(monthCost(db, now()));
   if (path === "/api/energy" && m === "GET") {
     const range = parseRange(url.searchParams.get("from"), url.searchParams.get("to"));
@@ -238,12 +253,13 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     return json({ month: rm[1], php_per_kwh: getRate(db, rm[1], now()) });
   }
   if (path === "/api/rates" && m === "GET") { getRate(db, monthKey(now()), now()); return json(db.query("SELECT month, php_per_kwh, set_at FROM rates ORDER BY month DESC").all()); }
-  if (path === "/api/settings" && m === "GET") return json({ poll_interval_s: pollInterval(), sample_interval_s: Number(getSetting(db, "sample_interval_s", "5")), retention_days: Number(getSetting(db, "retention_days", "90")) });
+  if (path === "/api/settings" && m === "GET") return json({ poll_interval_s: pollInterval(), sample_interval_s: Number(getSetting(db, "sample_interval_s", "5")), retention_days: Number(getSetting(db, "retention_days", "90")), cost_include_wall: getSetting(db, "cost_include_wall", "0") === "1" });
   if (path === "/api/settings" && m === "PUT") {
     const b = await req.json();
     if (b.poll_interval_s != null) setSetting(db, "poll_interval_s", String(Math.min(3600, Math.max(1, Number(b.poll_interval_s)))));
     if (b.sample_interval_s != null) setSetting(db, "sample_interval_s", String(Math.min(3600, Math.max(1, Number(b.sample_interval_s)))));
     if (b.retention_days != null) setSetting(db, "retention_days", String(Math.min(90, Math.max(1, Number(b.retention_days)))));
+    if (b.cost_include_wall != null) setSetting(db, "cost_include_wall", b.cost_include_wall ? "1" : "0");
     sched.refreshInterval();
     audit(db, "admin", "settings.updated", null, JSON.stringify(b), ip); return json({ ok: true });
   }

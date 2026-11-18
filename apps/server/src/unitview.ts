@@ -4,6 +4,7 @@ export type UnitViewDeps = {
   latest: (unitId: number) => Record<string, number | null> | null;
   staticJson: (unitId: number) => string | null;
   disks?: (unitId: number) => { ts: number; mounts: unknown[] } | null;
+  wall?: (unitId: number) => { ts: number; watts: number } | null;
 };
 
 export const isOnline = (u: { last_seen: number | null }, now: number, pollInterval: number) =>
@@ -20,8 +21,10 @@ export function unitView(u: any, deps: UnitViewDeps) {
   // Live power only counts a recent sample from a reachable, enabled, verified unit.
   const fresh = sampleFresh(u as any, deps.now, u.sample_interval_s ?? 5);
   const live_w = !online || !fresh || !enabled || !l || (l.cpu_w == null && l.gpu_w == null) ? null : (l.cpu_w ?? 0) + (l.gpu_w ?? 0);
+  const wall = deps.wall?.(u.id) ?? null;
   return {
     live_w, sample_fresh: fresh,
+    wall_w: wall?.watts ?? null, wall_ts: wall?.ts ?? null,
     id: u.id, name: u.name, host: u.host, ssh_port: u.ssh_port, mac: u.mac, broadcast: u.broadcast, enabled: !!u.enabled, online, last_seen: u.last_seen, last_sample_ts: u.last_sample_ts ?? null, last_error: u.last_error,
     fingerprint: u.fingerprint, host_fingerprint: u.host_fingerprint ?? null, migration_pending_port: u.migration_pending_port ?? null, sample_interval_s: u.sample_interval_s, static: s, latest: l,
     disks: deps.disks?.(u.id) ?? null,

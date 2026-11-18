@@ -43,14 +43,24 @@ Additional checks:
 - SQLite backup (`VACUUM INTO` plus a manifest) and transactional restore that
   keeps the open connection. The master key is never included; the UI and API
   both warn that a restore needs the same `CC_MASTER_KEY`.
+- Optional wall-meter input: `POST /api/metrics/wall` accepts
+  `{unit_id, watts, ts?}` (bounded watts, 5-minute timestamp skew) and stores
+  readings in `wall_power` with trapezoidal energy in `wall_energy`. Wall watts
+  are shown next to CPU+GPU power. Cost can opt into measured wall energy;
+  units without a meter keep the CPU+GPU estimate, and the dashboard states
+  the cost basis so measured data is never mistaken for an estimate.
 
-Verification for this work: 272 tests pass, typecheck and build clean. Against a
+Verification for this work including wall input: 278 tests pass, typecheck and build clean. Against a
 fresh throwaway instance, the real JSON endpoints were checked for daily energy
 (0.1 kWh / ₱1 from 4×25 Wh), strict date rejection (400), diagnostics checks,
 backup status, a 122,880-byte backup download, and an end-to-end restore
 (17 tables, unit name reverted after a deliberate change). Browser checks at
 320/390px confirmed the last-sample label, energy table and export, diagnostics,
 alerts and backup panels with zero console errors and no horizontal overflow.
+Wall input was checked end to end: invalid watts rejected with 400, `unit.wall_w`
+populated, cost switching from the 1 kWh estimate to 0.078125 kWh of measured
+wall energy with the basis labelled "measured wall where available, CPU+GPU
+estimate elsewhere", and the Settings toggle plus dashboard/unit labels rendered.
 
 Deployment to the live instance is intentionally not part of this change. Before
 deploying, back up the live `/data/cc.db` (plus WAL/SHM) and keep the master key
