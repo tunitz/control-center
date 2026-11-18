@@ -11,7 +11,7 @@ import { generateUnitKey, encrypt } from "./crypto";
 import { SshPool } from "./ssh";
 import { Scheduler, targetOf, type UnitRow } from "./poller";
 import { COMMANDS, sendWol } from "./commands";
-import { installScript, pasteCommand, curlCommand } from "./install";
+import { installScript, pasteCommand, curlCommand, DEFAULT_SSH_PORT } from "./install";
 import { deleteUnit, updateUnit } from "./units";
 import { unitView as unitViewOf } from "./unitview";
 import { handleServiceRoute } from "./services";
@@ -140,7 +140,7 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     audit(db, "admin", "unit.added", id, String(b.name), ip);
     return json({ id, public_key: k.publicKey, fingerprint: k.fingerprint }, 201);
   }
-  const um = /^\/api\/units\/(\d+)(?:\/(\w+))?$/.exec(path);
+  const um = /^\/api\/units\/(\d+)(?:\/([\w-]+))?$/.exec(path);
   if (um) {
     const id = Number(um[1]), sub = um[2];
     const u = db.query("SELECT * FROM units WHERE id=?").get(id) as any;
@@ -157,7 +157,9 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
       pool.drop(id); deleteUnit(db, id); audit(db, "admin", "unit.deleted", id, u.name, ip); return json({ ok: true });
     }
     if (sub === "installer" && m === "GET") {
-      const sshPort = u.ssh_port;
+      // A legacy unit on port 22 must be reinstalled for the dedicated sshd. Generate
+      // the installer for the target port, never for the old one the agent is leaving.
+      const sshPort = u.ssh_port === 22 ? DEFAULT_SSH_PORT : u.ssh_port;
       const script = installScript({ pubkey: u.pubkey, from: process.env.CC_PUBLIC_IP, interval: u.sample_interval_s, sshPort });
       const sudo = url.searchParams.get("sudo") !== "0";
       if (url.searchParams.get("format") === "curl")
@@ -170,6 +172,13 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
       const range = (url.searchParams.get("range") ?? "1h") as Range;
       if (!(range in RANGES)) return json({ error: "bad range" }, 400);
       return json(queryMetrics(db, id, range, now()));
+    }
+    if (sub === "migration-complete" && m === "POST") {
+      if (u.migration_pending_port == null) return json({ error: "no pending migration" }, 400);
+      db.query("UPDATE units SET ssh_port=?, migration_pending_port=NULL, last_error=NULL WHERE id=?").run(DEFAULT_SSH_PORT, id);
+      pool.drop(id);
+      audit(db, "admin", "unit.migration.completed", id, `${u.migration_pending_port}->${DEFAULT_SSH_PORT}`, ip);
+      return json({ ok: true, ssh_port: DEFAULT_SSH_PORT });
     }
     if (sub === "rekey" && m === "POST") {
       const k = generateUnitKey(`cc-${u.name}`);

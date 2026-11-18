@@ -26,6 +26,11 @@ export default function Diagnostics({ unit, onChanged }: { unit: Unit; onChanged
     catch (e: any) { setMsg(e.message); }
     load();
   };
+  const finishMigration = async () => {
+    try { await api(`/units/${id}/migration-complete`, { method: "POST" }); setMsg("Migration marked complete; the next poll uses the dedicated port."); }
+    catch (e: any) { setMsg(e.message); }
+    load(); onChanged?.();
+  };
   const tone = report?.status === "ok" ? "var(--ok)" : report?.status === "warn" ? "var(--warn)" : "var(--err)";
   return (
     <section className="card" aria-labelledby="diag-h" style={{ marginTop: 14 }}>
@@ -44,6 +49,7 @@ export default function Diagnostics({ unit, onChanged }: { unit: Unit; onChanged
         <button className="btn sm" onClick={probe}>Probe agent</button>
         <button className="btn sm" onClick={reconnect}>Reconnect</button>
         <button className="btn sm pri" onClick={() => setReinstall(true)}>Reinstall</button>
+        {unit.migration_pending_port != null && <button className="btn sm" onClick={finishMigration}>Finish migration</button>}
       </div>
       {msg && <div className="toast" role="status" onAnimationEnd={() => setMsg("")}>{msg}</div>}
       {reinstall && <Modal label={`Reinstall ${unit.name}`} onClose={() => { setReinstall(false); onChanged?.(); }}>
