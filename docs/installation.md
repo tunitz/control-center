@@ -74,7 +74,7 @@ CC_AGENT_DIR=<INSTALL_DIR>/agent \
 <INSTALL_DIR>/dist/control-center
 ```
 
-Bun resolves `import.meta.dir` inside the compiled binary to an internal virtual root, so source-run path defaults do not apply to the executable. See the [deployment guide](../deploy/README.md) for a systemd unit that sets these paths.
+Bun resolves `import.meta.dir` inside the compiled binary to an internal virtual root, so source-run path defaults do not apply to the executable. Run the binary under your host's existing process supervisor; see the [deployment guide](../deploy/README.md) for Docker and compiled-binary options.
 
 ## Optional: Docker
 

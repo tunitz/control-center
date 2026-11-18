@@ -60,18 +60,18 @@ Responses are explicit: `accepted` means the command was sent (or the WoL packet
 
 ## Service control
 
-### Control Center service
+### Control Center process
 
-The compiled binary runs as a simple systemd service. See the [deployment guide](../deploy/README.md) for the unit file and install steps.
+Docker is the recommended production runtime:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user start control-center
-systemctl --user restart control-center
-systemctl --user status control-center
+docker compose up -d --build
+docker compose logs -f control-center
+docker compose restart control-center
+docker compose down
 ```
 
-Stop the service before rebuilding the executable (overwriting a running binary fails with `ETXTBSY`).
+For a compiled-binary deployment, run the executable under your host's existing process supervisor with `CC_DATA`, `CC_WEB`, and `CC_AGENT_DIR` set. The [deployment guide](../deploy/README.md) includes a generic binary invocation and an optional systemd example. Stop the process before rebuilding the executable; overwriting a running binary fails with `ETXTBSY`.
 
 ### Unit services
 
