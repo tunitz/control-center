@@ -189,14 +189,17 @@ test("agent reports df avail_mb so UI can show real available space", () => {
   expect(sh).toContain('\\"avail_mb\\":" avail + 0');
 });
 
-test("firewall preflight runs first, detects every backend and aborts on nft without a chain", () => {
+test("firewall preflight runs first and discovers nftables input chains instead of hard-coding inet filter", () => {
   const s = installScript({ pubkey: pub, interval: 5 });
   expect(s.indexOf("# --- firewall preflight")).toBeLessThan(s.indexOf("useradd"));
   expect(s.indexOf("# --- firewall preflight")).toBeLessThan(s.indexOf("> /etc/ccagent.conf"));
   expect(s).toContain("ufw status 2>/dev/null | grep -q '^Status: active'");
   expect(s).toContain('[ "$(firewall-cmd --state 2>/dev/null)" = "running" ]');
   expect(s).toContain('[ -n "$(nft list ruleset 2>/dev/null)" ]');
-  expect(s).toContain("nft list chain inet filter input");
+  expect(s).toContain("nft -a list ruleset");
+  expect(s).toContain("/hook input/");
+  expect(s).toContain("FW_NFT_FAMILY");
+  expect(s).not.toContain("has no 'inet filter input' chain");
   expect(s).toContain("iptables -S INPUT");
   expect(s).toContain("nft add table inet filter");
   expect(s).toContain("nft add chain inet filter input");
@@ -208,7 +211,8 @@ test("firewall rules carry an ownership marker and a root-owned manifest for cle
   expect(s).toContain('chmod 600 /etc/ccagent/firewall.json');
   expect(s).toContain('-m comment --comment "$FW_MARKER"');
   const u = agentFile("uninstall.sh");
-  expect(u).toContain('nft delete rule inet filter input handle');
+  expect(u).toContain('nft delete rule "$FW_NFT_FAMILY" "$FW_NFT_TABLE" "$FW_NFT_CHAIN" handle');
+  expect(u).toContain('nft_family","inet');
   expect(u).toContain('-m comment --comment "$FW_MARKER"');
   expect(u).toContain("rm -f /etc/ccagent/firewall.json");
   expect(() => Bun.spawnSync(["bash", "-n"], { stdin: Buffer.from(s) }).exitCode === 0 || (() => { throw 1; })()).not.toThrow();
@@ -220,7 +224,7 @@ test("firewall is opened idempotently for each active backend", () => {
   expect(s).toContain("firewall-cmd --query-port=\"${PORT}/tcp\"");
   expect(s).toContain("firewall-cmd --permanent --add-port=\"${PORT}/tcp\"");
   expect(s).toContain("firewall-cmd --reload");
-  expect(s).toContain("nft add rule inet filter input tcp dport \"${PORT}\" accept comment \"$FW_MARKER\"");
+  expect(s).toContain("nft add rule \"$FW_NFT_FAMILY\" \"$FW_NFT_TABLE\" \"$FW_NFT_CHAIN\" tcp dport \"${PORT}\" accept comment \"$FW_MARKER\"");
   expect(s).toContain("iptables -C INPUT -p tcp --dport \"$PORT\" -m comment --comment \"$FW_MARKER\" -j ACCEPT");
   expect(s).toContain("iptables -I INPUT -p tcp --dport \"$PORT\" -m comment --comment \"$FW_MARKER\" -j ACCEPT");
   expect(s).toContain("ip6tables -I INPUT -p tcp --dport \"$PORT\" -m comment --comment \"$FW_MARKER\" -j ACCEPT");

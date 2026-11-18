@@ -76,7 +76,7 @@ esac
 FW_UFW=0
 FW_FIREDALD=0
 FW_NFT=0
-FW_NFT_CHAIN=0
+FW_NFT_FAMILY=""; FW_NFT_TABLE=""; FW_NFT_CHAIN=""
 FW_IPTABLES=0
 # First active backend wins: ufw/firewalld may use nftables or iptables internally,
 # so treat their nft/iptables rules as part of that backend, not as separate firewalls.
@@ -86,19 +86,30 @@ elif command -v firewall-cmd >/dev/null 2>&1 && [ "$(firewall-cmd --state 2>/dev
   FW_FIREDALD=1
 elif command -v nft >/dev/null 2>&1 && [ -n "$(nft list ruleset 2>/dev/null)" ]; then
   FW_NFT=1
-  if nft list chain inet filter input >/dev/null 2>&1; then
-    FW_NFT_CHAIN=1
+  # Use whichever chain already hooks input. Hard-coding 'inet filter input' broke
+  # hosts using ip/ip6 or a custom table name. Parse the ruleset for a filter hook.
+  NFT_SPEC=$(nft -a list ruleset 2>/dev/null | awk '
+    /^table / { fam=$2; tbl=$3; sub(/\{/,"",tbl); next }
+    /^[[:space:]]*chain / { ch=$2; sub(/\{/,"",ch); next }
+    /hook input/ { print fam " " tbl " " ch; exit }
+  ')
+  if [ -n "$NFT_SPEC" ]; then
+    set -- $NFT_SPEC; FW_NFT_FAMILY=$1; FW_NFT_TABLE=$2; FW_NFT_CHAIN=$3
+  else
+    # No input hook at all: a fresh accept-policy chain cannot weaken anything.
+    FW_NFT_FAMILY=inet; FW_NFT_TABLE=filter; FW_NFT_CHAIN=input
+    nft add table inet filter 2>/dev/null || true
+    nft add chain inet filter input '{ type filter hook input priority 0; policy accept; }' 2>/dev/null || true
+    if ! nft list chain inet filter input >/dev/null 2>&1; then
+      echo "ERROR: could not create an nftables input chain for port $PORT." >&2
+      echo "Create one manually, then re-run the installer:" >&2
+      echo "  nft add table inet filter" >&2
+      echo "  nft add chain inet filter input '{ type filter hook input priority 0; policy accept; }'" >&2
+      exit 1
+    fi
   fi
 elif command -v iptables >/dev/null 2>&1 && iptables -S INPUT >/dev/null 2>&1; then
   FW_IPTABLES=1
-fi
-# An active backend we cannot safely program is a hard stop, before anything is changed.
-if [ "$FW_NFT" = 1 ] && [ "$FW_NFT_CHAIN" != 1 ]; then
-  echo "ERROR: nftables is active but has no 'inet filter input' chain; cannot open port $PORT automatically." >&2
-  echo "Create it manually, then re-run the installer:" >&2
-  echo "  nft add table inet filter" >&2
-  echo "  nft add chain inet filter input '{ type filter hook input priority 0; policy accept; }'" >&2
-  exit 1
 fi
 
 # --- sshd preflight: make sure an sshd binary and host keys exist ---
@@ -273,8 +284,8 @@ if [ "$FW_FIREDALD" = 1 ]; then
   fi
 fi
 if [ "$FW_NFT" = 1 ]; then
-  if ! nft list chain inet filter input 2>/dev/null | grep -q "\$FW_MARKER"; then
-    nft add rule inet filter input tcp dport "\${PORT}" accept comment "\$FW_MARKER"
+  if ! nft list chain "\$FW_NFT_FAMILY" "\$FW_NFT_TABLE" "\$FW_NFT_CHAIN" 2>/dev/null | grep -q "\$FW_MARKER"; then
+    nft add rule "\$FW_NFT_FAMILY" "\$FW_NFT_TABLE" "\$FW_NFT_CHAIN" tcp dport "\${PORT}" accept comment "\$FW_MARKER"
   fi
 fi
 if [ "$FW_IPTABLES" = 1 ]; then
@@ -290,8 +301,8 @@ if [ "$FW_IPTABLES" = 1 ]; then
   echo "NOTE: iptables rules may not persist across reboot unless your distro persists them."
 fi
 # Root-owned record of exactly what this installer added.
-printf '{"port":%s,"marker":"%s","ufw":%s,"firewalld":%s,"nft":%s,"iptables":%s,"ip6tables":%s}\\n' \
-  "$PORT" "$FW_MARKER" "$FW_UFW" "$FW_FIREDALD" "$FW_NFT" "$FW_IPTABLES" "$FW_IP6" > /etc/ccagent/firewall.json
+printf '{"port":%s,"marker":"%s","ufw":%s,"firewalld":%s,"nft":%s,"nft_family":"%s","nft_table":"%s","nft_chain":"%s","iptables":%s,"ip6tables":%s}\\n' \
+  "$PORT" "$FW_MARKER" "$FW_UFW" "$FW_FIREDALD" "$FW_NFT" "$FW_NFT_FAMILY" "$FW_NFT_TABLE" "$FW_NFT_CHAIN" "$FW_IPTABLES" "$FW_IP6" > /etc/ccagent/firewall.json
 chmod 600 /etc/ccagent/firewall.json
 
 # --- verification ---
@@ -325,7 +336,7 @@ fi
 if [ "$FW_FIREDALD" = 1 ] && ! firewall-cmd --query-port="\${PORT}/tcp" >/dev/null 2>&1; then
   echo "ERROR: firewalld rule for port $PORT is missing after installation." >&2; exit 1
 fi
-if [ "$FW_NFT" = 1 ] && ! nft list chain inet filter input 2>/dev/null | grep -q "dport \${PORT} accept"; then
+if [ "$FW_NFT" = 1 ] && ! nft list chain "\$FW_NFT_FAMILY" "\$FW_NFT_TABLE" "\$FW_NFT_CHAIN" 2>/dev/null | grep -q "\$FW_MARKER"; then
   echo "ERROR: nftables rule for port $PORT is missing after installation." >&2; exit 1
 fi
 if [ "$FW_IPTABLES" = 1 ] && ! iptables -C INPUT -p tcp --dport "$PORT" -m comment --comment "$FW_MARKER" -j ACCEPT >/dev/null 2>&1; then
