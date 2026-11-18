@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { openDb, getSetting, setSetting, audit } from "./db";
 import { ensureAdmin, setupNeeded, setupAdmin, authorizedSetup, setBootstrapHash, clearBootstrap, checkPassword, changePassword, createSession, validSession, destroySession, makeLimiter, sessionCookie, clearSessionCookie } from "./auth";
 import { monthCost, setCurrentRate, monthKey, getRate } from "./cost";
+import { parseRange, dailyEnergy, energyCsv } from "./energy";
 import { queryMetrics, RANGES, type Range } from "./metrics";
 import { rollup, purge } from "./rollup";
 import { generateUnitKey, encrypt } from "./crypto";
@@ -15,6 +16,9 @@ import { deleteUnit, updateUnit } from "./units";
 import { unitView as unitViewOf } from "./unitview";
 import { handleServiceRoute } from "./services";
 import { latestDisks } from "./disks";
+import { handleDiagnosticRoute } from "./diagnostic";
+import { handleAlertRoute, evaluateAlerts } from "./alerts";
+import { createBackup, restoreBackup, validateBackup, tempBackupPath, removeBackupFile, SCHEMA_VERSION } from "./backup";
 
 const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
@@ -40,6 +44,7 @@ const pollInterval = () => Math.max(1, Number(getSetting(db, "poll_interval_s", 
 const sched = new Scheduler(db, pool, master, pollInterval, (unitId, added) => { if (added) push("sample", { unit_id: unitId, latest: latest(unitId) }); });
 if (process.env.CC_NO_POLL !== "1") sched.start();
 setInterval(() => rollup(db, now()), 60_000);
+setInterval(() => evaluateAlerts(db, now(), pollInterval()), 60_000);
 setInterval(() => purge(db, now(), Number(getSetting(db, "retention_days", "90"))), 3600_000);
 rollup(db, now());
 
@@ -114,6 +119,10 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
   const units = () => db.query("SELECT * FROM units ORDER BY id").all() as any[];
   const svc = await handleServiceRoute({ db, pool, master, now: now(), pollInterval: pollInterval(), authed: true }, req, url, path, ip);
   if (svc) return svc;
+  const diag = await handleDiagnosticRoute({ db, pool, master, now: now(), pollInterval: pollInterval(), authed: true }, req, path, ip);
+  if (diag) return diag;
+  const alert = await handleAlertRoute({ db, now: now(), pollInterval: pollInterval(), authed: true }, req, path, ip);
+  if (alert) return alert;
   if (path === "/api/auth/logout" && m === "POST") { const id = cookieOf(req); if (id) destroySession(db, id); return json({ ok: true }, 200, { "set-cookie": clearSessionCookie() }); }
   if (path === "/api/auth/password" && m === "POST") { const b = await req.json(); if (!(await checkPassword(db, String(b.current ?? "")))) return json({ error: "current password wrong" }, 400); await changePassword(db, String(b.next ?? "")); audit(db, "admin", "password.changed", null, "", ip); return json({ ok: true }); }
 
@@ -183,7 +192,45 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
       const aid = audit(db, "admin", `power.${c.verb}`, id, "", ip); return json({ ok: true, status: "accepted", delivery: c.gate ? "sent" : "broadcast", audit_id: aid });
     }
   }
+  if (path === "/api/backup/status" && m === "GET") return json({ masterKeyRequired: true, schemaVersion: SCHEMA_VERSION, note: "Backups exclude CC_MASTER_KEY; a restore needs the same key to decrypt unit SSH keys." });
+  if (path === "/api/backup" && m === "GET") {
+    const p = tempBackupPath(DATA);
+    try {
+      createBackup(db, p, now());
+      const bytes = await Bun.file(p).arrayBuffer();
+      audit(db, "admin", "backup.created", null, "", ip);
+      return new Response(bytes, { headers: { "content-type": "application/octet-stream", "content-disposition": `attachment; filename="control-center-backup-${new Date().toISOString().slice(0, 10)}.db"` } });
+    } finally { removeBackupFile(p); }
+  }
+  if (path === "/api/restore" && m === "POST") {
+    const form = await req.formData().catch(() => null);
+    const file = form?.get("file");
+    if (!(file instanceof File)) return json({ error: "a .db file is required" }, 400);
+    const p = tempBackupPath(DATA);
+    try {
+      await Bun.write(p, await file.arrayBuffer());
+      const info = validateBackup(p);
+      const result = restoreBackup(db, p);
+      audit(db, "admin", "backup.restored", null, `${info.version}:${result.tables} tables`, ip);
+      return json({ ok: true, ...result, masterKeyRequired: true });
+    } catch (e: any) { return json({ error: String(e?.message ?? e) }, 400); }
+    finally { removeBackupFile(p); }
+  }
   if (path === "/api/cost" && m === "GET") return json(monthCost(db, now()));
+  if (path === "/api/energy" && m === "GET") {
+    const range = parseRange(url.searchParams.get("from"), url.searchParams.get("to"));
+    if (!range) return json({ error: "invalid from/to date (expected YYYY-MM-DD, from <= to)" }, 400);
+    const rawUnit = url.searchParams.get("unitId");
+    let unitId: number | null = null;
+    if (rawUnit !== null && rawUnit !== "") {
+      if (!/^\d+$/.test(rawUnit)) return json({ error: "invalid unitId" }, 400);
+      unitId = Number(rawUnit);
+    }
+    const rows = dailyEnergy(db, range.from, range.to, unitId, now());
+    if (url.searchParams.get("format") === "csv")
+      return new Response(energyCsv(rows), { headers: { "content-type": "text/csv; charset=utf-8", "cache-control": "no-store", "content-disposition": 'attachment; filename="energy-history.csv"' } });
+    return json(rows);
+  }
   const rm = /^\/api\/rates\/(\d{4}-\d{2})$/.exec(path);
   if (rm && m === "PUT") {
     if (rm[1] !== monthKey(now())) return json({ error: "only the current month's rate can be edited" }, 400);

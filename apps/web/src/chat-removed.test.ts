@@ -48,6 +48,6 @@ test("Settings has no Pi agent or Subagents group", () => {
   expect(settings).not.toContain("SubagentsCard");
   expect(settings).not.toContain("Pi agent");
   expect(settings.match(/id: "[a-z-]+"/g)?.sort()).toEqual([
-    'id: "appearance"', 'id: "monitoring"', 'id: "security"',
+    'id: "alerts"', 'id: "appearance"', 'id: "backup"', 'id: "monitoring"', 'id: "security"',
   ]);
 });

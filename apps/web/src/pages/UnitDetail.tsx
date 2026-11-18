@@ -10,6 +10,9 @@ import Modal from "../components/Modal";
 import ActionMenu from "../components/ActionMenu";
 import { DiskList } from "../components/DiskList";
 import { hasSeries, rateUnit } from "../lib/disks";
+import { sampleLabel } from "../lib/format";
+import EnergyHistory from "../components/EnergyHistory";
+import Diagnostics from "../components/Diagnostics";
 
 const S = {
   cpu: [{ key: "cpu_pct", label: "CPU %", color: "var(--s1)" }] as Series[],
@@ -75,7 +78,7 @@ export default function UnitDetail({ id }: { id: number }) {
   );
   return (
     <>
-      <div className="uhead"><a href="#/" className="btn" aria-label="Back">←</a><span className={"dot" + (u.online ? " on" : "")} /><div><h3 style={{ fontSize: 22 }}>{u.name}</h3><div className="host">{u.host} · {u.online ? "online" : "offline"}</div></div><div className="spacer" />
+      <div className="uhead"><a href="#/" className="btn" aria-label="Back">←</a><span className={"dot" + (u.online ? " on" : "")} /><div><h3 style={{ fontSize: 22 }}>{u.name}</h3><div className="host">{u.host} · {u.online ? "online" : "offline"}</div><div className={"sample" + (u.sample_fresh === false ? " stale" : "")}>{sampleLabel(u.last_sample_ts, u.sample_fresh)}</div></div><div className="spacer" />
         <ActionMenu label="Power" actions={[
           { label: "Edit IP / MAC", onSelect: () => setEditing(true) },
           { label: "Wake (WoL)", onSelect: () => act("wake") },
@@ -110,6 +113,8 @@ export default function UnitDetail({ id }: { id: number }) {
           {hasSeries(m.points, "disk_temp_c") && <Block title="Disk temperature" m={m} keys={["disk_temp_c"]} series={S.diskTemp} unit=" °C" labels={{ disk_temp_c: "Temp" }} />}
         </div>}
       </section>}
+      <EnergyHistory unitId={id} />
+      <Diagnostics unitId={id} />
       {u.online && <Services unitId={id} />}
       {confirm && <Modal label={`Confirm ${confirm} ${u.name}`} onClose={() => setConfirm(null)}>
         {confirm === "remove" ? <>

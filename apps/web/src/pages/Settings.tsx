@@ -5,6 +5,8 @@ import InstallPanel from "../components/InstallPanel";
 import EditUnit from "../components/EditUnit";
 import Accordion, { type AccordionItem } from "../components/Accordion";
 import { getThemeMode, setThemeMode, type ThemeMode } from "../theme";
+import AlertsPanel from "../components/AlertsPanel";
+import BackupPanel from "../components/BackupPanel";
 
 const THEME_OPTIONS: { mode: ThemeMode; label: string }[] = [
   { mode: "system", label: "System" },
@@ -64,6 +66,14 @@ export default function Settings({ onSignOut }: { onSignOut: () => void }) {
             </div>
         </>
       ),
+    },
+    {
+      id: "alerts", title: "Alerts", hint: "Offline, stale and disk alerts with maintenance windows",
+      body: <AlertsPanel units={units ?? []} />,
+    },
+    {
+      id: "backup", title: "Backup", hint: "SQLite snapshot and restore (master key handled separately)",
+      body: <BackupPanel />,
     },
     {
       id: "security", title: "Security", hint: "Password and audit log",

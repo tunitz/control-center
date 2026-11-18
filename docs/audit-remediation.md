@@ -29,6 +29,29 @@ Additional checks:
 - Agent scripts synced to `tunitz/ccagent` and published as installer **v0.14.0**;
   both the pinned tag URL and `latest` were checked for the new markers.
 
+## Operator and feature work
+
+- Prominent last-sample age on dashboard cards and unit headers, with stale styling.
+- Per-unit diagnostics: reachability, sample freshness, host-key pin, static info,
+  service-sync and legacy-port checks, plus an agent `info` probe and a Reconnect
+  action that drops the pooled connection for the next poll.
+- Offline/stale/disk alerts with per-unit rules and maintenance windows (Manila
+  time, wrapping windows supported); active alerts shown on the dashboard and
+  managed in Settings.
+- Daily per-unit or fleet-wide energy history in Asia/Manila time with cost from
+  each month's rate, plus `format=csv` export with quoted fields.
+- SQLite backup (`VACUUM INTO` plus a manifest) and transactional restore that
+  keeps the open connection. The master key is never included; the UI and API
+  both warn that a restore needs the same `CC_MASTER_KEY`.
+
+Verification for this work: 272 tests pass, typecheck and build clean. Against a
+fresh throwaway instance, the real JSON endpoints were checked for daily energy
+(0.1 kWh / ₱1 from 4×25 Wh), strict date rejection (400), diagnostics checks,
+backup status, a 122,880-byte backup download, and an end-to-end restore
+(17 tables, unit name reverted after a deliberate change). Browser checks at
+320/390px confirmed the last-sample label, energy table and export, diagnostics,
+alerts and backup panels with zero console errors and no horizontal overflow.
+
 Deployment to the live instance is intentionally not part of this change. Before
 deploying, back up the live `/data/cc.db` (plus WAL/SHM) and keep the master key
 separate; the additive migrations were only proven against a copy here.

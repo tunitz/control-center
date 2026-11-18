@@ -4,6 +4,7 @@ import { useLive, cached, remember } from "../hooks";
 import { Gauge } from "../components/Gauge";
 import { Sparkline } from "../components/Sparkline";
 import AddUnit from "../components/AddUnit";
+import { sampleLabel } from "../lib/format";
 
 type Cost = { month: string; rate: number; total_php: number; total_kwh: number };
 function UnitCard({ u }: { u: Unit }) {
@@ -12,7 +13,7 @@ function UnitCard({ u }: { u: Unit }) {
   const l = u.latest, w = u.live_w;
   return (
     <a className="card" href={`#/unit/${u.id}`} aria-label={`Open ${u.name}`}>
-      <div className="uhead"><span className={"dot" + (u.online ? " on" : "")} title={u.online ? "online" : "offline"} /><div><h3>{u.name}</h3><div className="host">{u.host}{u.online ? "" : u.last_error ? ` · ${u.last_error}` : " · offline"}</div></div></div>
+      <div className="uhead"><span className={"dot" + (u.online ? " on" : "")} title={u.online ? "online" : "offline"} /><div><h3>{u.name}</h3><div className="host">{u.host}{u.online ? "" : u.last_error ? ` · ${u.last_error}` : " · offline"}</div><div className={"sample" + (u.sample_fresh === false ? " stale" : "")}>{sampleLabel(u.last_sample_ts, u.sample_fresh)}</div></div></div>
       <div className="gauges">
         <Gauge label="CPU" value={l?.cpu_pct ?? null} color="var(--s1)" sub={l?.cpu_mhz ? (l.cpu_mhz / 1000).toFixed(1) + " GHz" : undefined} />
         <Gauge label="GPU" value={l?.gpu_pct ?? null} color="var(--s2)" />
@@ -26,6 +27,7 @@ function UnitCard({ u }: { u: Unit }) {
 export default function Dashboard() {
   const { data: units, err } = useLive<Unit[]>("/units", 5000);
   const { data: cost } = useLive<Cost>("/cost", 15000);
+  const { data: alerts } = useLive<{ unit_id: number; kind: string; message: string; name: string }[]>("/alerts", 15000);
   const [adding, setAdding] = useState(false);
   const online = units?.filter(u => u.online).length ?? 0;
   const watts = units?.reduce((a, u) => a + (u.live_w ?? 0), 0) ?? 0;
@@ -36,6 +38,10 @@ export default function Dashboard() {
         <div className="card hero"><div className="lab">Live power</div><div className="val">{fmt(watts, 1, " W")}</div><div className="sub">all units, CPU + GPU</div></div>
         <div className="card hero"><div className="lab">Units online</div><div className="val">{online} / {units?.length ?? 0}</div><div className="sub">&nbsp;</div></div>
       </div>
+      {!!alerts?.length && <div className="card" role="alert" style={{ marginBottom: 14, borderColor: "var(--err-line)" }}>
+        <h4 style={{ marginTop: 0 }}>{alerts.length} active alert{alerts.length === 1 ? "" : "s"}</h4>
+        <ul className="muted" style={{ margin: 0, paddingLeft: 18 }}>{alerts.map((a, i) => <li key={`${a.unit_id}:${a.kind}:${i}`}>{a.name ?? `#${a.unit_id}`}: {a.kind} — {a.message}</li>)}</ul>
+      </div>}
       <div className="uhead" style={{ margin: "18px 0 10px" }}><h3 style={{ margin: 0 }}>Units</h3><div className="spacer" /><button className="btn pri" onClick={() => setAdding(true)}>+ Add unit</button></div>
       {err && <div className="err" role="alert">{err}</div>}
       {units && units.length === 0 && <div className="card muted">No units yet. Add one to get an install command.</div>}

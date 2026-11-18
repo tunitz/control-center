@@ -69,6 +69,8 @@ nav.tabs a.on{background:var(--surface2);color:var(--text)}
 .uhead{display:flex;align-items:center;gap:8px;margin-bottom:14px}
 .uhead h3{margin:0;font-size:1.0000rem}
 .uhead .host{color:var(--mut);font-size:0.8125rem}
+.sample{color:var(--ok);font-size:0.8125rem;font-variant-numeric:tabular-nums}
+.sample.stale{color:var(--err)}
 
 .dot{width:9px;height:9px;border-radius:50%;background:var(--err);flex:none;display:inline-block}
 .dot.on{background:var(--ok)}

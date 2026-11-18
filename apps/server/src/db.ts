@@ -38,6 +38,9 @@ export function openDb(path: string): Database {
   CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, unit_id INTEGER, unit_name TEXT, public_id TEXT, detail TEXT, ip TEXT);
   CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, auth_version INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS unit_services (unit_id INTEGER NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, synced INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(unit_id,kind,name));
+  CREATE TABLE IF NOT EXISTS alert_rules (unit_id INTEGER NOT NULL, kind TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, threshold REAL, PRIMARY KEY(unit_id,kind));
+  CREATE TABLE IF NOT EXISTS alert_state (unit_id INTEGER NOT NULL, kind TEXT NOT NULL, since_ts INTEGER NOT NULL, message TEXT, PRIMARY KEY(unit_id,kind));
+  CREATE TABLE IF NOT EXISTS maintenance_windows (id INTEGER PRIMARY KEY, unit_id INTEGER, days TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6', start_minute INTEGER NOT NULL, end_minute INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
   CREATE TABLE IF NOT EXISTS unit_disks (unit_id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, json TEXT NOT NULL);
   `);
   migrateSampleTable(db, "samples_raw", m => [m]);
