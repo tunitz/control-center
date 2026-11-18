@@ -1,18 +1,17 @@
 [Unit]
 Description=Control Center
-Documentation=file:///home/tunitz/projects/control-center/docs/setup.md
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
 Type=simple
-WorkingDirectory=/home/tunitz/projects/control-center
-EnvironmentFile=/home/tunitz/projects/control-center/.env
-Environment=PATH=/home/tunitz/.bun/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin
-Environment=CC_DATA=/home/tunitz/projects/control-center/data
-Environment=CC_WEB=/home/tunitz/projects/control-center/apps/web/dist
-Environment=CC_AGENT_DIR=/home/tunitz/projects/control-center/agent
-ExecStart=/home/tunitz/projects/control-center/dist/control-center
+WorkingDirectory=%h/control-center
+EnvironmentFile=%h/control-center/.env
+Environment=PATH=%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin
+Environment=CC_DATA=%h/control-center/data
+Environment=CC_WEB=%h/control-center/apps/web/dist
+Environment=CC_AGENT_DIR=%h/control-center/agent
+ExecStart=%h/control-center/dist/control-center
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=20
