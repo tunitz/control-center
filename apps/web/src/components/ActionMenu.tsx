@@ -3,47 +3,27 @@ import { useEffect, useRef, useState } from "react";
 export type MenuAction = { label: string; onSelect: () => void; danger?: boolean };
 
 /**
- * Popup action menu. Uses the native popover API and focusgroup where available,
- * with progressive fallbacks for Safari/Firefox: light dismiss, roles, and arrow keys.
+ * Action menu anchored to its trigger. A plain positioned element is used instead of
+ * the native popover: popovers enter the top layer, where UA centering overrides the
+ * anchor and light-dismiss races with React state (the menu drifted and closed at random).
  */
 export default function ActionMenu({ label, actions }: { label: string; actions: MenuAction[] }) {
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
   const pop = useRef<HTMLDivElement>(null);
-  const nativePopover = typeof HTMLElement !== "undefined" && "popover" in HTMLElement.prototype;
   const nativeFocusGroup = typeof HTMLElement !== "undefined" && "focusGroup" in HTMLElement.prototype;
 
   useEffect(() => {
-    const el = pop.current;
-    if (!el) return;
-    if (open) {
-      if (nativePopover && !el.matches(":popover-open")) el.showPopover();
-    } else if (nativePopover && el.matches(":popover-open")) {
-      el.hidePopover();
-    }
-  }, [open, nativePopover]);
-
-  // Native light dismiss and Escape close the popover without touching React state.
-  // Keep aria-expanded and our render state in sync with the element.
-  useEffect(() => {
-    const el = pop.current;
-    if (!el || !nativePopover) return;
-    const onToggle = () => setOpen(el.matches(":popover-open"));
-    el.addEventListener("toggle", onToggle);
-    return () => el.removeEventListener("toggle", onToggle);
-  }, [nativePopover]);
-
-  // Fallback outside-press and Escape handling when popover light-dismiss is unavailable.
-  useEffect(() => {
-    if (!open || nativePopover) return;
-    const outside = (e: PointerEvent) => { if (pop.current && !pop.current.contains(e.target as Node)) setOpen(false); };
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    if (!open) return;
+    const outside = (e: PointerEvent) => { if (root.current && !root.current.contains(e.target as Node)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { setOpen(false); (root.current?.querySelector("button") as HTMLButtonElement | null)?.focus(); } };
     document.addEventListener("pointerdown", outside);
     document.addEventListener("keydown", key);
     return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", key); };
-  }, [open, nativePopover]);
+  }, [open]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (nativeFocusGroup) return; // browser handles roving focus
+    if (nativeFocusGroup) return;
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not([disabled])")];
     if (!items.length) return;
@@ -55,7 +35,7 @@ export default function ActionMenu({ label, actions }: { label: string; actions:
   };
 
   return (
-    <div className="menu">
+    <div className="menu" ref={root}>
       <button type="button" className="btn pri" aria-haspopup="menu" aria-expanded={open}
         onClick={() => setOpen(o => !o)}
         onKeyDown={e => {
@@ -64,16 +44,15 @@ export default function ActionMenu({ label, actions }: { label: string; actions:
           setOpen(true);
           requestAnimationFrame(() => pop.current?.querySelector<HTMLButtonElement>("button")?.focus());
         }}>{label} ▾</button>
-      <div ref={pop} className={"card pop" + (open ? " pop-open" : "")}
-        {...(nativePopover ? ({ popover: "auto" } as any) : {})}>
+      {open && <div ref={pop} className="card pop">
         <div {...({ focusgroup: "menu nomemory" } as any)} role={nativeFocusGroup ? undefined : "menu"} aria-label={label} onKeyDown={onKeyDown}>
           {actions.map(a => (
             <button key={a.label} type="button" role={nativeFocusGroup ? undefined : "menuitem"}
               className={a.danger ? "dng" : ""}
-              onClick={() => { a.onSelect(); setOpen(false); }}>{a.label}</button>
+              onClick={() => { setOpen(false); a.onSelect(); }}>{a.label}</button>
           ))}
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
