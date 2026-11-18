@@ -7,7 +7,10 @@ export async function copyText(text: string): Promise<boolean> {
   el.value = text;
   el.setAttribute("readonly", "");
   Object.assign(el.style, { position: "fixed", top: "0", left: "0", opacity: "0", fontSize: "16px" }); // 16px stops iOS zooming
-  document.body.appendChild(el);
+  // A modal <dialog> makes the rest of the document inert: a textarea appended to
+  // <body> cannot be focused or selected there, so execCommand('copy') fails.
+  const host = document.querySelector("dialog[open]") ?? document.body;
+  host.appendChild(el);
   let ok = false;
   try {
     el.focus();
@@ -15,6 +18,6 @@ export async function copyText(text: string): Promise<boolean> {
     el.setSelectionRange(0, text.length); // iOS ignores select() alone
     ok = document.execCommand("copy");
   } catch { ok = false; }
-  document.body.removeChild(el);
+  host.removeChild(el);
   return ok;
 }

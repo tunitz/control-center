@@ -1,11 +1,12 @@
 import { test, expect, beforeEach } from "bun:test";
 import { copyText } from "./clipboard";
 
-let calls: string[], execResult: boolean, created: any[];
+let calls: string[], execResult: boolean, created: any[], dialogHost: any;
 beforeEach(() => {
-  calls = []; execResult = true; created = [];
+  calls = []; execResult = true; created = []; dialogHost = null;
   (globalThis as any).document = {
-    body: { appendChild: (e: any) => calls.push("append"), removeChild: () => calls.push("remove") },
+    body: { appendChild: (e: any) => calls.push("append-body"), removeChild: () => calls.push("remove-body") },
+    querySelector: () => dialogHost,
     createElement: () => { const e: any = { style: {}, setAttribute() {}, select: () => calls.push("select"), setSelectionRange: () => calls.push("range"), focus() {} }; created.push(e); return e; },
     execCommand: (c: string) => { calls.push("exec:" + c); return execResult; },
   };
@@ -16,7 +17,15 @@ test("insecure context (no navigator.clipboard, e.g. http://LAN-ip on iPhone) fa
   expect(await copyText("hello")).toBe(true);
   expect(created[0].value).toBe("hello");
   expect(calls).toContain("exec:copy");
-  expect(calls.at(-1)).toBe("remove"); // temp element cleaned up
+  expect(calls.at(-1)).toBe("remove-body"); // temp element cleaned up
+});
+test("uses the open dialog as host so copy works while a modal is open", async () => {
+  (globalThis as any).navigator = {};
+  dialogHost = { appendChild: () => calls.push("append-dialog"), removeChild: () => calls.push("remove-dialog") };
+  expect(await copyText("install command")).toBe(true);
+  expect(calls).toContain("append-dialog");
+  expect(calls).toContain("remove-dialog");
+  expect(calls).not.toContain("append-body");
 });
 test("reports failure instead of silently pretending when both methods fail", async () => {
   (globalThis as any).navigator = {};
