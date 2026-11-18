@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installScript, agentFile } from "./install";
+import { installScript, agentFile, curlCommand, DEFAULT_SSH_PORT } from "./install";
 
 const pub = "ssh-ed25519 AAAATESTKEY cc-test";
 test("CC_AGENT_DIR overrides where agent files and the installer are read from", () => {
@@ -52,8 +52,10 @@ test("paste command is ONE short line that decodes back to the full installer", 
   const s = installScript({ pubkey: pub, interval: 5 });
   const p = pasteCommand(s);
   expect(p.trim().split("\n").length).toBe(1);          // one line, not a paragraph
-  // curl is the default install method; this paste is the offline fallback, so its bound is loose (was 5600 before the installer grew to ~9.8k, ~11.3k with user-level service support, ~12.7k with disk metrics).
-  expect(p.length).toBeLessThan(14000);
+  // curl is the default install method; this paste is the offline fallback, so its bound is loose
+  // (was 5600 before the installer grew to ~9.8k, ~11.3k with user-level service support, ~12.7k with
+  // disk metrics, ~15.8k with the dedicated sshd + preflight/firewall logic added for the SSH port move).
+  expect(p.length).toBeLessThan(18000);
   const m = /^echo '([A-Za-z0-9+/=]+)' \| base64 -d \| gunzip \| sudo bash\n?$/.exec(p);
   expect(m).not.toBeNull();
   const back = gunzipSync(Buffer.from(m![1], "base64")).toString();
@@ -137,4 +139,124 @@ test("service control: svc path+service units disable start-rate limiting; power
     expect(units[u]).toBeDefined();
     expect(units[u]).not.toContain("StartLimitIntervalSec");
   }
+});
+
+// --- dedicated SSH port (62478) ---
+
+test("SSH port defaults to 62478, is baked in and recorded in /etc/ccagent.conf", () => {
+  expect(DEFAULT_SSH_PORT).toBe(62478);
+  const s = installScript({ pubkey: pub, interval: 5 });
+  expect(s).toContain("SSH_PORT=62478");
+  expect(s).toContain('SSH_PORT=%s\\n');
+  expect(s).toContain('"$PORT" > /etc/ccagent.conf');
+  expect(s).not.toContain("port 22)");
+  expect(s).toContain("port $PORT)");
+});
+test("optional sshPort propagates into installScript; invalid ports are rejected", () => {
+  const s = installScript({ pubkey: pub, interval: 5, sshPort: 63000 });
+  expect(s).toContain("SSH_PORT=63000");
+  const g = installScript({ interval: 5, sshPort: 63000 });
+  expect(g).toContain('PORT="${3:-${CCAGENT_SSH_PORT:-63000}}"');
+  expect(g).toContain("usage: sudo bash $0 '<ssh-ed25519 public key from the Control Center>' [interval_s] [ssh_port]");
+  for (const bad of [22, 0, 65536, 1.5, -1, NaN])
+    expect(() => installScript({ interval: 5, sshPort: bad })).toThrow(/ssh port/i);
+});
+test("sshPort propagates into curlCommand as the third argument without changing the legacy command", () => {
+  expect(curlCommand({ repo: "a/b", tag: "latest", pubkey: pub, sshPort: 63000 }))
+    .toBe(`curl -fsSL https://github.com/a/b/releases/latest/download/install-ccagent.sh | sudo bash -s -- '${pub}' 5 63000`);
+  expect(curlCommand({ repo: "a/b", tag: "latest", pubkey: pub }))
+    .toBe(`curl -fsSL https://github.com/a/b/releases/latest/download/install-ccagent.sh | sudo bash -s -- '${pub}'`);
+  for (const bad of [22, 0, 65536, 1.5])
+    expect(() => curlCommand({ repo: "a/b", tag: "latest", pubkey: pub, sshPort: bad })).toThrow(/ssh port/i);
+});
+
+test("firewall preflight runs first, detects every backend and aborts on nft without a chain", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  expect(s.indexOf("# --- firewall preflight")).toBeLessThan(s.indexOf("useradd"));
+  expect(s.indexOf("# --- firewall preflight")).toBeLessThan(s.indexOf("> /etc/ccagent.conf"));
+  expect(s).toContain("ufw status 2>/dev/null | grep -q '^Status: active'");
+  expect(s).toContain('[ "$(firewall-cmd --state 2>/dev/null)" = "running" ]');
+  expect(s).toContain('[ -n "$(nft list ruleset 2>/dev/null)" ]');
+  expect(s).toContain("nft list chain inet filter input");
+  expect(s).toContain("iptables -S INPUT");
+  expect(s).toContain("nft add table inet filter");
+  expect(s).toContain("nft add chain inet filter input");
+});
+test("firewall is opened idempotently for each active backend", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  expect(s).toContain("ufw allow \"${PORT}/tcp\" comment 'ccagent control center'");
+  expect(s).toContain("firewall-cmd --query-port=\"${PORT}/tcp\"");
+  expect(s).toContain("firewall-cmd --permanent --add-port=\"${PORT}/tcp\"");
+  expect(s).toContain("firewall-cmd --reload");
+  expect(s).toContain("nft add rule inet filter input tcp dport \"${PORT}\" accept");
+  expect(s).toContain("iptables -C INPUT -p tcp --dport \"$PORT\" -j ACCEPT");
+  expect(s).toContain("iptables -I INPUT -p tcp --dport \"$PORT\" -j ACCEPT");
+  expect(s).toContain("ip6tables -I INPUT -p tcp --dport \"$PORT\" -j ACCEPT");
+  expect(s).toContain("iptables rules may not persist across reboot");
+});
+test("sshd preflight installs openssh-server via apt-get/dnf/yum and prepares host keys", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  expect(s).toContain("command -v sshd");
+  expect(s).toContain("/usr/sbin/sshd");
+  expect(s).toContain("apt-get install -y openssh-server");
+  expect(s).toContain("dnf install -y openssh-server");
+  expect(s).toContain("yum install -y openssh-server");
+  expect(s).toContain("no supported package manager (apt-get/dnf/yum)");
+  expect(s).toContain("mkdir -p /run/sshd");
+  expect(s).toContain("ssh-keygen -A");
+  // a shadow-locked system user is rejected by sshd when UsePAM is off
+  expect(s).toContain("usermod -p '*' ccagent");
+});
+test("a dedicated sshd config and systemd unit are installed without touching port 22", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  for (const line of [
+    "Port %s", "ListenAddress 0.0.0.0", "for k in /etc/ssh/ssh_host_*_key",
+    'printf \'HostKey %s\\n\' "$k"', "PermitRootLogin no", "AllowUsers ccagent",
+    "PubkeyAuthentication yes", "PasswordAuthentication no", "KbdInteractiveAuthentication no",
+    "PermitEmptyPasswords no", "AuthorizedKeysFile /var/lib/ccagent/.ssh/authorized_keys",
+    "AllowAgentForwarding no", "AllowTcpForwarding no", "X11Forwarding no", "PermitTunnel no",
+    "GatewayPorts no", "PermitUserEnvironment no", "UsePAM no", "PidFile /run/ccagent-sshd.pid",
+  ]) expect(s).toContain(line);
+  // any installed host key type is used (ed25519, rsa, ecdsa, ...), and keys are generated when absent
+  expect(s).toContain("for k in /etc/ssh/ssh_host_*_key");
+  expect(s).toContain("ls /etc/ssh/ssh_host_*_key");
+  expect(s).toContain("ssh-keygen -A");
+  const units: Record<string, string> = {};
+  for (const m of s.matchAll(/cat > (\S+) <<UNIT\n([\s\S]*?)\nUNIT\n/g)) units[m[1]] = m[2];
+  const u = units["/etc/systemd/system/ccagent-sshd.service"]!;
+  expect(u).toContain("After=network.target");
+  expect(u).toContain("ExecStart=$SSHD_BIN -D -e -f /etc/ssh/ccagent_sshd_config");
+  expect(u).toContain("Restart=on-failure");
+  expect(u).toContain("WantedBy=multi-user.target");
+  expect(s.indexOf("sshd -t -f /etc/ssh/ccagent_sshd_config")).toBeLessThan(s.indexOf("systemctl enable ccagent-sshd.service"));
+  expect(s).toContain("systemctl restart ccagent-sshd.service");
+  expect(s).toContain("systemctl enable ccagent.service ccagent-power.path ccagent-svc.path");
+  expect(s).not.toContain("enable --now");
+});
+test("verification checks sshd state, listener via ss/netstat/proc fallback and firewall rules", () => {
+  const s = installScript({ pubkey: pub, interval: 5 });
+  expect(s).toContain("systemctl is-active ccagent-sshd.service");
+  expect(s).toContain("ss -ltn");
+  expect(s).toContain("netstat -ltn");
+  expect(s).toContain("/proc/net/tcp");
+  expect(s).toContain("printf '%04X'");
+  expect(s).toContain("WARNING: no listener check tool available");
+  expect(s).toContain("ERROR: ufw rule for port");
+  expect(s).toContain("ERROR: firewalld rule for port");
+  expect(s).toContain("ERROR: nftables rule for port");
+  expect(s).toContain("ERROR: iptables rule for port");
+});
+test("uninstall removes the dedicated sshd unit/config and only our firewall rules", () => {
+  const u = agentFile("uninstall.sh");
+  expect(u).toContain("systemctl disable --now ccagent-sshd.service");
+  expect(u).toContain("/etc/systemd/system/ccagent-sshd.service");
+  expect(u).toContain("/etc/ssh/ccagent_sshd_config");
+  expect(u).toContain("SSH_PORT=62478");
+  expect(u).toContain(". /etc/ccagent.conf");
+  expect(u).toContain("ccagent control center");
+  expect(u).toContain("firewall-cmd --permanent --remove-port=");
+  expect(u).toContain('iptables -D INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT');
+  expect(u).toContain("nftables detected");
+  expect(u).toContain("rm -rf /opt/ccagent");
+  expect(u).toContain("userdel -r ccagent");
 });

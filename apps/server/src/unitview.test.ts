@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { unitView } from "./unitview";
 
 const NOW = 1_000_000;
-const base = { id: 1, name: "u", host: "h", ssh_port: 22, mac: null, broadcast: null, enabled: 1, last_seen: NOW - 5, last_error: null, fingerprint: null, sample_interval_s: 5 };
+const base = { id: 1, name: "u", host: "h", ssh_port: 62478, mac: null, broadcast: null, enabled: 1, last_seen: NOW - 5, last_error: null, fingerprint: null, sample_interval_s: 5 };
 const view = (u: any, latest: Record<string, number | null> | null, pollInterval = 5) =>
   unitView(u, { now: NOW, pollInterval, latest: () => latest, staticJson: () => null });
 

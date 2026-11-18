@@ -5,7 +5,7 @@ import { updateUnit } from "./units";
 let db: ReturnType<typeof openDb>;
 beforeEach(() => {
   db = openDb(":memory:");
-  db.query("INSERT INTO units(id,name,host,ssh_port,pubkey,privkey_enc,mac,broadcast,last_seen,last_error,created_at) VALUES(1,'a','10.0.0.5',22,'pk','sk','aa:bb:cc:dd:ee:01','255.255.255.255',123,'old error',0)").run();
+  db.query("INSERT INTO units(id,name,host,ssh_port,pubkey,privkey_enc,mac,broadcast,last_seen,last_error,created_at) VALUES(1,'a','10.0.0.5',62478,'pk','sk','aa:bb:cc:dd:ee:01','255.255.255.255',123,'old error',0)").run();
 });
 const get = () => db.query("SELECT * FROM units WHERE id=1").get() as any;
 
@@ -30,6 +30,6 @@ test("rejects bad input and changes nothing", () => {
     const r = updateUnit(db, 1, bad as any);
     expect(r.ok).toBe(false);
   }
-  expect(get()).toMatchObject({ host: "10.0.0.5", mac: "aa:bb:cc:dd:ee:01", ssh_port: 22 });
+  expect(get()).toMatchObject({ host: "10.0.0.5", mac: "aa:bb:cc:dd:ee:01", ssh_port: 62478 });
 });
 test("unknown unit", () => { expect(updateUnit(db, 99, { name: "x" }).ok).toBe(false); });

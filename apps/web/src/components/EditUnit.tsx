@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, type Unit } from "../api";
 
 export default function EditUnit({ unit, onClose, onSaved }: { unit: Unit; onClose: () => void; onSaved: () => void }) {
-  const [f, setF] = useState({ name: unit.name, host: unit.host, ssh_port: String(unit.ssh_port ?? 22), mac: unit.mac ?? "", broadcast: unit.broadcast ?? "255.255.255.255" });
+  const [f, setF] = useState({ name: unit.name, host: unit.host, ssh_port: String(unit.ssh_port ?? 62478), mac: unit.mac ?? "", broadcast: unit.broadcast ?? "255.255.255.255" });
   const [err, setErr] = useState(""), [busy, setBusy] = useState(false);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   return (

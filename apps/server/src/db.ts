@@ -17,7 +17,7 @@ export function openDb(path: string): Database {
   const db = new Database(path, { create: true });
   db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;");
   db.exec(`
-  CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY, name TEXT NOT NULL, host TEXT NOT NULL, ssh_port INTEGER NOT NULL DEFAULT 22, ssh_user TEXT NOT NULL DEFAULT 'ccagent',
+  CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY, name TEXT NOT NULL, host TEXT NOT NULL, ssh_port INTEGER NOT NULL DEFAULT 62478, ssh_user TEXT NOT NULL DEFAULT 'ccagent',
     pubkey TEXT NOT NULL, privkey_enc TEXT NOT NULL, fingerprint TEXT, mac TEXT, broadcast TEXT DEFAULT '255.255.255.255',
     sample_interval_s INTEGER NOT NULL DEFAULT 5, enabled INTEGER NOT NULL DEFAULT 1, last_seen INTEGER, last_error TEXT, created_at INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS unit_static (unit_id INTEGER PRIMARY KEY, json TEXT NOT NULL, updated_at INTEGER NOT NULL);
@@ -35,6 +35,13 @@ export function openDb(path: string): Database {
   migrateSampleTable(db, "samples_raw", m => [m]);
   migrateSampleTable(db, "samples_1m", m => [`${m}_avg`, `${m}_min`, `${m}_max`]);
   migrateSampleTable(db, "samples_15m", m => [`${m}_avg`, `${m}_min`, `${m}_max`]);
+  // One-time: move units off the old default SSH port 22 to the dedicated port 62478.
+  // Only rows on exactly 22 change; custom ports are preserved. The settings guard
+  // stops this re-applying if someone deliberately sets a port back to 22 later.
+  if (getSetting(db, "ssh_port_62478_migrated", "0") !== "1") {
+    db.exec("UPDATE units SET ssh_port = 62478 WHERE ssh_port = 22");
+    setSetting(db, "ssh_port_62478_migrated", "1");
+  }
   return db;
 }
 

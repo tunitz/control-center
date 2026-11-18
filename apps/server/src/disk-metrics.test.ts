@@ -110,7 +110,7 @@ test("deleteUnit removes the disks snapshot too", () => {
 // ---- unit detail API shape --------------------------------------------------
 
 test("unit view exposes disks {ts,mounts} from the dep, or null when none", () => {
-  const u = { id: 1, name: "u", host: "h", ssh_port: 22, mac: null, broadcast: null, enabled: 1, last_seen: 1000, last_error: null, fingerprint: null, sample_interval_s: 5 };
+  const u = { id: 1, name: "u", host: "h", ssh_port: 62478, mac: null, broadcast: null, enabled: 1, last_seen: 1000, last_error: null, fingerprint: null, sample_interval_s: 5 };
   const withDisks = unitView(u, { now: 1000, pollInterval: 5, latest: () => null, staticJson: () => null, disks: () => ({ ts: 999, mounts: api(mountsA) }) } as any) as any;
   expect(withDisks.disks).toEqual({ ts: 999, mounts: api(mountsA) });
   const none = unitView(u, { now: 1000, pollInterval: 5, latest: () => null, staticJson: () => null, disks: () => null } as any) as any;

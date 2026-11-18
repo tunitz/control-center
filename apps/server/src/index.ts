@@ -113,7 +113,7 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
     if (!b.name || !b.host) return json({ error: "name and host required" }, 400);
     const k = generateUnitKey(`cc-${b.name}`);
     const r = db.query("INSERT INTO units(name,host,ssh_port,pubkey,privkey_enc,fingerprint,mac,broadcast,sample_interval_s,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
-      .run(String(b.name), String(b.host), Number(b.ssh_port ?? 22), k.publicKey, encrypt(master, k.privateKey), k.fingerprint, b.mac || null, b.broadcast || "255.255.255.255", Number(b.sample_interval_s ?? getSetting(db, "sample_interval_s", "5")), now());
+      .run(String(b.name), String(b.host), Number(b.ssh_port ?? 62478), k.publicKey, encrypt(master, k.privateKey), k.fingerprint, b.mac || null, b.broadcast || "255.255.255.255", Number(b.sample_interval_s ?? getSetting(db, "sample_interval_s", "5")), now());
     const id = Number(r.lastInsertRowid);
     audit(db, "admin", "unit.added", id, String(b.name), ip);
     return json({ id, public_key: k.publicKey, fingerprint: k.fingerprint }, 201);
@@ -135,10 +135,11 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
       pool.drop(id); deleteUnit(db, id); audit(db, "admin", "unit.deleted", id, u.name, ip); return json({ ok: true });
     }
     if (sub === "installer" && m === "GET") {
-      const script = installScript({ pubkey: u.pubkey, from: process.env.CC_PUBLIC_IP, interval: u.sample_interval_s });
+      const sshPort = u.ssh_port;
+      const script = installScript({ pubkey: u.pubkey, from: process.env.CC_PUBLIC_IP, interval: u.sample_interval_s, sshPort });
       const sudo = url.searchParams.get("sudo") !== "0";
       if (url.searchParams.get("format") === "curl")
-        return new Response(curlCommand({ sudo,  repo: process.env.CC_AGENT_REPO ?? "tunitz/ccagent", tag: process.env.CC_AGENT_TAG ?? "latest", pubkey: u.pubkey }), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
+        return new Response(curlCommand({ sudo,  repo: process.env.CC_AGENT_REPO ?? "tunitz/ccagent", tag: process.env.CC_AGENT_TAG ?? "latest", pubkey: u.pubkey, sshPort }), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
       if (url.searchParams.get("format") === "paste")
         return new Response(pasteCommand(script, sudo), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
       return new Response(script, { headers: { "content-type": "text/x-shellscript", "content-disposition": `attachment; filename="install-ccagent-${u.name.replace(/[^\w.-]/g, "_")}.sh"` } });

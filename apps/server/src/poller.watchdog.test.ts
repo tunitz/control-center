@@ -4,7 +4,7 @@ import { encrypt } from "./crypto";
 import { Scheduler, type UnitRow } from "./poller";
 
 const unit = (db: ReturnType<typeof openDb>) => {
-  db.query("INSERT INTO units(id,name,host,ssh_port,ssh_user,pubkey,privkey_enc,created_at,sample_interval_s) VALUES(1,'u','127.0.0.1',22,'x','p',?,0,5)").run(encrypt("m", "dummy-private-key"));
+  db.query("INSERT INTO units(id,name,host,ssh_port,ssh_user,pubkey,privkey_enc,created_at,sample_interval_s) VALUES(1,'u','127.0.0.1',62478,'x','p',?,0,5)").run(encrypt("m", "dummy-private-key"));
   return db.query("SELECT * FROM units WHERE id=1").get() as UnitRow;
 };
 const never = <T,>() => new Promise<T>(() => {});
@@ -42,7 +42,7 @@ test("a hung static refresh does not wedge the unit either", async () => {
 
 test("a static refresh failure is recorded in last_error instead of failing silently", async () => {
   const db = openDb(":memory:"), u = unit(db);
-  const { pool } = fakePool(async () => { throw new Error("connect ECONNREFUSED 192.168.31.2:22"); });
+  const { pool } = fakePool(async () => { throw new Error("connect ECONNREFUSED 192.168.31.2:62478"); });
   const sched = new Scheduler(db, pool, "m", () => 5, () => {}, { pollTimeoutMs: 50 });
 
   await sched.run(u);
