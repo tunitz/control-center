@@ -115,7 +115,7 @@ export default function UnitDetail({ id }: { id: number }) {
         </div>}
       </section>}
       <EnergyHistory unitId={id} />
-      <Diagnostics unitId={id} />
+      <Diagnostics unit={u} onChanged={reload} />
       {u.online && <Services unitId={id} />}
       {confirm && <Modal label={`Confirm ${confirm} ${u.name}`} onClose={() => setConfirm(null)}>
         {confirm === "remove" ? <>

@@ -26,7 +26,7 @@ export function unitView(u: any, deps: UnitViewDeps) {
     live_w, sample_fresh: fresh,
     wall_w: wall?.watts ?? null, wall_ts: wall?.ts ?? null,
     id: u.id, name: u.name, host: u.host, ssh_port: u.ssh_port, mac: u.mac, broadcast: u.broadcast, enabled: !!u.enabled, online, last_seen: u.last_seen, last_sample_ts: u.last_sample_ts ?? null, last_error: u.last_error,
-    fingerprint: u.fingerprint, host_fingerprint: u.host_fingerprint ?? null, migration_pending_port: u.migration_pending_port ?? null, sample_interval_s: u.sample_interval_s, static: s, latest: l,
+    fingerprint: u.fingerprint, public_key: u.pubkey ?? null, host_fingerprint: u.host_fingerprint ?? null, migration_pending_port: u.migration_pending_port ?? null, sample_interval_s: u.sample_interval_s, static: s, latest: l,
     disks: deps.disks?.(u.id) ?? null,
     ram_pct: l && s && l.ram_used_mb != null ? (l.ram_used_mb / s.ram_total_mb) * 100 : null,
     vram_pct: l && s?.vram_total_mb && l.vram_used_mb != null ? (l.vram_used_mb / s.vram_total_mb) * 100 : null,

@@ -16,8 +16,16 @@ export default function InstallPanel({ id, name, publicKey, fingerprint }: { id:
   }, [id, sudo]);
   const download = async () => {
     const r = await fetch(`/api/units/${id}/installer`, { credentials: "same-origin" });
-    const url = URL.createObjectURL(await r.blob()), a = document.createElement("a");
-    a.href = url; a.download = file; a.click(); URL.revokeObjectURL(url);
+    if (!r.ok) { setCopied("failed"); return; }
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a");
+    a.href = url; a.download = file; a.style.display = "none";
+    document.body.appendChild(a);
+    try { a.click(); } finally {
+      a.remove();
+      // Revoking immediately can cancel the download in some browsers.
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    }
   };
   const copy = async (text: string, which: "paste" | "key") => {
     const ok = await copyText(text);
