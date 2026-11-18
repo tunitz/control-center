@@ -1,7 +1,28 @@
 import { test, expect } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { installScript, agentFile } from "./install";
 
 const pub = "ssh-ed25519 AAAATESTKEY cc-test";
+test("CC_AGENT_DIR overrides where agent files and the installer are read from", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cc-agent-"));
+  const prev = process.env.CC_AGENT_DIR;
+  try {
+    for (const f of ["ccagent.sh", "ccagent-gate", "ccagent-power", "ccagent-svc", "uninstall.sh"])
+      writeFileSync(join(dir, f), `echo FIXTURE_${f.replace(/\W/g, "_")}\n`);
+    process.env.CC_AGENT_DIR = dir;
+    expect(agentFile("ccagent.sh")).toBe("echo FIXTURE_ccagent_sh\n");
+    const s = installScript({ pubkey: pub, interval: 5 });
+    expect(s).toContain("echo FIXTURE_ccagent_sh");
+    expect(s).toContain("echo FIXTURE_uninstall_sh");
+  } finally {
+    if (prev === undefined) delete process.env.CC_AGENT_DIR;
+    else process.env.CC_AGENT_DIR = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("installer is self-contained: no network callback, embeds agent files and key", () => {
   const s = installScript({ pubkey: pub, interval: 5 });
   expect(s).not.toMatch(/curl|wget|BASE=|TOKEN/);

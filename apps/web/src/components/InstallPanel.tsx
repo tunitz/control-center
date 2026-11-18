@@ -37,13 +37,13 @@ export default function InstallPanel({ id, name, publicKey, fingerprint }: { id:
         <button className={"chip" + (!sudo ? " on" : "")} aria-pressed={!sudo} onClick={() => setSudo(false)}>No sudo (already root)</button>
       </div>}
       {tab === "curl" ? <>
-        <div className="pre" style={{ userSelect: "all" }}>{curl || "loading…"}</div>
+        <div className="pre" style={{ userSelect: "all" }}>{curl || "Loading command"}</div>
         <button className="btn pri" style={{ marginTop: 8 }} disabled={!curl} onClick={() => copy(curl, "paste")}>{copied === "paste" ? "Copied to clipboard" : copied === "failed" ? "Copy blocked: long-press the command above" : "Copy command"}</button>
         <p className="muted" style={{ fontSize: 13 }}>Run it on the unit. It downloads the installer from the public ccagent release (no login, no secrets) and authorizes only this unit's public key. The unit needs internet, not access to the Control Center. No internet there? Use Offline paste. Proxmox hosts and root shells have no sudo: pick "No sudo".</p>
       </> : tab === "paste" ? <>
         <button className="btn pri" disabled={!paste} onClick={() => copy(paste, "paste")}>{copied === "paste" ? "Copied to clipboard" : copied === "failed" ? "Copy blocked: select the text below" : "Copy install command"}</button>
         <p className="muted" style={{ fontSize: 13 }}>Paste it into a terminal on the unit and it installs as root. Everything needed is inside the paste, so the unit needs no access to the Control Center. {paste ? `${Math.round(paste.length / 1024)} KB.` : ""}</p>
-        <details open={copied === "failed"}><summary className="muted" style={{ cursor: "pointer" }}>{copied === "failed" ? "Tap the box, select all, copy" : "Preview"}</summary><textarea readOnly value={paste || "loading…"} onFocus={e => e.currentTarget.select()} aria-label="Install command" style={{ width: "100%", height: 160, fontFamily: "ui-monospace,monospace", fontSize: 16, background: "var(--surface2)", border: "1px solid var(--line)", borderRadius: 10, color: "var(--text)", padding: 10 }} /></details>
+        <details open={copied === "failed"}><summary className="muted" style={{ cursor: "pointer" }}>{copied === "failed" ? "Tap the box, select all, copy" : "Preview"}</summary><textarea readOnly value={paste || "Loading command"} onFocus={e => e.currentTarget.select()} aria-label="Install command" style={{ width: "100%", height: 160, fontFamily: "ui-monospace,monospace", fontSize: 16, background: "var(--surface2)", border: "1px solid var(--line)", borderRadius: 10, color: "var(--text)", padding: 10 }} /></details>
       </> : <>
         <ol className="muted" style={{ paddingLeft: 18 }}>
           <li>Download the installer (it embeds the agent and this unit's key).</li>

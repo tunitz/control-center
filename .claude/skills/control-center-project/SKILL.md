@@ -186,7 +186,7 @@ Rules for changing the service-control helper or gate:
 ## Common Operations
 - **Add unit**: Web UI → Add unit → curl command (default), copy-paste heredoc, or download installer
 - **Remove unit**: Unit detail page → Remove unit (with confirmation)
-- **Reset admin password**: `CC_ADMIN_PASSWORD` in `.env` (chmod 600, untracked)
+- **Reset admin password**: sign in and use Settings > Security > Reset password. `CC_ADMIN_PASSWORD` in `.env` (chmod 600, untracked) only seeds a fresh database; editing it later has no effect.
 - **Check unit status**: `curl -s localhost:3030/api/units` (with auth cookie)
 - **Audit log**: `docker exec control-center-control-center-1 bun -e 'import{Database}from"bun:sqlite";const d=new Database("/data/cc.db");console.log(d.query("select * from audit order by id desc limit 10").all())'`
 

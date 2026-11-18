@@ -8,15 +8,31 @@ Bun + SQLite backend, React + uPlot frontend, single admin login.
 bun install && bun run build:web
 CC_MASTER_KEY=<long random> CC_ADMIN_PASSWORD=<pw> CC_PUBLIC_URL=http://<this-host>:3030 bun run start
 ```
-Or `docker compose up -d --build` with `CC_MASTER_KEY` and `CC_PUBLIC_URL` in `.env`. If `CC_ADMIN_PASSWORD` is unset, a random one is printed once on first start.
+Or `docker compose up -d --build` with `CC_MASTER_KEY` and `CC_PUBLIC_URL` in `.env`. If `CC_ADMIN_PASSWORD` is unset, open the dashboard and set the admin password on first run. Once set, change it in Settings > Security.
 `CC_MASTER_KEY` encrypts the per-unit SSH private keys at rest. Back it up: losing it means re-keying every unit.
 
 | Env | Default | Meaning |
 |---|---|---|
 | PORT / HOST | 3030 / 0.0.0.0 | listen address |
-| CC_DATA | ./data | SQLite location |
+| CC_DATA | ./data (source default) | SQLite location; the compiled binary must set an absolute path |
+| CC_WEB | apps/web/dist (source default) | built web assets; the compiled binary must set it |
+| CC_AGENT_DIR | agent (source default) | agent scripts used to build installers; the compiled binary must set it |
 | CC_PUBLIC_IP | unset | if set, the key on units is restricted with `from="<ip>"` |
 | CC_POLL_INTERVAL | 5 | initial poll interval (editable in Settings) |
+
+## Compiled binary
+Build the web assets first, then the executable:
+```
+bun run build:web
+bun run build:server
+```
+`build:server` writes the gitignored `dist/control-center`. The web UI and agent scripts are not embedded, and the executable does not read `.env` automatically (`--no-compile-autoload-dotenv`). For a loopback-only deployment:
+```
+CC_MASTER_KEY='<persistent master key>' CC_ADMIN_PASSWORD='<admin password>' HOST=127.0.0.1 \
+  CC_DATA=/srv/control-center/data CC_WEB=/srv/control-center/apps/web/dist \
+  CC_AGENT_DIR=/srv/control-center/agent ./dist/control-center
+```
+Under systemd, pass the existing secrets with `EnvironmentFile=` pointing at `.env` and the non-secret runtime paths with `Environment=`. All three path variables must be set for a compiled deployment; `bun run start` keeps its source-run defaults (`./data`, `apps/web/dist`, `agent`), which do not apply to the executable because Bun resolves `import.meta.dir` to its internal virtual root rather than the working directory.
 
 ## Add a unit (no connection from the unit to the Control Center is needed)
 Only the Control Center connects out to the unit (SSH, port 22, key auth), so units on another subnet work as long as the Control Center can reach them.
@@ -46,7 +62,7 @@ Raw samples are kept 48 h, 1-minute rollups 30 d, 15-minute rollups 90 d (the re
 GPU power is read from hwmon (AMD) or nvidia-smi. CPU power needs Intel/AMD RAPL; units without it show "n/a".
 
 ## API (cookie session; writes need header `x-cc: 1`)
-- `POST /api/auth/login {password}`, `POST /api/auth/logout`, `POST /api/auth/password {current,next}`
+- `GET /api/auth/status` → `{setupNeeded, authed}` (public); `POST /api/auth/setup {password}` (first run only), `POST /api/auth/login {password}`, `POST /api/auth/logout`, `POST /api/auth/password {current,next}`
 - `GET /api/units`, `POST /api/units {name,host,mac?}` -> `{id,public_key,fingerprint}`; `GET /api/units/:id/installer` (per-unit script); `GET|PATCH|DELETE /api/units/:id`; `POST /api/units/:id/rekey` -> `{public_key,fingerprint}`
 - `GET /api/units/:id/metrics?range=1h|6h|12h|24h|7d|30d` -> `{tier,points[],summary{min,avg,max},energy_wh}`
 - `POST /api/units/:id/power {action: shutdown|restart|wake, confirm:true}`

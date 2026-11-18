@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { openDb, getSetting, setSetting, audit } from "./db";
-import { ensureAdmin, checkPassword, changePassword, createSession, validSession, destroySession, makeLimiter } from "./auth";
+import { ensureAdmin, setupNeeded, setupAdmin, checkPassword, changePassword, createSession, validSession, destroySession, makeLimiter, sessionCookie, clearSessionCookie } from "./auth";
 import { monthCost, setCurrentRate, monthKey, getRate } from "./cost";
 import { queryMetrics, RANGES, type Range } from "./metrics";
 import { rollup, purge } from "./rollup";
@@ -19,8 +19,7 @@ const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
 mkdirSync(DATA, { recursive: true });
 const master = process.env.CC_MASTER_KEY ?? (() => { console.warn("CC_MASTER_KEY not set: using a dev key"); return "dev-master-key-change-me"; })();
 const db = openDb(join(DATA, "cc.db"));
-const initialPw = await ensureAdmin(db, process.env.CC_ADMIN_PASSWORD);
-if (initialPw) console.log(`\n== Initial admin password: ${initialPw}  (change it in Settings) ==\n`);
+await ensureAdmin(db, process.env.CC_ADMIN_PASSWORD);
 
 const now = () => Math.floor(Date.now() / 1000);
 const pool = new SshPool();
@@ -48,7 +47,8 @@ const unitView = (u: any) => unitViewOf(u, {
 const json = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
 const cookieOf = (req: Request) => /(?:^|; )cc_session=([^;]+)/.exec(req.headers.get("cookie") ?? "")?.[1];
 const loginLimit = makeLimiter(5, 60);
-const WEB = join(import.meta.dir, "../../web/dist");
+const setupLimit = makeLimiter(5, 60);
+const WEB = process.env.CC_WEB ?? join(import.meta.dir, "../../web/dist");
 
 const server = Bun.serve({
   port: Number(process.env.PORT ?? 3030), hostname: process.env.HOST ?? "0.0.0.0", idleTimeout: 0,
@@ -56,12 +56,29 @@ const server = Bun.serve({
     const url = new URL(req.url), path = url.pathname, ip = srv.requestIP(req)?.address ?? "";
     try {
       if (path === "/api/health") return json({ app: "control-center", ok: true });
+      // Public: the browser needs to know whether to show first-run setup or the login form.
+      // Returns auth state too so boot takes a single round-trip.
+      if (path === "/api/auth/status" && req.method === "GET") {
+        const pending = setupNeeded(db);
+        return json({ setupNeeded: pending, authed: !pending && validSession(db, cookieOf(req), now()) });
+      }
+      if (path === "/api/auth/setup" && req.method === "POST") {
+        if (!setupNeeded(db)) return json({ error: "password already set" }, 409);
+        if (!setupLimit(ip, now())) return json({ error: "too many attempts" }, 429);
+        if (req.headers.get("x-cc") !== "1") return json({ error: "csrf" }, 403);
+        const body = await req.json().catch(() => ({}));
+        try { await setupAdmin(db, String(body.password ?? "")); }
+        catch (e: any) { return json({ error: String(e?.message ?? e) }, 400); }
+        const id = createSession(db, now()); audit(db, "anon", "auth.setup", null, "", ip);
+        return json({ ok: true }, 200, { "set-cookie": sessionCookie(id) });
+      }
       if (path === "/api/auth/login" && req.method === "POST") {
+        if (setupNeeded(db)) return json({ error: "setup required" }, 409);
         if (!loginLimit(ip, now())) return json({ error: "too many attempts" }, 429);
         const body = await req.json().catch(() => ({}));
         if (!(await checkPassword(db, String(body.password ?? "")))) { audit(db, "anon", "login.failed", null, "", ip); return json({ error: "invalid password" }, 401); }
         const id = createSession(db, now()); audit(db, "admin", "login", null, "", ip);
-        return json({ ok: true }, 200, { "set-cookie": `cc_session=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${7 * 86400}` });
+        return json({ ok: true }, 200, { "set-cookie": sessionCookie(id) });
       }
       if (path.startsWith("/api/")) {
         if (!validSession(db, cookieOf(req), now())) return json({ error: "unauthorized" }, 401);
@@ -87,9 +104,8 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
   const units = () => db.query("SELECT * FROM units ORDER BY id").all() as any[];
   const svc = await handleServiceRoute({ db, pool, master, now: now(), pollInterval: pollInterval(), authed: true }, req, url, path, ip);
   if (svc) return svc;
-  if (path === "/api/auth/logout" && m === "POST") { const id = cookieOf(req); if (id) destroySession(db, id); return json({ ok: true }, 200, { "set-cookie": "cc_session=; Path=/; Max-Age=0" }); }
+  if (path === "/api/auth/logout" && m === "POST") { const id = cookieOf(req); if (id) destroySession(db, id); return json({ ok: true }, 200, { "set-cookie": clearSessionCookie() }); }
   if (path === "/api/auth/password" && m === "POST") { const b = await req.json(); if (!(await checkPassword(db, String(b.current ?? "")))) return json({ error: "current password wrong" }, 400); await changePassword(db, String(b.next ?? "")); audit(db, "admin", "password.changed", null, "", ip); return json({ ok: true }); }
-  if (path === "/api/me") return json({ ok: true });
 
   if (path === "/api/units" && m === "GET") { const mc = monthCost(db, now()); return json(units().map(unitView).map(u => ({ ...u, month: mc.units.find(x => x.id === u.id) }))); }
   if (path === "/api/units" && m === "POST") {

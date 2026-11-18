@@ -3,8 +3,10 @@ import ts from "typescript";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-// House rule (tun): no ellipses on buttons, chips or menu items. "Remove unit", not "Remove unit…".
-const ELLIPSIS = /…|\.\.\./;
+// House rule (tun): no ellipses on buttons, chips or menu items, and none in visible text anywhere.
+// Write "Remove unit", not "Remove unit" followed by three dots or a single ellipsis character.
+const ELLIPSIS = /\u2026|\.\.\./;
+const ELLIPSIS_CHAR = "\u2026";
 const isControl = (tag: string, attrs: string) => tag === "button" || /\b(btn|chip)\b/.test(attrs);
 
 function tsxFiles(dir: string): string[] {
@@ -38,5 +40,22 @@ test("no ellipsis in any button, chip or menu item label", () => {
     };
     visit(sf);
   }
+  expect(offenders).toEqual([]);
+});
+
+test("no ellipsis character anywhere in web source", () => {
+  const offenders: string[] = [];
+  const walk = (dir: string) => {
+    for (const f of readdirSync(dir)) {
+      const p = join(dir, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.(tsx?|css|html)$/.test(f)) {
+        readFileSync(p, "utf8").split("\n").forEach((line, i) => {
+          if (line.includes(ELLIPSIS_CHAR)) offenders.push(`${p.split("/src/")[1] ?? p}:${i + 1}`);
+        });
+      }
+    }
+  };
+  walk(import.meta.dir);
   expect(offenders).toEqual([]);
 });
