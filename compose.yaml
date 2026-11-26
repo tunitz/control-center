@@ -1,0 +1,23 @@
+# network_mode: host so Wake-on-LAN broadcasts reach the LAN and units are reachable by IP.
+services:
+  control-center:
+    image: ghcr.io/tunitz/control-center:${IMAGE_TAG:-latest}
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      PORT: "${PORT:-3030}"
+      HOST: "${HOST:-0.0.0.0}"
+      CC_MASTER_KEY: ${CC_MASTER_KEY:?set CC_MASTER_KEY in .env}
+      CC_ADMIN_PASSWORD: ${CC_ADMIN_PASSWORD:-}
+      CC_BOOTSTRAP_TOKEN: ${CC_BOOTSTRAP_TOKEN:-}
+    volumes:
+      - cc-data:/data
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || '3030') + '/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  cc-data:

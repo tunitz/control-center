@@ -1,6 +1,6 @@
 # Deployment guide
 
-The recommended production runtime is the Docker image defined in `docker-compose.yml`. It builds the web bundle and runs the Bun server with a persistent data volume. A compiled-binary option is available for hosts that prefer a supervisor-agnostic process.
+The recommended production runtime is the Docker image defined in `compose.yaml` (pulling from `ghcr.io/tunitz/control-center`). A `compose.build.yaml` override builds locally, and a compiled-binary option is available for hosts that prefer a supervisor-agnostic process.
 
 ## Docker deployment
 
@@ -16,7 +16,9 @@ PORT=3030
 ```
 
 ```bash
-docker compose up -d --build
+docker compose up -d
+# Or build locally instead of pulling from GHCR:
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
 ```
 
 The compose file mounts a named volume at `/data` and uses host network mode so wake-on-LAN broadcasts reach the LAN and units are reachable by IP. Keep `CC_MASTER_KEY` stable across restarts and back it up separately; it is not included in database backups.

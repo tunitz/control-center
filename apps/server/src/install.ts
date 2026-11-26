@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { gzipSync } from "node:zlib";
 
+const isCompiled = import.meta.dir.startsWith("/$bunfs") || /^[A-Za-z]:[\\/]+~BUN/i.test(import.meta.dir);
+const agentBaseDir = isCompiled ? dirname(process.execPath) : join(import.meta.dir, "../../..");
+
 export const agentFile = (name: string) =>
-  readFileSync(join(process.env.CC_AGENT_DIR ?? join(import.meta.dir, "../../../agent"), name), "utf8");
+  readFileSync(join(process.env.CC_AGENT_DIR ?? join(agentBaseDir, "agent"), name), "utf8");
 const slim = (src: string) => src.split("\n").filter((l, i) => i === 0 || (l.trim() !== "" && !/^\s*#/.test(l))).join("\n") + "\n";
 const b64 = (name: string) => (Buffer.from(slim(agentFile(name))).toString("base64").match(/.{1,76}/g) ?? []).join("\n");
 
