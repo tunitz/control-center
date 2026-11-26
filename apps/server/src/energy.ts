@@ -1,6 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { computeEnergy } from "./ingest";
 import { getRate } from "./cost";
+import { dayEnd, dayStart, getTimezone } from "./tz";
+
+export { dayStart };
 
 type Sample = { ts: number; cpu_w: number | null; gpu_w: number | null; cpu_uj: number | null; gpu_uj: number | null };
 
@@ -43,26 +46,9 @@ export function sumEnergy(db: Database, unitId: number, from: number, to: number
   return r.s;
 }
 
-// ---- Daily per-unit energy history (Asia/Manila, UTC+8 with no DST) ----
+// ---- Daily per-unit energy history (configured IANA timezone, default UTC) ----
 
-const TZ_OFFSET_S = 8 * 3600;
-const DAY_S = 86400;
-
-export type EnergyDay = { day: string; kwh: number; php: number };
-
-/** Calendar midnight of a YYYY-MM-DD day as a UTC epoch-second timestamp. */
-function utcMidnight(day: string): number {
-  const [y, m, d] = day.split("-").map(Number);
-  const dt = new Date(0);
-  dt.setUTCFullYear(y, m - 1, d);
-  dt.setUTCHours(0, 0, 0, 0);
-  return dt.getTime() / 1000;
-}
-
-/** Start of a Manila calendar day in UTC epoch seconds (00:00 Manila = 16:00 previous UTC day). */
-export function dayStart(day: string): number {
-  return utcMidnight(day) - TZ_OFFSET_S;
-}
+export type EnergyDay = { day: string; kwh: number; cost: number; php: number };
 
 function nextDay(day: string): string {
   const [y, m, d] = day.split("-").map(Number);
@@ -89,18 +75,19 @@ export function parseRange(from: string | null, to: string | null): { from: stri
   return { from: f, to: t };
 }
 
-/** Per-day kWh and PHP cost over an inclusive Manila-day range. `unitId=null` aggregates all units. */
-export function dailyEnergy(db: Database, from: string, to: string, unitId: number | null, now: number): EnergyDay[] {
+/** Per-day kWh and cost over an inclusive local-day range in `tz`. `unitId=null` aggregates all units. */
+export function dailyEnergy(db: Database, from: string, to: string, unitId: number | null, now: number, tz: string = getTimezone(db)): EnergyDay[] {
   const out: EnergyDay[] = [];
   const all = db.query("SELECT COALESCE(SUM(wh),0) s FROM energy_intervals WHERE end_ts>=? AND end_ts<?");
   const one = db.query("SELECT COALESCE(SUM(wh),0) s FROM energy_intervals WHERE unit_id=? AND end_ts>=? AND end_ts<?");
   for (let day = from; day <= to; day = nextDay(day)) {
-    const start = dayStart(day), end = start + DAY_S;
+    const start = dayStart(day, tz), end = dayEnd(day, tz);
     const row = (unitId == null ? all.get(start, end) : one.get(unitId, start, end)) as { s: number };
     const wh = row.s;
     const kwh = wh / 1000;
     const rate = getRate(db, day.slice(0, 7), now);
-    out.push({ day, kwh, php: kwh * rate });
+    const cost = kwh * rate;
+    out.push({ day, kwh, cost, php: cost });
   }
   return out;
 }
@@ -111,9 +98,9 @@ export function csvEscape(value: string | number): string {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** CSV with a `day,kwh,php` header row and one row per day. */
-export function energyCsv(rows: EnergyDay[]): string {
-  const lines = ["day,kwh,php"];
-  for (const r of rows) lines.push([r.day, r.kwh, r.php].map(csvEscape).join(","));
+/** CSV with a `day,kwh,cost` header row and one row per day. */
+export function energyCsv(rows: Array<{ day: string; kwh: number; cost?: number; php?: number }>): string {
+  const lines = ["day,kwh,cost"];
+  for (const r of rows) lines.push([r.day, r.kwh, r.cost ?? r.php ?? 0].map(csvEscape).join(","));
   return lines.join("\r\n") + "\r\n";
 }

@@ -2,7 +2,7 @@ import { test, expect, beforeEach } from "bun:test";
 import { openDb } from "./db";
 import { evaluateAlerts, inWindow, handleAlertRoute, type AlertDeps } from "./alerts";
 
-const NOW = 1_800_000_000; // Manila: check weekday/minute in tests via localTime indirectly
+const NOW = 1_800_000_000; // check weekday/minute in tests via localTime indirectly
 let db: ReturnType<typeof openDb>;
 const deps = (): AlertDeps => ({ db, now: NOW, pollInterval: 5, authed: true });
 const req = (method: string, path: string, body?: unknown) => new Request("http://cc.test" + path, {
@@ -43,10 +43,9 @@ test("disk alerts are opt-in and use the configured threshold", () => {
   expect((db.query("SELECT message FROM alert_state WHERE kind='disk'").get() as any).message).toMatch(/above 80%/);
 });
 
-test("maintenance windows suppress alerts, including a window spanning midnight", () => {
-  const t = NOW + 8 * 3600;
-  const weekday = new Date(Math.floor(t / 86400) * 1000).getUTCDay();
-  const minute = Math.floor((t % 86400) / 60);
+test("maintenance windows suppress alerts, including a window spanning midnight and custom timezone", () => {
+  const weekday = new Date(Math.floor(NOW / 86400) * 86400 * 1000).getUTCDay();
+  const minute = Math.floor((NOW % 86400) / 60);
   // A wrapping window that includes this minute: start just before, end just after midnight.
   const start = minute > 60 ? minute - 60 : 1380;
   const end = minute > 60 ? 0 : 60;
@@ -55,6 +54,15 @@ test("maintenance windows suppress alerts, including a window spanning midnight"
   db.query("UPDATE units SET last_seen=? WHERE id=1").run(NOW - 1000);
   expect(evaluateAlerts(db, NOW, 5)).toBe(0);
   expect(activeKinds()).toEqual([]);
+
+  // With Asia/Manila (+08:00), local time shifts by 8 hours.
+  db.query("INSERT INTO settings(key,value) VALUES('timezone','Asia/Manila') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run();
+  const t = NOW + 8 * 3600;
+  const mDay = new Date(Math.floor(t / 86400) * 86400 * 1000).getUTCDay();
+  const mMin = Math.floor((t % 86400) / 60);
+  db.query("DELETE FROM maintenance_windows").run();
+  db.query("INSERT INTO maintenance_windows(unit_id,days,start_minute,end_minute,enabled) VALUES(?,?,?,?,1)").run(null, String(mDay), mMin - 10, mMin + 10);
+  expect(evaluateAlerts(db, NOW, 5)).toBe(0);
 });
 
 test("alert routes validate input and expose active state", async () => {

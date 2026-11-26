@@ -5,6 +5,7 @@ import { openDb, getSetting, setSetting, audit } from "./db";
 import { ensureAdmin, setupNeeded, setupAdmin, authorizedSetup, setBootstrapHash, clearBootstrap, checkPassword, changePassword, createSession, validSession, destroySession, makeLimiter, sessionCookie, clearSessionCookie } from "./auth";
 import { monthCost, setCurrentRate, monthKey, getRate } from "./cost";
 import { parseRange, dailyEnergy, energyCsv } from "./energy";
+import { getCurrency, getTimezone, isValidTimezone } from "./tz";
 import { queryMetrics, RANGES, type Range } from "./metrics";
 import { rollup, purge } from "./rollup";
 import { generateUnitKey, encrypt } from "./crypto";
@@ -259,14 +260,51 @@ async function api(req: Request, url: URL, path: string, ip: string): Promise<Re
   }
   const rm = /^\/api\/rates\/(\d{4}-\d{2})$/.exec(path);
   if (rm && m === "PUT") {
-    if (rm[1] !== monthKey(now())) return json({ error: "only the current month's rate can be edited" }, 400);
-    const b = await req.json(); setCurrentRate(db, Number(b.php_per_kwh), now()); audit(db, "admin", "rate.set", null, `${rm[1]}=${b.php_per_kwh}`, ip);
-    return json({ month: rm[1], php_per_kwh: getRate(db, rm[1], now()) });
+    const tz = getTimezone(db);
+    if (rm[1] !== monthKey(now(), tz)) return json({ error: "only the current month's rate can be edited" }, 400);
+    const b = await req.json();
+    const rateVal = Number(b.rate_per_kwh ?? b.php_per_kwh);
+    setCurrentRate(db, rateVal, now(), tz);
+    audit(db, "admin", "rate.set", null, `${rm[1]}=${rateVal}`, ip);
+    const r = getRate(db, rm[1], now());
+    const currency = getCurrency(db);
+    return json({ month: rm[1], rate_per_kwh: r, php_per_kwh: r, currency_code: currency.code, currency_symbol: currency.symbol });
   }
-  if (path === "/api/rates" && m === "GET") { getRate(db, monthKey(now()), now()); return json(db.query("SELECT month, php_per_kwh, set_at FROM rates ORDER BY month DESC").all()); }
-  if (path === "/api/settings" && m === "GET") return json({ poll_interval_s: pollInterval(), sample_interval_s: Number(getSetting(db, "sample_interval_s", "5")), retention_days: Number(getSetting(db, "retention_days", "90")), cost_include_wall: getSetting(db, "cost_include_wall", "0") === "1" });
+  if (path === "/api/rates" && m === "GET") {
+    const tz = getTimezone(db);
+    getRate(db, monthKey(now(), tz), now());
+    const rows = db.query("SELECT month, php_per_kwh, set_at FROM rates ORDER BY month DESC").all() as Array<{ month: string; php_per_kwh: number; set_at: number }>;
+    return json(rows.map(r => ({ ...r, rate_per_kwh: r.php_per_kwh })));
+  }
+  if (path === "/api/settings" && m === "GET") {
+    const currency = getCurrency(db);
+    return json({
+      poll_interval_s: pollInterval(),
+      sample_interval_s: Number(getSetting(db, "sample_interval_s", "5")),
+      retention_days: Number(getSetting(db, "retention_days", "90")),
+      cost_include_wall: getSetting(db, "cost_include_wall", "0") === "1",
+      timezone: getTimezone(db),
+      currency_code: currency.code,
+      currency_symbol: currency.symbol,
+    });
+  }
   if (path === "/api/settings" && m === "PUT") {
     const b = await req.json();
+    if (b.timezone !== undefined) {
+      const tz = String(b.timezone).trim();
+      if (!isValidTimezone(tz)) return json({ error: "invalid IANA timezone" }, 400);
+      setSetting(db, "timezone", tz);
+    }
+    if (b.currency_code !== undefined) {
+      const code = String(b.currency_code).trim().toUpperCase();
+      if (!/^[A-Z0-9]{1,8}$/.test(code)) return json({ error: "currency_code must be 1..8 alphanumeric characters" }, 400);
+      setSetting(db, "currency_code", code);
+    }
+    if (b.currency_symbol !== undefined) {
+      const sym = String(b.currency_symbol).trim();
+      if (sym.length < 1 || sym.length > 4) return json({ error: "currency_symbol must be 1..4 characters" }, 400);
+      setSetting(db, "currency_symbol", sym);
+    }
     if (b.poll_interval_s != null) setSetting(db, "poll_interval_s", String(Math.min(3600, Math.max(1, Number(b.poll_interval_s)))));
     if (b.sample_interval_s != null) setSetting(db, "sample_interval_s", String(Math.min(3600, Math.max(1, Number(b.sample_interval_s)))));
     if (b.retention_days != null) setSetting(db, "retention_days", String(Math.min(90, Math.max(1, Number(b.retention_days)))));

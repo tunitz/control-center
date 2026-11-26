@@ -21,14 +21,29 @@ data/
 coverage/
 .nyc_output/
 .playwright-cli/
+playwright-report/
+test-results/
+release-artifacts/
 
 # Disposable and scratch files
 scratch/
 **/scratch/
+__pycache__/
+*.pyc
+*.pyo
+*.sqlite*
+/PLAN.md
+/NOTES.md
+/TODO.md
 
 # Editor, OS and compiler noise
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.code-workspace
 .DS_Store
 Thumbs.db
+Desktop.ini
 *.swp
 *.swo
 *.swn

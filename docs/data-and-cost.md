@@ -28,9 +28,9 @@ Each valid interval between two consecutive samples contributes watt-hours:
 
 The result is stored per interval in `energy_intervals` and summed into hourly rows. Units without RAPL show CPU power as unavailable. These figures are a CPU+GPU **estimate**, not a wall-power measurement.
 
-## Manila day boundaries
+## Timezone and day boundaries
 
-All calendar-day and month accounting uses Asia/Manila time (UTC+8, no daylight saving). A Manila day runs from 16:00 UTC on the previous day to 16:00 UTC on the stated day; a billing month is derived from the same offset. Daily energy history, rate lookups, and maintenance-window weekday/minutes all use this local clock.
+Calendar-day and billing-month accounting uses the configured IANA timezone (Settings → Monitoring → Regional & currency, or `CC_TIMEZONE`; defaults to `UTC`). Daily energy history, rate lookups, and maintenance-window weekday/minutes all use this local clock.
 
 ## Wall power input
 
@@ -51,7 +51,7 @@ Cost for the current billing month is the month's energy multiplied by that mont
 - **Default:** cost uses the CPU+GPU estimate for every enabled unit. The dashboard reports the basis as `estimated CPU+GPU power`.
 - **With `cost_include_wall` enabled:** units that have measured wall energy use that measurement **instead of** their estimate; units without a meter keep the CPU+GPU estimate. The two are never added together. The dashboard and API state the basis as `measured wall where available, CPU+GPU estimate elsewhere` (or the estimate-only wording when no wall data exists).
 
-Each unit in `GET /api/cost` carries its own `basis` and `wall_kwh`, so measured data is never mistaken for an estimate. The response also includes the current `rate`, `total_kwh`, and `total_php`.
+Each unit in `GET /api/cost` carries its own `basis` and `wall_kwh`, so measured data is never mistaken for an estimate. The response also includes the current `rate`, `timezone`, `currency_code`, `currency_symbol`, `total_kwh`, and `total_cost` (with legacy `total_php` / `php` aliases for existing clients).
 
 Rates are stored per month. A new month copies the previous month's rate on first read (default 10). Only the current month's rate can be edited; attempts to write a past month are rejected.
 
@@ -60,11 +60,11 @@ Rates are stored per month. A new month copies the previous month's rate on firs
 `GET /api/energy?from=YYYY-MM-DD&to=YYYY-MM-DD` returns daily energy as JSON. Add `format=csv` for a downloadable file:
 
 ```text
-day,kwh,php
-2026-11-01,1.234,12.34
-2026-11-02,0.500,5.00
+day,kwh,cost
+2026-11-01,1.234,0.19
+2026-11-02,0.500,0.08
 ```
 
-The file has a `day,kwh,php` header, one row per Manila day in the inclusive range, CRLF line endings, and RFC-style quoting for any field containing a comma, quote, or newline. Omit `unitId` for the whole fleet or supply it for one unit; monetary values use that day's rate.
+The file has a `day,kwh,cost` header, one row per local day in the configured timezone across the inclusive range, CRLF line endings, and RFC-style quoting for any field containing a comma, quote, or newline. Omit `unitId` for the whole fleet or supply it for one unit; monetary values use that day's rate.
 
 Continue with [development](development.md) and [troubleshooting](troubleshooting.md).

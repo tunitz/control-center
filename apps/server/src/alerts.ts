@@ -1,30 +1,23 @@
 import type { Database } from "bun:sqlite";
 import { audit } from "./db";
+import { getTimezone, localTime } from "./tz";
 
+export { localTime };
 export const ALERT_KINDS = ["offline", "stale", "disk"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
-const TZ_OFFSET_S = 8 * 3600;
-const DAY_S = 86400;
-
-/** Manila local weekday (0=Sunday) and minute-of-day for an epoch-second timestamp. */
-export function localTime(ts: number) {
-  const t = ts + TZ_OFFSET_S;
-  const day = Math.floor(t / DAY_S);
-  const minute = Math.floor((t % DAY_S) / 60);
-  return { weekday: new Date(day * 1000).getUTCDay(), minute };
-}
 
 /** A window covers midnight by wrapping its end past 1440 minutes. Days are comma-separated weekdays. */
-export function inWindow(w: { days: string; start_minute: number; end_minute: number }, now: number): boolean {
-  const { weekday, minute } = localTime(now);
+export function inWindow(w: { days: string; start_minute: number; end_minute: number }, now: number, tz?: string): boolean {
+  const { weekday, minute } = localTime(now, tz);
   if (!String(w.days).split(",").map(x => x.trim()).includes(String(weekday))) return false;
   const start = w.start_minute, end = w.end_minute;
   return end >= start ? minute >= start && minute < end : minute >= start || minute < end;
 }
 
 const inMaintenance = (db: Database, unitId: number, now: number): boolean => {
+  const tz = getTimezone(db);
   const rows = db.query("SELECT * FROM maintenance_windows WHERE enabled=1 AND (unit_id IS NULL OR unit_id=?)").all(unitId) as any[];
-  return rows.some(w => inWindow(w, now));
+  return rows.some(w => inWindow(w, now, tz));
 };
 
 /** Recompute active alerts for all enabled units. Returns the active count. */

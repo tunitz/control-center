@@ -94,7 +94,7 @@ Alerts are evaluated every minute for enabled units:
 - **stale** — no recent telemetry sample while the unit is reachable (enabled by default).
 - **disk** — a mount at or above a threshold (default 90%); opt-in per unit.
 
-Active alerts appear on the dashboard. Rules are managed per unit in Settings (enable/disable and disk threshold, 1–100). Maintenance windows suppress alerts for selected weekdays and a minute range, either fleet-wide or for one unit; windows whose end minute is earlier than the start wrap past midnight. Times use Asia/Manila local time. See [data and cost](data-and-cost.md#manila-day-boundaries).
+Active alerts appear on the dashboard. Rules are managed per unit in Settings (enable/disable and disk threshold, 1–100). Maintenance windows suppress alerts for selected weekdays and a minute range, either fleet-wide or for one unit; windows whose end minute is earlier than the start wrap past midnight. Times use the configured IANA timezone (default `UTC`). See [data and cost](data-and-cost.md#timezone-and-day-boundaries).
 
 ## Backup and restore
 
