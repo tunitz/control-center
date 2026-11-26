@@ -1,6 +1,7 @@
 import { test, expect, beforeEach } from "bun:test";
 import { openDb } from "./db";
 import { monthKey, monthStart, setCurrentRate, getRate, monthCost } from "./cost";
+import { dayStart, getTimezone, getCurrency, isValidTimezone } from "./tz";
 import { ingestLines, computeEnergy } from "./ingest";
 import { sumEnergy } from "./energy";
 import { rollup, purge } from "./rollup";
@@ -14,11 +15,32 @@ beforeEach(() => { db = openDb(":memory:"); db.query("INSERT INTO units(id,name,
 
 const line = (ts: number, o: Record<string, unknown> = {}) => JSON.stringify({ v: 1, ts, cpu_pct: 10, cpu_mhz: 3000, cpu_w: 20, cpu_uj: null, gpu_pct: 5, gpu_mhz: 300, vram_used_mb: 500, gpu_w: 10, gpu_uj: null, ram_used_mb: 4000, ram_cached_mb: 2000, swap_used_mb: 0, ...o });
 
-test("monthKey uses Asia/Manila", () => {
-  // 2026-09-30T16:30:00Z is 2026-10-01 00:30 in Manila
-  expect(monthKey(Date.UTC(2026, 8, 30, 16, 30) / 1000)).toBe("2026-10");
-  expect(monthKey(Date.UTC(2026, 8, 30, 15, 30) / 1000)).toBe("2026-09");
-  expect(monthStart("2026-10")).toBe(Date.UTC(2026, 8, 30, 16, 0) / 1000);
+test("monthKey and monthStart respect configured IANA timezones (UTC, Asia/Manila, DST)", () => {
+  // Default UTC
+  expect(monthKey(Date.UTC(2026, 8, 30, 23, 30) / 1000)).toBe("2026-09");
+  expect(monthStart("2026-10")).toBe(Date.UTC(2026, 9, 1, 0, 0) / 1000);
+  // 2026-09-30T16:30:00Z is 2026-10-01 00:30 in Asia/Manila (UTC+8)
+  expect(monthKey(Date.UTC(2026, 8, 30, 16, 30) / 1000, "Asia/Manila")).toBe("2026-10");
+  expect(monthKey(Date.UTC(2026, 8, 30, 15, 30) / 1000, "Asia/Manila")).toBe("2026-09");
+  expect(monthStart("2026-10", "Asia/Manila")).toBe(Date.UTC(2026, 8, 30, 16, 0) / 1000);
+  // DST transition: America/New_York switches EDT (-04:00) -> EST (-05:00) on 2026-11-01
+  expect(dayStart("2026-11-01", "America/New_York")).toBe(Date.UTC(2026, 10, 1, 4, 0) / 1000);
+  expect(dayStart("2026-11-02", "America/New_York")).toBe(Date.UTC(2026, 10, 2, 5, 0) / 1000);
+});
+
+test("timezone and currency settings validate and default to UTC / USD", () => {
+  expect(getTimezone(db)).toBe("UTC");
+  expect(getCurrency(db)).toEqual({ code: "USD", symbol: "$" });
+  expect(isValidTimezone("UTC")).toBe(true);
+  expect(isValidTimezone("America/New_York")).toBe(true);
+  expect(isValidTimezone("Mars/Olympus_Mons")).toBe(false);
+  db.query("INSERT INTO settings(key,value) VALUES('timezone','Europe/Berlin'),('currency_code','EUR'),('currency_symbol','€') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run();
+  expect(getTimezone(db)).toBe("Europe/Berlin");
+  expect(getCurrency(db)).toEqual({ code: "EUR", symbol: "€" });
+  const c = monthCost(db, Date.UTC(2026, 9, 15) / 1000);
+  expect(c.timezone).toBe("Europe/Berlin");
+  expect(c.currency_code).toBe("EUR");
+  expect(c.currency_symbol).toBe("€");
 });
 
 test("rate editing never touches past months and rollover copies previous rate", () => {

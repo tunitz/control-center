@@ -1,17 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { getSetting } from "./db";
 import { wallEnergySum } from "./wall";
-const TZ_OFFSET_S = 8 * 3600; // Asia/Manila, no DST
+import { getCurrency, getTimezone, monthKey, monthStart } from "./tz";
+
+export { monthKey, monthStart };
 const BILLING_KEEP_S = 400 * 86400;
 
-export function monthKey(ts: number): string {
-  const d = new Date((ts + TZ_OFFSET_S) * 1000);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-export function monthStart(month: string): number {
-  const [y, m] = month.split("-").map(Number);
-  return Date.UTC(y, m - 1, 1) / 1000 - TZ_OFFSET_S;
-}
 export const DEFAULT_RATE = 10;
 
 /** Rate for a month. A month with no row is created by copying the latest earlier rate (rollover). */
@@ -24,16 +18,17 @@ export function getRate(db: Database, month: string, now: number): number {
   return p;
 }
 /** Only ever writes the current month's row. */
-export function setCurrentRate(db: Database, rate: number, now: number) {
+export function setCurrentRate(db: Database, rate: number, now: number, tz: string = getTimezone(db)) {
   if (!(rate >= 0) || !isFinite(rate)) throw new Error("invalid rate");
-  const month = monthKey(now);
+  const month = monthKey(now, tz);
   getRate(db, month, now);
   db.query("UPDATE rates SET php_per_kwh=?, set_at=? WHERE month=?").run(rate, now, month);
 }
-export function monthCost(db: Database, now: number) {
-  const month = monthKey(now);
+export function monthCost(db: Database, now: number, tz: string = getTimezone(db)) {
+  const month = monthKey(now, tz);
   const rate = getRate(db, month, now);
-  const start = monthStart(month), end = now + 1, floor = now - BILLING_KEEP_S;
+  const currency = getCurrency(db);
+  const start = monthStart(month, tz), end = now + 1, floor = now - BILLING_KEEP_S;
   const rows = db.query(
     `SELECT u.id, u.name, COALESCE(SUM(e.wh),0) wh FROM units u LEFT JOIN energy_intervals e ON e.unit_id=u.id AND e.end_ts>=? AND e.end_ts<? AND e.end_ts>=? WHERE u.enabled=1 GROUP BY u.id ORDER BY u.id`
   ).all(start, end, floor) as { id: number; name: string; wh: number }[];
@@ -43,13 +38,21 @@ export function monthCost(db: Database, now: number) {
     const wallWh = includeWall ? wallEnergySum(db, r.id, Math.max(start, floor), end) : 0;
     const measured = wallWh > 0;
     const wh = measured ? wallWh : r.wh;
-    return { id: r.id, name: r.name, kwh: wh / 1000, php: (wh / 1000) * rate, basis: measured ? "measured wall" : "estimated CPU+GPU", wall_kwh: wallWh / 1000 };
+    const cost = (wh / 1000) * rate;
+    return {
+      id: r.id, name: r.name, kwh: wh / 1000, cost, php: cost,
+      currency_code: currency.code, currency_symbol: currency.symbol,
+      basis: measured ? "measured wall" : "estimated CPU+GPU", wall_kwh: wallWh / 1000,
+    };
   });
   const wallKwh = units.reduce((a, u) => a + u.wall_kwh, 0);
+  const totalCost = units.reduce((a, u) => a + u.cost, 0);
   return {
-    month, rate,
+    month, rate, timezone: tz,
+    currency_code: currency.code, currency_symbol: currency.symbol,
     total_kwh: units.reduce((a, u) => a + u.kwh, 0),
-    total_php: units.reduce((a, u) => a + u.php, 0),
+    total_cost: totalCost,
+    total_php: totalCost,
     wall_kwh: wallKwh,
     cost_include_wall: includeWall,
     cost_basis: includeWall

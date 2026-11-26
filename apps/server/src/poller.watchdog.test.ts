@@ -42,7 +42,7 @@ test("a hung static refresh does not wedge the unit either", async () => {
 
 test("a static refresh failure is recorded in last_error instead of failing silently", async () => {
   const db = openDb(":memory:"), u = unit(db);
-  const { pool } = fakePool(async () => { throw new Error("connect ECONNREFUSED 192.168.31.2:62478"); });
+  const { pool } = fakePool(async () => { throw new Error("connect ECONNREFUSED 192.0.2.10:62478"); });
   const sched = new Scheduler(db, pool, "m", () => 5, () => {}, { pollTimeoutMs: 50 });
 
   await sched.run(u);

@@ -9,7 +9,7 @@ type Data = { active: Active[]; rules: Rule[]; windows: Window[] };
 const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const minutes = (v: string) => { const [h, m] = v.split(":").map(Number); return h * 60 + m; };
 
-export default function AlertsPanel({ units }: { units: Unit[] }) {
+export default function AlertsPanel({ units, timezone }: { units: Unit[]; timezone?: string }) {
   const [data, setData] = useState<Data | null>(null);
   const [msg, setMsg] = useState("");
   const [w, setW] = useState({ unit_id: "", days: "0,1,2,3,4,5,6", from: "22:00", to: "06:00" });
@@ -73,7 +73,7 @@ export default function AlertsPanel({ units }: { units: Unit[] }) {
         <input aria-label="Window end" type="time" value={w.to} onChange={e => setW({ ...w, to: e.target.value })} style={{ width: 110 }} />
         <button className="btn sm pri" onClick={addWindow}>Add window</button>
       </div>
-      <p className="muted" style={{ fontSize: "0.75rem" }}>Times are device-local; alert evaluation uses Asia/Manila time. A window ending before it starts spans midnight.</p>
+      <p className="muted" style={{ fontSize: "0.75rem" }}>Times are device-local; alert evaluation uses {timezone || "UTC"} time. A window ending before it starts spans midnight.</p>
       {msg && <div className="toast" role="status" onAnimationEnd={() => setMsg("")}>{msg}</div>}
     </div>
   );

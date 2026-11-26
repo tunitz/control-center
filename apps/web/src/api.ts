@@ -25,7 +25,7 @@ export type Unit = {
   id: number; name: string; host: string; ssh_port?: number; mac: string | null; broadcast: string | null; enabled: boolean; online: boolean; sample_fresh?: boolean; last_sample_ts?: number | null; last_seen: number | null; last_error: string | null;
   fingerprint: string | null; public_key?: string | null; host_fingerprint?: string | null; migration_pending_port?: number | null; sample_interval_s: number; latest: Sample | null; live_w: number | null; wall_w?: number | null; wall_ts?: number | null; ram_pct: number | null; vram_pct: number | null;
   static: null | { cpu_model: string; cores: number; threads: number; base_mhz: number | null; boost_mhz: number | null; gpu_model: string | null; vram_total_mb: number | null; ram_total_mb: number; swap_total_mb: number };
-  month?: { kwh: number; php: number };
+  month?: { kwh: number; cost?: number; php: number; currency_code?: string; currency_symbol?: string };
   disks?: DiskSnapshot;
 };
 export type Metrics = { range: string; tier: string; points: Sample[]; energy_wh: number; summary: Record<string, { min: number | null; avg: number | null; max: number | null }> };
