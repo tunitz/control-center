@@ -7,7 +7,9 @@ cd "$(dirname "$0")/.." || exit 1
 fail=0
 
 md_files=()
-[ -f README.md ] && md_files+=(README.md)
+for f in README.md AGENTS.md CONTRIBUTING.md SECURITY.md; do
+  [ -f "$f" ] && md_files+=("$f")
+done
 while IFS= read -r f; do md_files+=("$f"); done < <(find docs deploy .claude -type f -name '*.md' -print 2>/dev/null | sort)
 
 scan_files=("${md_files[@]-}")
@@ -16,7 +18,7 @@ for f in .gitignore .dockerignore; do
 done
 
 # Removed-feature and user-specific markers. Exclude this script so the patterns themselves never match.
-markers="(/api/chat|PiConfigCard|PiSkillsCard|CHAT_UPLOAD_DIR|pi-bridge/|chatmock|auto-migrates|tunitz|/home/tunitz|~/\\.hermes|192\\.168\\.|tun['’]s|tun:)"
+markers="(/api/chat|PiConfigCard|PiSkillsCard|CHAT_UPLOAD_DIR|pi-bridge/|chatmock|auto-migrates|/home/tunitz|~/\\.hermes|192\\.168\\.31\\.|100\\.67\\.153\\.|tun['’]s|tun:|tun-sfx|tun-minipc|d8:43:ae)"
 for f in "${scan_files[@]}"; do
   [ -z "$f" ] && continue
   [ "$f" = "tools/check_docs.sh" ] && continue

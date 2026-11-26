@@ -6,7 +6,7 @@
 - Public routes: `GET /api/health`, `GET /api/auth/status`, `POST /api/auth/setup`, `POST /api/auth/login`. Everything else under `/api/` requires the session cookie.
 - The session cookie is `cc_session` (HttpOnly, SameSite=Strict, 7 days). Every authenticated write (`POST`, `PUT`, `PATCH`, `DELETE`) also requires the header `x-cc: 1`; missing it returns `403`. The public `setup` write requires it too; public `login` does not.
 - Login and setup are rate-limited to 5 attempts per 60 seconds per client IP.
-- Route parameters such as `:id` are numeric unit IDs. `:YYYY-MM` is a calendar month in `Asia/Manila` time.
+- Route parameters such as `:id` are numeric unit IDs. `:YYYY-MM` is a calendar month in the configured IANA timezone (default `UTC`).
 
 ## Health and authentication
 
@@ -64,10 +64,10 @@ Start/stop/restart return `{ ok: true, ...agentData }` or `502` with `{ error }`
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/cost` | Current-month cost. Returns `{ month, rate, total_kwh, total_php, wall_kwh, cost_include_wall, cost_basis, units[] }`. Each unit has `{ id, name, kwh, php, basis, wall_kwh }`. |
-| GET | `/api/energy` | Daily energy history. Required query `from` and `to` (`YYYY-MM-DD`, inclusive, `from <= to`); optional `unitId` (omit for all units) and `format=csv`. JSON returns `[{ day, kwh, php }]`. CSV returns a `day,kwh,php` file with quoted fields. Invalid dates return `400`. |
-| GET | `/api/rates` | Lists `[{ month, php_per_kwh, set_at }]`, newest first. Reading the current month creates it by copying the previous rate (default 10). |
-| PUT | `/api/rates/:YYYY-MM` | Body `{ php_per_kwh }`. Only the current month may be edited; past months return `400`. Returns `{ month, php_per_kwh }`. |
+| GET | `/api/cost` | Current-month cost. Returns `{ month, rate, timezone, currency_code, currency_symbol, total_kwh, total_cost, total_php, wall_kwh, cost_include_wall, cost_basis, units[] }`. Each unit has `{ id, name, kwh, cost, php, currency_code, currency_symbol, basis, wall_kwh }`. |
+| GET | `/api/energy` | Daily energy history. Required query `from` and `to` (`YYYY-MM-DD`, inclusive, `from <= to`); optional `unitId` (omit for all units) and `format=csv`. JSON returns `[{ day, kwh, cost, php }]`. CSV returns a `day,kwh,cost` file with quoted fields. Invalid dates return `400`. |
+| GET | `/api/rates` | Lists `[{ month, rate_per_kwh, php_per_kwh, set_at }]`, newest first. Reading the current month creates it by copying the previous rate (default 10). |
+| PUT | `/api/rates/:YYYY-MM` | Body `{ rate_per_kwh }` (also accepts legacy `php_per_kwh`). Only the current month may be edited; past months return `400`. Returns `{ month, rate_per_kwh, php_per_kwh, currency_code, currency_symbol }`. |
 
 ## Wall power
 
@@ -82,8 +82,8 @@ Readings are integrated into measured wall energy; see [data and cost](data-and-
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/settings` | Returns `{ poll_interval_s, sample_interval_s, retention_days, cost_include_wall }`. |
-| PUT | `/api/settings` | Body with any of those fields. Poll interval 1–3600s, sample interval 1–3600s, retention 1–90 days, `cost_include_wall` boolean. Returns `{ ok: true }`; the change is audit-logged. |
+| GET | `/api/settings` | Returns `{ poll_interval_s, sample_interval_s, retention_days, cost_include_wall, timezone, currency_code, currency_symbol }`. |
+| PUT | `/api/settings` | Body with any of those fields. Poll interval 1–3600s, sample interval 1–3600s, retention 1–90 days, `cost_include_wall` boolean, `timezone` valid IANA zone, `currency_code` 1–8 alphanumeric chars, `currency_symbol` 1–4 chars. Returns `{ ok: true }`; the change is audit-logged. |
 | GET | `/api/audit` | Query `limit` (default 100, max 500). Returns newest-first entries with a resolved unit name. |
 | GET | `/api/events` | Server-Sent Events stream. Emits `hello` on connect, `ping` every 20s, and `sample` events when new data is ingested. |
 

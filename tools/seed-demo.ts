@@ -11,9 +11,9 @@ const db = openDb(path);
 await ensureAdmin(db, "demo-pass-123");
 const now = Math.floor(Date.now() / 1000), n = Number(nUnits), H = Number(hours), STEP = Number(step);
 const profiles = [
-  { name: "tun-sfx", host: "192.168.31.15", mac: "d8:43:ae:2c:0c:ed", cpu: "AMD Ryzen 7 5800X3D 8-Core Processor", cores: 8, threads: 16, base: 3400, boost: 4500, gpu: "AMD Radeon RX 7800 XT", vram: 16384, ram: 32768, cw: 90, gw: 250, gpu_on: true },
-  { name: "tun-minipc", host: "192.168.31.206", mac: "aa:bb:cc:00:11:22", cpu: "Intel(R) N100", cores: 4, threads: 4, base: 800, boost: 3400, gpu: null, vram: null, ram: 15744, cw: 12, gw: 0, gpu_on: false },
-  { name: "proxmox-pve", host: "192.168.1.200", mac: "aa:bb:cc:00:11:33", cpu: "Intel(R) Core(TM) i5-8500", cores: 6, threads: 6, base: 3000, boost: 4100, gpu: null, vram: null, ram: 32768, cw: 38, gw: 0, gpu_on: false },
+  { name: "workstation-01", host: "192.168.1.101", mac: "02:00:00:00:01:01", cpu: "AMD Ryzen 7 5800X3D 8-Core Processor", cores: 8, threads: 16, base: 3400, boost: 4500, gpu: "AMD Radeon RX 7800 XT", vram: 16384, ram: 32768, cw: 90, gw: 250, gpu_on: true },
+  { name: "homelab-mini", host: "192.168.1.102", mac: "02:00:00:00:01:02", cpu: "Intel(R) N100", cores: 4, threads: 4, base: 800, boost: 3400, gpu: null, vram: null, ram: 15744, cw: 12, gw: 0, gpu_on: false },
+  { name: "proxmox-pve", host: "192.168.1.103", mac: "02:00:00:00:01:03", cpu: "Intel(R) Core(TM) i5-8500", cores: 6, threads: 6, base: 3000, boost: 4100, gpu: null, vram: null, ram: 32768, cw: 38, gw: 0, gpu_on: false },
 ];
 const t0 = Date.now();
 let rows = 0;
@@ -40,6 +40,6 @@ for (let i = 0; i < n; i++) {
     rows += ingestLines(db, i + 1, lines, STEP);
   }
 }
-setCurrentRate(db, 11.5, now);
+setCurrentRate(db, 0.15, now);
 rollup(db, now);
 console.log(JSON.stringify({ units: n, hours: H, step: STEP, rows, seconds: (Date.now() - t0) / 1000 }));

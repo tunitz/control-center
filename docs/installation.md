@@ -22,6 +22,9 @@ Set secrets in a `.env` file or in the process environment. The compiled binary 
 | `CC_ADMIN_PASSWORD` | unset | If set, seeds the admin password on an empty database. Otherwise use first-run setup with `CC_BOOTSTRAP_TOKEN`. |
 | `CC_BOOTSTRAP_TOKEN` | unset | One-time secret (min 8 characters) that authorizes the first-run setup form. Consumed after setup. |
 | `CC_POLL_INTERVAL` | `5` | Initial poll interval in seconds; editable later in Settings. |
+| `CC_TIMEZONE` | `UTC` | Default IANA timezone for billing days/months and alert maintenance windows (editable in Settings). |
+| `CC_CURRENCY` | `USD` | Default display currency code for electricity rates and costs (editable in Settings). |
+| `CC_CURRENCY_SYMBOL` | `$` | Default display currency symbol (editable in Settings). |
 | `CC_PUBLIC_IP` | unset | If set, the authorized key on units is restricted with `from="<ip>"` to this source address. |
 | `CC_AGENT_REPO` | project public agent repo | Repository in `owner/name` form used to build the short curl installer URL. Override with your own fork, for example `<AGENT_REPO>`. |
 | `CC_AGENT_TAG` | `latest` | Release tag for the curl installer; pin a specific tag for reproducibility. |
@@ -76,7 +79,7 @@ CC_AGENT_DIR=<INSTALL_DIR>/agent \
 
 Bun resolves `import.meta.dir` inside the compiled binary to an internal virtual root, so source-run path defaults do not apply to the executable. Run the binary under your host's existing process supervisor; see the [deployment guide](../deploy/README.md) for Docker and compiled-binary options.
 
-## Optional: Docker
+## Docker (Recommended)
 
 The image builds the web bundle and runs the server with `CC_DATA=/data`. Keep `CC_MASTER_KEY` in `.env` and mount a named volume for `/data`:
 
@@ -93,4 +96,4 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 
 The compose file uses host network mode so wake-on-LAN broadcasts reach the LAN and units are reachable by IP. To run on a conventional bridge network, set `HOST` and `PORT` accordingly and ensure outbound SSH to unit port 62478. A container needs the web bundle and agent scripts present in the image (the Dockerfile builds them in), but data must live in the mounted volume.
 
-For production deployments the compiled binary is the primary path; Docker is optional. Continue with [operations](operations.md).
+For production deployments, Docker Compose (`ghcr.io/tunitz/control-center`) is the recommended runtime; the compiled binary and source runs above are supported alternatives. Continue with [operations](operations.md).
