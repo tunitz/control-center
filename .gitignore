@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+
+# Build outputs and local runtime state
+dist/
+data/
+*.db*
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+.envrc
+.npmrc
+*.pem
+*.p12
+*.pfx
+*.key
+id_ed25519*
+id_rsa*
+secrets.*
+
+# Logs, coverage and browser test artifacts
+*.log
+coverage/
+.nyc_output/
+.playwright-cli/
+playwright-report/
+test-results/
+release-artifacts/
+stage-*/
+
+# Disposable and scratch files
+scratch/
+**/scratch/
+__pycache__/
+*.pyc
+*.pyo
+*.sqlite*
+*.bak
+*.sql
+/PLAN.md
+/NOTES.md
+/TODO.md
+
+# Editor, OS and compiler noise
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*.swn
+*~
+*.tsbuildinfo

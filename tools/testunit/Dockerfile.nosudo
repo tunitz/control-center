@@ -1,0 +1,5 @@
+FROM debian:12-slim
+# Mimics a Proxmox host: root shell, NO sudo, NO visudo
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server curl ca-certificates procps && rm -rf /var/lib/apt/lists/* && mkdir -p /run/sshd /etc/systemd/system
+RUN printf '#!/bin/sh\ncase "$1" in enable) ;; restart|start) pkill -f /opt/ccagent/ccagent.sh; su -s /bin/bash ccagent -c "nohup /opt/ccagent/ccagent.sh >/dev/null 2>&1 &" ;; is-active) echo active;; esac\nexit 0\n' > /usr/bin/systemctl && chmod +x /usr/bin/systemctl
+CMD ["/usr/sbin/sshd","-D","-e"]

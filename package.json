@@ -1,0 +1,37 @@
+{
+  "name": "control-center",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Self-hosted fleet monitoring, service control, and energy-cost dashboard for Linux units over SSH.",
+  "license": "MIT",
+  "author": "tunitz",
+  "homepage": "https://github.com/tunitz/control-center#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tunitz/control-center.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tunitz/control-center/issues"
+  },
+  "keywords": [
+    "homelab",
+    "monitoring",
+    "ssh",
+    "linux",
+    "bun",
+    "sqlite",
+    "self-hosted"
+  ],
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "bun test apps/server apps/web/src",
+    "typecheck": "bun run --cwd apps/server typecheck && bun run --cwd apps/web typecheck",
+    "build:web": "bun run --cwd apps/web build",
+    "build:server": "bun build --compile --target=bun --no-compile-autoload-dotenv --external cpu-features apps/server/src/index.ts --outfile dist/control-center",
+    "build:server:bundle": "bun build --target=bun --minify --external cpu-features apps/server/src/index.ts --outfile dist/server.js",
+    "build": "bun run build:web && bun run build:server",
+    "start": "bun run apps/server/src/index.ts"
+  }
+}
