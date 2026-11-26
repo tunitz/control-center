@@ -1,5 +1,6 @@
 {
   "name": "control-center",
+  "version": "0.2.0",
   "private": true,
   "workspaces": [
     "apps/*"
@@ -9,6 +10,7 @@
     "typecheck": "bun run --cwd apps/server typecheck && bun run --cwd apps/web typecheck",
     "build:web": "bun run --cwd apps/web build",
     "build:server": "bun build --compile --target=bun --no-compile-autoload-dotenv --external cpu-features apps/server/src/index.ts --outfile dist/control-center",
+    "build:server:bundle": "bun build --target=bun --minify --external cpu-features apps/server/src/index.ts --outfile dist/server.js",
     "build": "bun run build:web && bun run build:server",
     "start": "bun run apps/server/src/index.ts"
   }

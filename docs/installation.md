@@ -86,7 +86,9 @@ CC_MASTER_KEY='<persistent master key>'
 ```
 
 ```bash
-docker compose up -d --build
+docker compose up -d
+# Or build locally:
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
 ```
 
 The compose file uses host network mode so wake-on-LAN broadcasts reach the LAN and units are reachable by IP. To run on a conventional bridge network, set `HOST` and `PORT` accordingly and ensure outbound SSH to unit port 62478. A container needs the web bundle and agent scripts present in the image (the Dockerfile builds them in), but data must live in the mounted volume.

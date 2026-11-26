@@ -65,7 +65,9 @@ Responses are explicit: `accepted` means the command was sent (or the WoL packet
 Docker is the recommended production runtime:
 
 ```bash
-docker compose up -d --build
+docker compose up -d
+# Or build locally:
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
 docker compose logs -f control-center
 docker compose restart control-center
 docker compose down

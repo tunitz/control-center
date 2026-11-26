@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { openDb, getSetting, setSetting, audit } from "./db";
 import { ensureAdmin, setupNeeded, setupAdmin, authorizedSetup, setBootstrapHash, clearBootstrap, checkPassword, changePassword, createSession, validSession, destroySession, makeLimiter, sessionCookie, clearSessionCookie } from "./auth";
 import { monthCost, setCurrentRate, monthKey, getRate } from "./cost";
@@ -21,7 +21,9 @@ import { handleAlertRoute, evaluateAlerts } from "./alerts";
 import { createBackup, restoreBackup, validateBackup, tempBackupPath, removeBackupFile, SCHEMA_VERSION } from "./backup";
 import { validateWallSample, ingestWall, latestWall, purgeWall } from "./wall";
 
-const DATA = process.env.CC_DATA ?? join(import.meta.dir, "../../../data");
+const isCompiled = import.meta.dir.startsWith("/$bunfs") || /^[A-Za-z]:[\\/]+~BUN/i.test(import.meta.dir);
+const baseDir = isCompiled ? dirname(process.execPath) : join(import.meta.dir, "../../..");
+const DATA = process.env.CC_DATA ?? join(baseDir, "data");
 mkdirSync(DATA, { recursive: true });
 const devMode = process.env.NODE_ENV !== "production" && process.env.CC_DEV_KEY === "1";
 const master = process.env.CC_MASTER_KEY ?? (devMode ? "dev-master-key-change-me" : (() => { throw new Error("CC_MASTER_KEY is required outside local development"); })());
@@ -61,7 +63,7 @@ const json = (o: unknown, status = 200, headers: Record<string, string> = {}) =>
 const cookieOf = (req: Request) => /(?:^|; )cc_session=([^;]+)/.exec(req.headers.get("cookie") ?? "")?.[1];
 const loginLimit = makeLimiter(5, 60);
 const setupLimit = makeLimiter(5, 60);
-const WEB = process.env.CC_WEB ?? join(import.meta.dir, "../../web/dist");
+const WEB = process.env.CC_WEB ?? join(baseDir, "apps/web/dist");
 
 const server = Bun.serve({
   port: Number(process.env.PORT ?? 3030), hostname: process.env.HOST ?? "0.0.0.0", idleTimeout: 0,
